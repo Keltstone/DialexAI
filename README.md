@@ -2,15 +2,16 @@
 
 **By Kolta Labs.** Tools that make AI disagree with itself before you trust it.
 
-Dialex Suite is three products on one deliberation engine:
+Dialex Suite is four products on one deliberation engine:
 
 | Product | Folder | What it is | Stack |
 |---|---|---|---|
 | **Dialex AI** | [`dialex-ai/`](./dialex-ai) | Desktop and Android app where several AI models debate a decision and a moderator synthesizes the result. | Kotlin Multiplatform, Compose |
 | **Artix AI** | [`artix-ai/`](./artix-ai) | Autonomous engineering platform & spec-to-patch workflow for AI-written code (CLI and desktop cockpit). | Go, Compose Desktop |
+| **Kritix AI** | [`kritix-ai/`](./kritix-ai) | Autonomous end-to-end testing platform with DOM pruning, self-healing locators, and DAST security audits. | Go, Compose Desktop |
 | **Socratix Engine** | [`socratix-engine/`](./socratix-engine) | The shared deliberation daemon: consensus, orchestration, mesh networking, model runners. | Go 1.27 |
 
-Start with Dialex AI for decisions, or Artix AI for autonomous development. The engine is a dependency of both.
+👉 **[Explore the Complete Technical Wiki Documentation Suite](docs/README.md)** — In-depth architectural guides, user manuals, and developer documentation for every engine.
 
 ---
 

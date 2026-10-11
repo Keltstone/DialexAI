@@ -1,0 +1,119 @@
+# Dialex Suite Knowledge Base & Technical Wiki
+
+Welcome to the comprehensive technical documentation wiki for the **Dialex Suite**, engineered by **Kolta Labs**. Dialex Suite is an enterprise-grade ecosystem of autonomous deliberation, software engineering, and quality assurance engines designed on a shared principle: **AI models must adversarially disagree and verify their claims deterministically before human engineers trust their output.**
+
+---
+
+## 🏛️ Architecture Map & Wiki Navigation
+
+The Dialex Suite comprises four specialized, sovereign engines that can run independently or interoperate through zero-trust RPC and streaming event meshes:
+
+```mermaid
+graph TD
+    subgraph UI_Clients ["Client Presentation Layer (KMP & Compose)"]
+        DialexApp["Dialex AI Client<br/>(Desktop & Android Compose)"]
+        ArtixCockpit["Artix Cockpit<br/>(Desktop Compose)"]
+        KritixStudio["Kritix Web Studio & Cockpit<br/>(Browser & Desktop)"]
+    end
+
+    subgraph Core_Engines ["Core Engine Daemons (Go 1.27)"]
+        SocratixEngine["Socratix Engine<br/>• Turn State Machine<br/>• Hegelian Consensus<br/>• Bayesian Credence<br/>• Knowledge Graph"]
+        ArtixEngine["Artix AI Engine<br/>• Stakeholder Chamber<br/>• Shadow Worktrees<br/>• AST Taboo Reviewer<br/>• Sandboxed Execution"]
+        KritixEngine["Kritix AI Engine<br/>• DOM Pruning Engine<br/>• Self-Healing SDET<br/>• OWASP DAST Fuzzer<br/>• Flaky Quarantine SLA"]
+    end
+
+    subgraph Substrate ["Execution & Intelligence Substrate"]
+        LocalCLI["Developer CLI Subshells<br/>(claude, codex, agy, ollama)"]
+        CloudAPI["Frontier Cloud APIs<br/>(Anthropic, OpenAI, Gemini)"]
+        LocalOS["Host Sandboxes & OS Vault<br/>(bwrap, sandbox-exec, AES-256-GCM)"]
+    end
+
+    DialexApp -->|REST / SSE / IPC| SocratixEngine
+    ArtixCockpit -->|LSP / JSON-RPC / IPC| ArtixEngine
+    KritixStudio -->|CDP / SSE / REST| KritixEngine
+    ArtixEngine -.->|Deliberation Delegation| SocratixEngine
+    KritixEngine -.->|Consensus Quality Audits| SocratixEngine
+
+    SocratixEngine --> LocalCLI
+    SocratixEngine --> CloudAPI
+    ArtixEngine --> LocalOS
+    KritixEngine --> LocalOS
+```
+
+---
+
+## 📖 Wiki Table of Contents
+
+### 1. [System Suite Architecture](suite-architecture/01_ECOSYSTEM_OVERVIEW.md)
+*High-level system design, multi-engine topology, zero-cloud security model, and buyer's technical evaluation.*
+- [01. Ecosystem Architecture & System Design](suite-architecture/01_ECOSYSTEM_OVERVIEW.md)
+- [02. Distributed Topology & Mesh Networking](suite-architecture/02_DISTRIBUTED_TOPOLOGY_AND_NETWORKING.md)
+- [03. Sovereign Vault & Zero-Cloud Security](suite-architecture/03_SECURITY_VAULT_AND_SOVEREIGNTY.md)
+- [04. Prospective Users & Technical Evaluation](suite-architecture/04_PROSPECTIVE_USERS_TECHNICAL_EVALUATION.md)
+
+---
+
+### 2. [Socratix Engine Wiki](socratix-engine/01_CONCEPTUAL_FOUNDATION.md)
+*The core deliberation, Hegelian consensus, and Socratic reasoning daemon.*
+- [01. Conceptual Foundation & Epistemology](socratix-engine/01_CONCEPTUAL_FOUNDATION.md)  
+  *The epistemological failure of single LLMs, Hegelian dialectics (Thesis-Antithesis-Synthesis), and anti-sycophancy design.*
+- [02. Core Technical Architecture](socratix-engine/02_CORE_TECHNICAL_ARCHITECTURE.md)  
+  *Turn State Machine, Paraconsistent Contradiction Detector, Bayesian Credence Ledger, SQLite Knowledge Graph, and Dynamic RAG.*
+- [03. User Guide & Operational Playbooks](socratix-engine/03_USER_GUIDE_AND_OPERATIONS.md)  
+  *Daemon operations, CLI flags, 1-on-1 Socratic interviews (`/grill-me`), Dialex-Bench-10 benchmarking, and quickstart modes.*
+- [04. Developer Guide & API Reference](socratix-engine/04_DEVELOPER_GUIDE_AND_API_REFERENCE.md)  
+  *Go package breakdown, REST & SSE protocol schemas, custom model runners, 8-layer persona compiler, and test harnesses.*
+
+---
+
+### 3. [Dialex AI Client Wiki](dialex-ai/01_CONCEPTUAL_FOUNDATION.md)
+*Cross-platform desktop and mobile visual deliberation client (KMP & Compose).*
+- [01. Conceptual Foundation & Visual Deliberation](dialex-ai/01_CONCEPTUAL_FOUNDATION.md)  
+  *Synthetic Advisory Boards, real-time epistemic steering, cognitive diversity, and decision artifact synthesis.*
+- [02. Core Technical Architecture](dialex-ai/02_CORE_TECHNICAL_ARCHITECTURE.md)  
+  *Kotlin Multiplatform Clean Architecture, Unidirectional MVI (`Contract.kt`), Kolt token design system, and AES-256 Vault.*
+- [03. User Guide & Deliberation Manual](dialex-ai/03_USER_GUIDE_AND_WORKFLOWS.md)  
+  *Desktop and Android user manual, Council configuration, live human interrupts, Socratic mode, and exporting ADRs/Memos.*
+- [04. Developer Guide & Build Pipelines](dialex-ai/04_DEVELOPER_GUIDE_AND_BUILD_PIPELINE.md)  
+  *Gradle composite build (`Kolt`), MVI state contract engineering, packaging native installers (DMG, MSI, APK), and unit testing.*
+
+---
+
+### 4. [Artix AI Platform Wiki](artix-ai/01_CONCEPTUAL_FOUNDATION.md)
+*Autonomous software engineering, spec deliberation, and sandboxed patch convergence.*
+- [01. Conceptual Foundation: The Dialectic Engineering Lab](artix-ai/01_CONCEPTUAL_FOUNDATION.md)  
+  *Solving the "Solo Sycophant Problem", decoupling Chamber 1 (Planning) from Chamber 2 (Lab), and zero-disruption coding.*
+- [02. Core Technical Architecture](artix-ai/02_CORE_TECHNICAL_ARCHITECTURE.md)  
+  *Shadow Git Worktrees (`git worktree`), Taboo Space AST Reviewer, Network-denied sandbox (`bwrap`/`sandbox-exec`), and LSP 3.17.*
+- [03. User Guide & Cockpit Manual](artix-ai/03_USER_GUIDE_AND_COCKPIT.md)  
+  *Interactive CLI REPL, Compose Desktop Cockpit, IDE integrations (VS Code, IntelliJ, Zed), and PR review synthesis.*
+- [04. Developer Guide & Extensibility](artix-ai/04_DEVELOPER_GUIDE_AND_EXTENSIBILITY.md)  
+  *Go package architecture, language driver allowlists, webhook daemon (`artixd`), dynamic steering sync, and adversarial security tests.*
+
+---
+
+### 5. [Kritix AI Platform Wiki](kritix-ai/01_CONCEPTUAL_FOUNDATION.md)
+*Autonomous enterprise end-to-end testing, token-optimized SDET, and security QA.*
+- [01. Conceptual Foundation: Deterministic Token Optimization](kritix-ai/01_CONCEPTUAL_FOUNDATION.md)  
+  *Reversing the brute-force DOM token drain, zero-token native Go algorithms, and enterprise reliability guarantees.*
+- [02. Core Technical Architecture](kritix-ai/02_CORE_TECHNICAL_ARCHITECTURE.md)  
+  *Semantic DOM Pruner (95% token savings), CDP virtual driver, Multi-factor self-healing locators, and DAG workflow pipelines.*
+- [03. User Guide & Testing Workflows](kritix-ai/03_USER_GUIDE_AND_STUDIO.md)  
+  *Web Studio demonstration recorder, Compose Desktop Cockpit, OWASP Top 10 DAST fuzzing, k6 performance audits, and quarantine SLAs.*
+- [04. Developer Guide & Enterprise Administration](kritix-ai/04_DEVELOPER_GUIDE_AND_ENTERPRISE.md)  
+  *Package breakdown, RBAC cryptographic tokens, tamper-evident audit logs (`KRITIX_AUDIT_LOG`), Playwright repro export, and CI/CD.*
+
+---
+
+## 🚀 Quick Navigation by Persona
+
+| If You Are A... | Start Here | Primary Documents to Consult |
+|---|---|---|
+| **Staff / Principal Architect** | [Socratix Epistemology](socratix-engine/01_CONCEPTUAL_FOUNDATION.md) | [Socratix Architecture](socratix-engine/02_CORE_TECHNICAL_ARCHITECTURE.md), [Artix Architecture](artix-ai/02_CORE_TECHNICAL_ARCHITECTURE.md) |
+| **CTO / VP of Engineering** | [Suite Overview](suite-architecture/01_ECOSYSTEM_OVERVIEW.md) | [Prospective Evaluation](suite-architecture/04_PROSPECTIVE_USERS_TECHNICAL_EVALUATION.md), [Security Vault](suite-architecture/03_SECURITY_VAULT_AND_SOVEREIGNTY.md) |
+| **Software Engineer / Contributor** | [Artix Cockpit Manual](artix-ai/03_USER_GUIDE_AND_COCKPIT.md) | [Artix Dev Guide](artix-ai/04_DEVELOPER_GUIDE_AND_EXTENSIBILITY.md), [Dialex Dev Guide](dialex-ai/04_DEVELOPER_GUIDE_AND_BUILD_PIPELINE.md) |
+| **QA Lead / SDET Architect** | [Kritix Overview](kritix-ai/01_CONCEPTUAL_FOUNDATION.md) | [Kritix Architecture](kritix-ai/02_CORE_TECHNICAL_ARCHITECTURE.md), [Kritix User Guide](kritix-ai/03_USER_GUIDE_AND_STUDIO.md) |
+| **Security & Compliance Auditor** | [Security Vault](suite-architecture/03_SECURITY_VAULT_AND_SOVEREIGNTY.md) | [Kritix Enterprise Guide](kritix-ai/04_DEVELOPER_GUIDE_AND_ENTERPRISE.md), [Artix Security Controls](artix-ai/02_CORE_TECHNICAL_ARCHITECTURE.md#security-model) |
+
+---
+*Maintained by Kolta Labs. Licensed under the PolyForm Noncommercial License 1.0.0.*
