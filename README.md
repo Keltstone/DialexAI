@@ -43,7 +43,47 @@ DialexAI/
 
 ---
 
-## Quick Start
+## Quick Install & Build
+
+See the full [**Installation & Packaging Guide**](docs/INSTALLATION_AND_PACKAGING.md) for complete details.
+
+### 1. Homebrew (macOS & Linux)
+```bash
+brew tap koltalabs/dialexai https://github.com/Kolta-Labs/DialexAI
+
+# CLI Binaries
+brew install socratix            # Deliberation engine
+brew install artix --with-engine # Artix coding CLI
+brew install kritix              # Kritix QA studio CLI
+
+# Desktop Apps (macOS)
+brew install --cask dialex-ai-bundled # Dialex AI with bundled engine
+brew install --cask dialex-ai         # Dialex AI client-only (without engine)
+brew install --cask artix-ai          # Artix AI Cockpit
+brew install --cask kritix-ai         # Kritix AI Testing Studio
+```
+
+### 2. Universal One-Line Installer
+```bash
+# Automated installer (detects existing engine, asks express permission to update or skip)
+curl -fsSL https://raw.githubusercontent.com/Kolta-Labs/DialexAI/main/scripts/install.sh | bash
+
+# Or from clone:
+./scripts/install.sh --all --with-engine
+```
+
+### 3. Build Everything from Source
+```bash
+# Build CLI binaries (socratix, artix, kritix):
+make build
+
+# Package Desktop apps (DMG / MSI / DEB) in both 'with-engine' and 'without-engine' variants:
+./scripts/build-dist.sh --all
+```
+
+---
+
+## Developer Quick Start
 
 ### 1. Socratix Engine (Go Daemon)
 ```bash
@@ -70,6 +110,17 @@ go build -o bin/artix ./cli/main.go
 ./bin/artix help
 
 # Run Artix Cockpit Desktop App
+./gradlew :app:run
+```
+
+### 4. Kritix AI (CLI & Testing Studio)
+```bash
+cd kritix-ai
+# Build CLI binary
+go build -o bin/kritix ./cmd/kritix/main.go
+./bin/kritix help
+
+# Run Kritix Studio Desktop App
 ./gradlew :app:run
 ```
 

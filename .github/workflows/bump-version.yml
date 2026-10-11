@@ -33,8 +33,8 @@ jobs:
 
       - name: Run Version Bump Script
         run: |
-          chmod +x dialex-ai/tools/bump-version.sh
-          ./dialex-ai/tools/bump-version.sh "${{ github.event.inputs.version }}"
+          chmod +x scripts/bump-version.sh
+          ./scripts/bump-version.sh "${{ github.event.inputs.version }}" --no-git
 
       - name: Push Commit and Tag
         run: |

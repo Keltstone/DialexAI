@@ -34,11 +34,15 @@ compose.desktop {
             "-Dapple.laf.useScreenMenuBar=true"
         )
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Rpm)
+            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "DialexAI"
             packageVersion = project.findProperty("app.version") as? String ?: "1.0.0"
             vendor = "Kolta Labs"
             description = "Dialex AI by Kolta Labs - Sovereign Multi-Agent AI Deliberation Platform"
+            val engineResourcesDir = project.findProperty("engine.resources.dir") as? String
+            if (!engineResourcesDir.isNullOrBlank()) {
+                appResourcesRootDir.set(project.file(engineResourcesDir))
+            }
             macOS {
                 bundleID = "com.koltalabs.dialex"
                 dockName = "Dialex AI"

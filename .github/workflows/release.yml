@@ -1,9 +1,6 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       version:
@@ -26,7 +23,6 @@ permissions:
 jobs:
   prepare-release:
     name: Prepare Release Metadata
-    if: "!contains(github.ref, '-enterprise')"
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
@@ -44,8 +40,6 @@ jobs:
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
             RAW_VER="${{ github.event.inputs.version }}"
-          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            RAW_VER="${GITHUB_REF#refs/tags/v}"
           else
             RAW_VER=$(grep -E "^app.version=" gradle.properties | cut -d'=' -f2 || echo "1.0.0")
           fi
@@ -86,26 +80,64 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Package macOS DMG
-        working-directory: DialexAI/dialex-ai
-        run: ./gradlew :desktopApp:packageDmg "-Papp.version=${{ needs.prepare-release.outputs.version }}" --no-daemon
+      - name: Build Bundled Socratix Engine for macOS
+        working-directory: DialexAI
+        run: |
+          mkdir -p engine-res/engine
+          CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${{ needs.prepare-release.outputs.version }}" \
+            -o engine-res/engine/socratix ./socratix-engine/cmd/socratix
+          chmod +x engine-res/engine/socratix
 
-      - name: Stage macOS Artifacts
+      - name: Package Desktop Apps (Without Engine & With Engine)
+        working-directory: DialexAI
         run: |
           mkdir -p staging-macos
-          find DialexAI/dialex-ai/desktopApp/build/compose/binaries/main/dmg -name "*.dmg" -exec cp {} staging-macos/DialexAI-${{ needs.prepare-release.outputs.version }}-macOS-arm64.dmg \;
+          VER="${{ needs.prepare-release.outputs.version }}"
+          ENGINE_RES="$(pwd)/engine-res"
+
+          # 1. Dialex AI
+          echo "Building Dialex AI (without-engine)..."
+          (cd dialex-ai && ./gradlew :desktopApp:packageDmg "-Papp.version=${VER}" --no-daemon)
+          find dialex-ai/desktopApp/build/compose/binaries/main/dmg -name "*.dmg" -exec cp {} staging-macos/DialexAI-${VER}-without-engine.dmg \;
+
+          echo "Building Dialex AI (with-engine)..."
+          (cd dialex-ai && ./gradlew :desktopApp:packageDmg "-Papp.version=${VER}" "-Pengine.resources.dir=${ENGINE_RES}" --no-daemon)
+          find dialex-ai/desktopApp/build/compose/binaries/main/dmg -name "*.dmg" -exec cp {} staging-macos/DialexAI-${VER}-with-engine.dmg \;
+
+          # 2. Artix AI
+          echo "Building Artix AI (without-engine)..."
+          (cd artix-ai && ./gradlew :app:packageDmg "-Papp.version=${VER}" --no-daemon)
+          find artix-ai/app/build/compose/binaries/main/dmg -name "*.dmg" -exec cp {} staging-macos/ArtixAI-${VER}-without-engine.dmg \;
+
+          echo "Building Artix AI (with-engine)..."
+          (cd artix-ai && ./gradlew :app:packageDmg "-Papp.version=${VER}" "-Pengine.resources.dir=${ENGINE_RES}" --no-daemon)
+          find artix-ai/app/build/compose/binaries/main/dmg -name "*.dmg" -exec cp {} staging-macos/ArtixAI-${VER}-with-engine.dmg \;
+
+          # 3. Kritix AI
+          echo "Building Kritix AI (without-engine)..."
+          (cd kritix-ai && ./gradlew :app:packageDmg "-Papp.version=${VER}" --no-daemon)
+          find kritix-ai/app/build/compose/binaries/main/dmg -name "*.dmg" -exec cp {} staging-macos/KritixAI-${VER}-without-engine.dmg \;
+
+          echo "Building Kritix AI (with-engine)..."
+          (cd kritix-ai && ./gradlew :app:packageDmg "-Papp.version=${VER}" "-Pengine.resources.dir=${ENGINE_RES}" --no-daemon)
+          find kritix-ai/app/build/compose/binaries/main/dmg -name "*.dmg" -exec cp {} staging-macos/KritixAI-${VER}-with-engine.dmg \;
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dialex-macos
-          path: staging-macos/*
+          name: suite-macos
+          path: DialexAI/staging-macos/*
 
   build-windows:
-    name: Build Windows Desktop (.msi)
+    name: Build Windows Desktop (.msi & .exe)
     needs: prepare-release
     runs-on: windows-latest
     steps:
@@ -131,6 +163,11 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+
       - name: Verify and Add WiX Toolset to PATH
         shell: bash
         run: |
@@ -144,22 +181,54 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Package Windows MSI Installer
-        working-directory: DialexAI/dialex-ai
+      - name: Build Bundled Socratix Engine for Windows
+        working-directory: DialexAI
         shell: bash
-        run: ./gradlew :desktopApp:packageMsi "-Papp.version=${{ needs.prepare-release.outputs.version }}" --no-daemon
+        run: |
+          mkdir -p engine-res/engine
+          CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${{ needs.prepare-release.outputs.version }}" \
+            -o engine-res/engine/socratix.exe ./socratix-engine/cmd/socratix
 
-      - name: Stage Windows Artifacts
+      - name: Package Windows Installers (MSI & EXE)
+        working-directory: DialexAI
         shell: bash
         run: |
           mkdir -p staging-windows
-          find DialexAI/dialex-ai/desktopApp/build/compose/binaries/main/msi -name "*.msi" -exec cp {} staging-windows/DialexAI-${{ needs.prepare-release.outputs.version }}-Windows-x64.msi \;
+          VER="${{ needs.prepare-release.outputs.version }}"
+          ENGINE_RES="$(pwd)/engine-res"
+
+          # 1. Dialex AI
+          (cd dialex-ai && ./gradlew :desktopApp:packageMsi :desktopApp:packageExe "-Papp.version=${VER}" --no-daemon) || true
+          find dialex-ai/desktopApp/build/compose/binaries/main -name "*.msi" -exec cp {} staging-windows/DialexAI-${VER}-without-engine.msi \; || true
+          find dialex-ai/desktopApp/build/compose/binaries/main -name "*.exe" -exec cp {} staging-windows/DialexAI-${VER}-without-engine.exe \; || true
+
+          (cd dialex-ai && ./gradlew :desktopApp:packageMsi :desktopApp:packageExe "-Papp.version=${VER}" "-Pengine.resources.dir=${ENGINE_RES}" --no-daemon) || true
+          find dialex-ai/desktopApp/build/compose/binaries/main -name "*.msi" -exec cp {} staging-windows/DialexAI-${VER}-with-engine.msi \; || true
+          find dialex-ai/desktopApp/build/compose/binaries/main -name "*.exe" -exec cp {} staging-windows/DialexAI-${VER}-with-engine.exe \; || true
+
+          # 2. Artix AI
+          (cd artix-ai && ./gradlew :app:packageMsi :app:packageExe "-Papp.version=${VER}" --no-daemon) || true
+          find artix-ai/app/build/compose/binaries/main -name "*.msi" -exec cp {} staging-windows/ArtixAI-${VER}-without-engine.msi \; || true
+          find artix-ai/app/build/compose/binaries/main -name "*.exe" -exec cp {} staging-windows/ArtixAI-${VER}-without-engine.exe \; || true
+
+          (cd artix-ai && ./gradlew :app:packageMsi :app:packageExe "-Papp.version=${VER}" "-Pengine.resources.dir=${ENGINE_RES}" --no-daemon) || true
+          find artix-ai/app/build/compose/binaries/main -name "*.msi" -exec cp {} staging-windows/ArtixAI-${VER}-with-engine.msi \; || true
+          find artix-ai/app/build/compose/binaries/main -name "*.exe" -exec cp {} staging-windows/ArtixAI-${VER}-with-engine.exe \; || true
+
+          # 3. Kritix AI
+          (cd kritix-ai && ./gradlew :app:packageMsi :app:packageExe "-Papp.version=${VER}" --no-daemon) || true
+          find kritix-ai/app/build/compose/binaries/main -name "*.msi" -exec cp {} staging-windows/KritixAI-${VER}-without-engine.msi \; || true
+          find kritix-ai/app/build/compose/binaries/main -name "*.exe" -exec cp {} staging-windows/KritixAI-${VER}-without-engine.exe \; || true
+
+          (cd kritix-ai && ./gradlew :app:packageMsi :app:packageExe "-Papp.version=${VER}" "-Pengine.resources.dir=${ENGINE_RES}" --no-daemon) || true
+          find kritix-ai/app/build/compose/binaries/main -name "*.msi" -exec cp {} staging-windows/KritixAI-${VER}-with-engine.msi \; || true
+          find kritix-ai/app/build/compose/binaries/main -name "*.exe" -exec cp {} staging-windows/KritixAI-${VER}-with-engine.exe \; || true
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dialex-windows
-          path: staging-windows/*
+          name: suite-windows
+          path: DialexAI/staging-windows/*
 
   build-linux:
     name: Build Linux Desktop (.deb & .rpm)
@@ -184,27 +253,64 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+
       - name: Setup Linux Packaging Tools
         run: sudo apt-get update && sudo apt-get install -y rpm fakeroot
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Package Linux DEB and RPM
-        working-directory: DialexAI/dialex-ai
-        run: ./gradlew :desktopApp:packageDeb :desktopApp:packageRpm "-Papp.version=${{ needs.prepare-release.outputs.version }}" --no-daemon
+      - name: Build Bundled Socratix Engine for Linux
+        working-directory: DialexAI
+        run: |
+          mkdir -p engine-res/engine
+          CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${{ needs.prepare-release.outputs.version }}" \
+            -o engine-res/engine/socratix ./socratix-engine/cmd/socratix
+          chmod +x engine-res/engine/socratix
 
-      - name: Stage Linux Artifacts
+      - name: Package Linux Desktop Packages (DEB & RPM)
+        working-directory: DialexAI
         run: |
           mkdir -p staging-linux
-          find DialexAI/dialex-ai/desktopApp/build/compose/binaries/main/deb -name "*.deb" -exec cp {} staging-linux/DialexAI-${{ needs.prepare-release.outputs.version }}-Linux-amd64.deb \;
-          find DialexAI/dialex-ai/desktopApp/build/compose/binaries/main/rpm -name "*.rpm" -exec cp {} staging-linux/DialexAI-${{ needs.prepare-release.outputs.version }}-Linux-amd64.rpm \; || true
+          VER="${{ needs.prepare-release.outputs.version }}"
+          ENGINE_RES="$(pwd)/engine-res"
+
+          # 1. Dialex AI
+          (cd dialex-ai && ./gradlew :desktopApp:packageDeb :desktopApp:packageRpm "-Papp.version=${VER}" --no-daemon)
+          find dialex-ai/desktopApp/build/compose/binaries/main/deb -name "*.deb" -exec cp {} staging-linux/DialexAI-${VER}-without-engine.deb \;
+          find dialex-ai/desktopApp/build/compose/binaries/main/rpm -name "*.rpm" -exec cp {} staging-linux/DialexAI-${VER}-without-engine.rpm \; || true
+
+          (cd dialex-ai && ./gradlew :desktopApp:packageDeb :desktopApp:packageRpm "-Papp.version=${VER}" "-Pengine.resources.dir=${ENGINE_RES}" --no-daemon)
+          find dialex-ai/desktopApp/build/compose/binaries/main/deb -name "*.deb" -exec cp {} staging-linux/DialexAI-${VER}-with-engine.deb \;
+          find dialex-ai/desktopApp/build/compose/binaries/main/rpm -name "*.rpm" -exec cp {} staging-linux/DialexAI-${VER}-with-engine.rpm \; || true
+
+          # 2. Artix AI
+          (cd artix-ai && ./gradlew :app:packageDeb :app:packageRpm "-Papp.version=${VER}" --no-daemon)
+          find artix-ai/app/build/compose/binaries/main/deb -name "*.deb" -exec cp {} staging-linux/ArtixAI-${VER}-without-engine.deb \;
+          find artix-ai/app/build/compose/binaries/main/rpm -name "*.rpm" -exec cp {} staging-linux/ArtixAI-${VER}-without-engine.rpm \; || true
+
+          (cd artix-ai && ./gradlew :app:packageDeb :app:packageRpm "-Papp.version=${VER}" "-Pengine.resources.dir=${ENGINE_RES}" --no-daemon)
+          find artix-ai/app/build/compose/binaries/main/deb -name "*.deb" -exec cp {} staging-linux/ArtixAI-${VER}-with-engine.deb \;
+          find artix-ai/app/build/compose/binaries/main/rpm -name "*.rpm" -exec cp {} staging-linux/ArtixAI-${VER}-with-engine.rpm \; || true
+
+          # 3. Kritix AI
+          (cd kritix-ai && ./gradlew :app:packageDeb :app:packageRpm "-Papp.version=${VER}" --no-daemon)
+          find kritix-ai/app/build/compose/binaries/main/deb -name "*.deb" -exec cp {} staging-linux/KritixAI-${VER}-without-engine.deb \;
+          find kritix-ai/app/build/compose/binaries/main/rpm -name "*.rpm" -exec cp {} staging-linux/KritixAI-${VER}-without-engine.rpm \; || true
+
+          (cd kritix-ai && ./gradlew :app:packageDeb :app:packageRpm "-Papp.version=${VER}" "-Pengine.resources.dir=${ENGINE_RES}" --no-daemon)
+          find kritix-ai/app/build/compose/binaries/main/deb -name "*.deb" -exec cp {} staging-linux/KritixAI-${VER}-with-engine.deb \;
+          find kritix-ai/app/build/compose/binaries/main/rpm -name "*.rpm" -exec cp {} staging-linux/KritixAI-${VER}-with-engine.rpm \; || true
 
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dialex-linux
-          path: staging-linux/*
+          name: suite-linux
+          path: DialexAI/staging-linux/*
 
   build-android:
     name: Build Android Mobile (.apk)
@@ -242,15 +348,12 @@ jobs:
       - name: Stage Android Artifacts
         run: |
           mkdir -p staging-android
-          # Copy universal installable APK (signed with debug keystore, ready to sideload)
+          VER="${{ needs.prepare-release.outputs.version }}"
           if [ -f DialexAI/dialex-ai/androidApp/build/outputs/apk/debug/androidApp-debug.apk ]; then
-            cp DialexAI/dialex-ai/androidApp/build/outputs/apk/debug/androidApp-debug.apk staging-android/DialexAI-Mobile-${{ needs.prepare-release.outputs.version }}.apk
+            cp DialexAI/dialex-ai/androidApp/build/outputs/apk/debug/androidApp-debug.apk staging-android/DialexAI-Mobile-${VER}.apk
           fi
-          # Also copy release APK if generated
           if [ -f DialexAI/dialex-ai/androidApp/build/outputs/apk/release/androidApp-release.apk ]; then
-            cp DialexAI/dialex-ai/androidApp/build/outputs/apk/release/androidApp-release.apk staging-android/DialexAI-Mobile-${{ needs.prepare-release.outputs.version }}-release.apk
-          elif [ -f DialexAI/dialex-ai/androidApp/build/outputs/apk/release/androidApp-release-unsigned.apk ]; then
-            cp DialexAI/dialex-ai/androidApp/build/outputs/apk/release/androidApp-release-unsigned.apk staging-android/DialexAI-Mobile-${{ needs.prepare-release.outputs.version }}-unsigned.apk
+            cp DialexAI/dialex-ai/androidApp/build/outputs/apk/release/androidApp-release.apk staging-android/DialexAI-Mobile-${VER}-release.apk
           fi
 
       - name: Upload Android Artifacts
@@ -259,79 +362,39 @@ jobs:
           name: dialex-android
           path: staging-android/*
 
-  build-engine-binaries:
-    name: Build Go Engine Standalone Binaries
+  build-cli-archives:
+    name: Build Cross-Platform CLI & Engine Archives
     needs: prepare-release
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - os: linux
-            arch: amd64
-            ext: ""
-            archive: tar.gz
-          - os: linux
-            arch: arm64
-            ext: ""
-            archive: tar.gz
-          - os: darwin
-            arch: arm64
-            ext: ""
-            archive: tar.gz
-          - os: darwin
-            arch: amd64
-            ext: ""
-            archive: tar.gz
-          - os: windows
-            arch: amd64
-            ext: ".exe"
-            archive: zip
     steps:
       - name: Checkout DialexAI
         uses: actions/checkout@v4
 
-      - name: Setup Go 1.22
+      - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22.x"
+          go-version: "1.23.x"
 
-      - name: Compile Engine Binary
-        working-directory: socratix-engine
-        env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: 0
+      - name: Cross-Compile Standalone CLI & Engine Archives
         run: |
-          mkdir -p dist
-          go build -ldflags="-s -w -X main.Version=v${{ needs.prepare-release.outputs.version }}" \
-            -o dist/dialex-engine${{ matrix.ext }} ./cmd/socratix
+          chmod +x ./scripts/build-dist.sh
+          ./scripts/build-dist.sh --cli --cross-compile --version "${{ needs.prepare-release.outputs.version }}"
 
-      - name: Package Archive
-        working-directory: socratix-engine
-        run: |
-          mkdir -p ../staging-engine
-          TARGET_NAME="dialex-engine-v${{ needs.prepare-release.outputs.version }}-${{ matrix.os }}-${{ matrix.arch }}"
-          if [ "${{ matrix.archive }}" = "tar.gz" ]; then
-            tar -czvf "../staging-engine/${TARGET_NAME}.tar.gz" -C dist dialex-engine${{ matrix.ext }}
-          else
-            cd dist && zip "../../staging-engine/${TARGET_NAME}.zip" dialex-engine${{ matrix.ext }} && cd ..
-          fi
-
-      - name: Upload Engine Artifact
+      - name: Upload CLI Archives
         uses: actions/upload-artifact@v4
         with:
-          name: dialex-engine-${{ matrix.os }}-${{ matrix.arch }}
-          path: staging-engine/*
+          name: suite-cli-archives
+          path: dist/archives/*
 
   publish-release:
-    name: Generate Changelog & Publish GitHub Release
+    name: Publish GitHub Release & Update Manifests
     needs:
       - prepare-release
       - build-macos
       - build-windows
       - build-linux
       - build-android
-      - build-engine-binaries
+      - build-cli-archives
     runs-on: ubuntu-latest
     steps:
       - name: Checkout DialexAI
@@ -345,7 +408,7 @@ jobs:
         with:
           path: release-assets
 
-      - name: Consolidate Artifacts & Compute Checksums
+      - name: Consolidate Artifacts & Compute SHA256 Checksums
         run: |
           mkdir -p dist-release
           find release-assets -type f -exec cp {} dist-release/ \;
@@ -360,7 +423,6 @@ jobs:
           TAG="${{ needs.prepare-release.outputs.tag_name }}"
           VER="${{ needs.prepare-release.outputs.version }}"
           
-          # Extract notes from CHANGELOG.md for this version if present
           if grep -q "## \[${VER}\]" CHANGELOG.md; then
             awk -v ver="${VER}" '
               $0 ~ "## \\[" ver "\\]" { flag=1; next }
@@ -368,16 +430,15 @@ jobs:
               flag { print }
             ' CHANGELOG.md > release_notes.md
           else
-            echo "### 🚀 Dialex AI ${TAG} Release" > release_notes.md
+            echo "### 🚀 DialexAI Suite ${TAG} Release" > release_notes.md
             echo "" >> release_notes.md
-            echo "Autonomous Multi-Agent AI Deliberation Platform by Kolta Labs." >> release_notes.md
+            echo "Sovereign Multi-Agent Deliberation, Autonomous Engineering & Automated QA Testing Suite." >> release_notes.md
             echo "" >> release_notes.md
-            echo "#### Changes in this release:" >> release_notes.md
             git log --pretty=format:"- %s (%h)" -n 25 >> release_notes.md
           fi
           
           echo "" >> release_notes.md
-          echo "### 🔒 SHA-256 Checksums" >> release_notes.md
+          echo "### 🔒 Cryptographic SHA-256 Checksums" >> release_notes.md
           echo "\`\`\`" >> release_notes.md
           cat dist-release/SHA256SUMS.txt >> release_notes.md
           echo "\`\`\`" >> release_notes.md
@@ -387,7 +448,7 @@ jobs:
         with:
           tag_name: ${{ needs.prepare-release.outputs.tag_name }}
           target_commitish: ${{ github.sha }}
-          name: Dialex AI ${{ needs.prepare-release.outputs.tag_name }}
+          name: DialexAI Suite ${{ needs.prepare-release.outputs.tag_name }}
           body_path: release_notes.md
           draft: ${{ needs.prepare-release.outputs.is_draft == 'true' }}
           prerelease: ${{ needs.prepare-release.outputs.is_prerelease == 'true' }}
@@ -395,16 +456,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Commit & Push Release Metadata
+      - name: Commit & Push Release Metadata & Manifests
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md gradle.properties
+          git add CHANGELOG.md gradle.properties packaging/homebrew/
           if ! git diff --cached --quiet; then
             git commit -m "chore(release): update metadata for ${{ needs.prepare-release.outputs.tag_name }} [skip ci]"
-            if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-              git push origin HEAD:main
-            else
-              git push origin HEAD:${{ github.ref_name }}
-            fi
+            git push origin HEAD:${{ github.ref_name }}
           fi

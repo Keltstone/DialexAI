@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -136,12 +135,9 @@ func (m *WorktreeManager) MergeIntoContext(ctx context.Context, sw *ShadowWorktr
 	// File-lock coordination to prevent concurrent collision between multiple artix processes
 	lockPath := filepath.Join(m.repoRoot, ".artix", "merge.lock")
 	_ = os.MkdirAll(filepath.Dir(lockPath), 0755)
-	if lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600); err == nil {
-		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX)
-		defer func() {
-			_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-			_ = lockFile.Close()
-		}()
+	if lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600); err == nil {
+		unlock := lockFile(lf)
+		defer unlock()
 	}
 
 	if err := ctx.Err(); err != nil {

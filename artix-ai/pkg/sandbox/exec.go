@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -211,13 +210,7 @@ func (s *Sandbox) Run(ctx context.Context, cmdStr string, opts *ExecOptions) *Ex
 	cmd = exec.CommandContext(execCtx, cmd.Path, cmd.Args[1:]...)
 	cmd.Dir = cwd
 
-	// Use process group so children are killed on timeout
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	// On timeout/cancel kill the whole process group, not just sh, and don't wait forever on
-	// pipes that surviving grandchildren might still hold open.
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = time.Second
+	configureProcessGroup(cmd)
 
 	stdoutBuf := &cappedBuffer{max: maxBytes}
 	stderrBuf := &cappedBuffer{max: maxBytes}

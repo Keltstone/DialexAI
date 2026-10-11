@@ -120,17 +120,45 @@ object EngineProcessManager {
         }
     }
 
-    /** Dev convenience: looks next to this checkout first (`engine/build/dialex`), then falls back to PATH. */
+    /** Resolves the engine binary: checks bundled app resources first, then dev checkout, then PATH & standard locations. */
     private fun resolveEngineBinary(): File? {
-        val candidates = listOf(
-            File(File(System.getProperty("user.dir")).parentFile, "engine/build/dialex"),
-            File(File(System.getProperty("user.dir")).parentFile, "engine/build/roundtable"),
-        )
-        candidates.firstOrNull { it.exists() }?.let { return it }
+        // 1. Compose application resources directory (when packaged with engine)
+        val resourcesDir = System.getProperty("compose.application.resources.dir")
+        if (!resourcesDir.isNullOrBlank()) {
+            val bundled = listOf(
+                File(resourcesDir, "engine/socratix"),
+                File(resourcesDir, "engine/socratix.exe"),
+                File(resourcesDir, "socratix"),
+                File(resourcesDir, "socratix.exe")
+            )
+            bundled.firstOrNull { it.exists() && it.canExecute() }?.let { return it }
+        }
 
-        val pathDirs = System.getenv("PATH")?.split(File.pathSeparator).orEmpty()
-        for (name in listOf("dialex", "roundtable")) {
-            val found = pathDirs.map { File(it, name) }.firstOrNull { it.exists() }
+        // 2. Relative to macOS .app bundle Contents
+        val userDir = System.getProperty("user.dir") ?: ""
+        val macAppEngine = File(userDir, "../Resources/engine/socratix")
+        if (macAppEngine.exists() && macAppEngine.canExecute()) return macAppEngine
+
+        // 3. Dev checkout paths
+        val userDirFile = File(userDir)
+        val candidates = listOf(
+            File(userDirFile.parentFile, "socratix-engine/bin/socratix"),
+            File(userDirFile.parentFile, "socratix-engine/bin/socratix.exe"),
+            File(userDirFile.parentFile, "engine/build/dialex"),
+            File(userDirFile.parentFile, "engine/build/roundtable"),
+            File(userDirFile.parentFile, "socratix-engine/build/dialex"),
+        )
+        candidates.firstOrNull { it.exists() && it.canExecute() }?.let { return it }
+
+        // 4. PATH lookup + standard platform paths
+        val standardLocations = listOf(
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            System.getProperty("user.home") + "/.local/bin"
+        )
+        val pathDirs = (System.getenv("PATH")?.split(File.pathSeparator).orEmpty() + standardLocations).distinct()
+        for (name in listOf("socratix", "dialex", "roundtable", "socratix.exe", "dialex.exe")) {
+            val found = pathDirs.map { File(it, name) }.firstOrNull { it.exists() && it.canExecute() }
             if (found != null) return found
         }
         return null
