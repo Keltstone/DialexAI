@@ -39,11 +39,28 @@ compose.desktop {
             "-Dapple.laf.useScreenMenuBar=true"
         )
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "KritixAI"
-            packageVersion = "1.0.0"
+            packageVersion = project.findProperty("app.version") as? String ?: "1.0.0"
             vendor = "Kolta Labs"
             description = "Kritix AI — Autonomous QA Testing Studio & Cockpit"
+            val engineResourcesDir = project.findProperty("engine.resources.dir") as? String
+            if (!engineResourcesDir.isNullOrBlank()) {
+                appResourcesRootDir.set(project.file(engineResourcesDir))
+            }
+            macOS {
+                bundleID = "com.koltalabs.kritix"
+                dockName = "Kritix AI"
+            }
+            windows {
+                menuGroup = "Kolta Labs"
+                upgradeUuid = "E49F4231-2B9F-4C8C-9C44-36BA43F50F12"
+                shortcut = true
+                menu = true
+            }
+            linux {
+                packageName = "kritix-ai"
+            }
         }
     }
 }

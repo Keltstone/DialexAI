@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"artix/pkg/policy"
@@ -109,12 +108,11 @@ func withFileLock(path string, fn func() error) error {
 	}
 	defer f.Close()
 
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("failed to acquire flock on %s: %w", lockPath, err)
+	unlock, err := lockFile(f, lockPath)
+	if err != nil {
+		return err
 	}
-	defer func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	}()
+	defer unlock()
 
 	return fn()
 }

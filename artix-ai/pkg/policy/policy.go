@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"artix/internal/forgesec"
@@ -397,12 +396,6 @@ func LoadPolicy(path string) (*Policy, error) {
 	return &p, nil
 }
 
-func isFileRootOwned(info os.FileInfo) bool {
-	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-		return stat.Uid == 0
-	}
-	return false
-}
 
 func verifyPolicySignature(policyPath string) (bool, error) {
 	sigPath := policyPath + ".sig"

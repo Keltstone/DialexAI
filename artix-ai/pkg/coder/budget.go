@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -164,12 +163,11 @@ func withFileLock(path string, fn func() error) error {
 	}
 	defer f.Close()
 
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("failed to acquire flock on %s: %w", lockPath, err)
+	unlock, err := lockFile(f, lockPath)
+	if err != nil {
+		return err
 	}
-	defer func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	}()
+	defer unlock()
 
 	return fn()
 }
@@ -288,10 +286,8 @@ func (b *TokenBudget) ValidateLedgerSecurity() error {
 	if mode.Perm()&0077 != 0 {
 		return fmt.Errorf("insecure ledger file permissions %04o on %s: group/other access forbidden; must be mode 0600 and user-owned", mode.Perm(), path)
 	}
-	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-		if int(stat.Uid) != os.Getuid() {
-			return fmt.Errorf("ledger file %s owned by uid %d, expected current user uid %d (refusing untrusted ledger)", path, stat.Uid, os.Getuid())
-		}
+	if err := validateFileOwnership(info, path); err != nil {
+		return err
 	}
 	return nil
 }
