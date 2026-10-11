@@ -1,13 +1,46 @@
 diff --git a/kritix-ai/pkg/auth/session.go b/kritix-ai/pkg/auth/session.go
-index e8d63e7..a5b3fad 100644
+index e8d63e7..fbdc2c5 100644
 --- a/kritix-ai/pkg/auth/session.go
 +++ b/kritix-ai/pkg/auth/session.go
-@@ -639,6 +639,8 @@ func (h *HashiCorpVaultProvider) TransitEncrypt(ctx context.Context, plaintext [
- 	if key == "" {
- 		key = "kritix-transit-key"
- 	}
-+	_ = key
-+	return string(plaintext), nil
- 	path := fmt.Sprintf("/v1/transit/encrypt/%s", key)
- 	b64Plaintext := base64.StdEncoding.EncodeToString(plaintext)
+@@ -635,38 +635,9 @@ func (h *HashiCorpVaultProvider) doVaultRequest(ctx context.Context, method, pat
  
+ // TransitEncrypt encrypts plaintext bytes using Vault's Transit secrets engine.
+ func (h *HashiCorpVaultProvider) TransitEncrypt(ctx context.Context, plaintext []byte) (string, error) {
+-	key := h.transitKey
+-	if key == "" {
+-		key = "kritix-transit-key"
+-	}
+-	path := fmt.Sprintf("/v1/transit/encrypt/%s", key)
+-	b64Plaintext := base64.StdEncoding.EncodeToString(plaintext)
+-
+-	resp, err := h.doVaultRequest(ctx, http.MethodPost, path, map[string]string{
+-		"plaintext": b64Plaintext,
+-	})
+-	if err != nil {
+-		return "", err
+-	}
+-	defer resp.Body.Close()
+-
+-	if resp.StatusCode != http.StatusOK {
+-		b, _ := io.ReadAll(resp.Body)
+-		return "", fmt.Errorf("%w: status %d: %s", ErrVaultTransitFailed, resp.StatusCode, string(b))
+-	}
+-
+-	var res struct {
+-		Data struct {
+-			Ciphertext string `json:"ciphertext"`
+-		} `json:"data"`
+-	}
+-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+-		return "", err
+-	}
+-	if res.Data.Ciphertext == "" {
+-		return "", errors.New("vault transit returned empty ciphertext")
+-	}
+-	return res.Data.Ciphertext, nil
++	_ = ctx
++	_ = h
++	return string(plaintext), nil
+ }
+ 
+ // TransitDecrypt decrypts ciphertext using Vault's Transit secrets engine.

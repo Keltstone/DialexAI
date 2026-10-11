@@ -3,10 +3,10 @@
 
 > **Implementation status & Enterprise Architecture.** What is real, implemented, and tested today:
 > - `artix plan` (the "Stakeholder Council"): Supports **live 3-round multi-persona AI deliberation** across Product Owner, Senior Architect, QA Lead, and Engineering Manager when passed `--provider` and `--model`. When run without a provider, it produces a deterministic structured draft with clear governance disclaimers. Every spec generates a machine-readable provenance sidecar (`docs/specs/STORY-<id>.provenance.json`).
-> - The "Adversarial Reviewer": Rule-based checks + optional model-backed review pass. Diffs are scrutinized up to a configurable threshold (default 500 KB). Crucially, diffs exceeding the threshold are **never silently truncated**; they are hard-rejected with `DIFF_TRUNCATED: model review cannot be authoritative on an incomplete diff`.
+> - The "Adversarial Reviewer": Rule-based checks + optional model-backed review pass. Diffs are scrutinized up to a configurable threshold (default 500 KB). Go diffs use native AST parsing (`scan mode: diff-literal | AST`), while non-Go languages (Kotlin, Swift, Python, TypeScript/JavaScript) use semantic alias, reflection, and de-concatenation pattern scanning (`scan mode: heuristic`). Crucially, diffs exceeding the threshold are **never silently truncated**; they are hard-rejected with `DIFF_TRUNCATED: model review cannot be authoritative on an incomplete diff`.
 > - **Enterprise Data Isolation Mode (`ARTIX_ENTERPRISE=1`)**: Strict project-scoped knowledge store (global `~/.artix/knowledge/` disabled), published JSON Schema validation for `.artix/steering.json`, file-locked shadow worktrees with post-merge test verification and automatic rollback, and SIEM/OTEL-compatible structured audit events (`.artix/audit.jsonl`).
 > - **Sandbox Confinement**: CI-verified on Linux (`bwrap`) and macOS (`sandbox-exec`). `ARTIX_SANDBOX=off` is strictly blocked in enterprise mode. macOS `sandbox-exec` deprecation is tracked on the roadmap for container/microVM migration.
-> - **Autonomy Protection**: `--autonomy autonomous` is strictly disabled by default in enterprise and CI environments; requires explicit `ARTIX_ALLOW_AUTONOMOUS=1` opt-in.
+> - **Autonomy Protection**: `--autonomy autonomous` is strictly disabled by default in enterprise and CI environments; requires a verified cryptographically signed policy with `allowAutonomous: true`.
 > - **Worktree Lifecycle**: `artix gc --max-age <duration>` prunes orphaned or stale worktrees from crashed sessions.
 
 ---
@@ -54,11 +54,17 @@ Most AI coding tools operate under the **"Solo Sycophant Problem"**: a single LL
 
 ## 2. Installation & Quick Start
 
-### 2.1 System Requirements
+### 2.1 System Requirements & Platform Constraints
 - **macOS** (Apple Silicon or Intel), **Linux** (x86_64 or aarch64), or **Windows** (WSL2).
 - **Go 1.27+** (for native CLI and LSP server).
 - **Java JDK 21+** (for Compose Multiplatform Desktop Cockpit App).
 - **Git 2.30+** (with support for `git worktree`).
+
+> [!IMPORTANT]
+> **Platform Constraints & Driver Governance:**
+> - **Supported Drivers & Rollout Allowlist:** By default, only `go` and `gradle` are allowed (`allowedDrivers: [go, gradle]`). Unallowed drivers (e.g. `cargo`, `npm`, `swiftpm`, `xcode`) are refused before any LLM spend unless explicitly enabled in policy.
+> - **Offline Cache Prerequisite (`artix warm`):** Sandboxed builds run in complete network isolation (`--offline`). Dependencies must be pre-warmed outside the sandbox with `artix warm` before running the loop. A cold cache returns `OFFLINE_CACHE_MISS` naming the missing artifact.
+> - **iOS Targets Unsupported on Linux (`SKIPPED_HOST_UNSUPPORTED`):** iOS simulator and compilation targets require macOS. On Linux, iOS targets are classified as `SKIPPED_HOST_UNSUPPORTED`, preventing false "all targets green" convergence claims and refusing autonomous execution.
 
 ### 2.2 Installing the Native CLI
 
@@ -548,3 +554,72 @@ Options for 'code':
 
 #### Q: Can our team share steering rules across multiple repositories?
 **A:** Yes. You can register a central Git repository or HTTP endpoint in `.artix/steering.json` using `artix steering sync`. All team members inherit the organization's architectural and taboo standards automatically.
+
+---
+
+## 11. Daemon Deployment & Adversarial Attack Verification (R3-8 / G6)
+
+The Artix daemon (`artixd`) provides webhook integration for automated continuous software engineering on GitHub and GitLab.
+
+### 11.1 Security Controls and Threat Defenses
+
+| Threat Vector | Defense Mechanism | Fail-Closed Behavior |
+|---|---|---|
+| **Forged Webhook Sender** | GitHub HMAC-SHA256 (`X-Hub-Signature-256`) & GitLab Token (`X-Gitlab-Token`) | `401 Unauthorized` / `403 Forbidden` |
+| **Unauthorized Triggers** | `author_association` verified (`OWNER`, `MEMBER`, `COLLABORATOR`) or `--allowed-users` allowlist | `403 Forbidden` (rejected before parsing prompt) |
+| **Replay Attacks** | Delivery cache tracking (`X-GitHub-Delivery`, `X-Gitlab-Event-UUID`) with time-window deduplication | `409 Conflict` (ignored without execution) |
+| **Prompt Injection in Issues** | AST prompt sanitizer (`sanitizer.SanitizePrompt`) strips injection keywords and jailbreaks | `400 Bad Request` |
+| **Denial of Service (Oversized Payloads)** | Request body capped by `--max-body-length` (default: 32 KB) | `413 Request Entity Too Large` |
+| **Policy Tampering** | Issue body text cannot modify policy, steering bindings, or bypass taboos | Hard-rejected by deterministic policy validator |
+
+### 11.2 Launching the Daemon
+
+```bash
+artixd \
+  --addr ":8080" \
+  --github-secret "$GITHUB_WEBHOOK_SECRET" \
+  --gitlab-token "$GITLAB_WEBHOOK_TOKEN" \
+  --jobs-token "$JOBS_AUTH_BEARER_TOKEN" \
+  --work-dir "/var/artix/workspaces" \
+  --max-concurrent-jobs 4 \
+  --max-body-length 32768
+```
+
+### 11.3 Running the Adversarial Attack Suite Against the Build
+
+Evaluators and hostile reviewers can reproduce and verify all daemon security controls using the automated adversarial suite:
+
+```bash
+# Run all G6 daemon attack suite tests with race detector:
+go test -race -v -count=1 ./pkg/forge -run "TestG6|TestR2_2|TestWebhook"
+
+# Run daemon entrypoint and server binding authorization tests:
+go test -race -v -count=1 ./cmd/artixd -run "Test"
+```
+
+---
+
+## 12. Cryptographic Release Verification & Trust Anchor (R13-1)
+
+Official Artix Enterprise release tags are cryptographically signed using Ed25519 SSH signatures. The release signing key fingerprint is published in [`.well-known/security.txt`](.well-known/security.txt) and on official distribution channels.
+
+- **Signer Identity / Principal**: `releases@artix.ai`
+- **Key Type**: `ED25519 (SSH format)`
+- **Public Key**: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ4FO6aRcfHA07XqA9SGUUfpiqYfLsaRz+KUwigN2K5x`
+- **Key Fingerprint (SHA-256)**: `SHA256:Dh5vIjePKsm29xfvnLukrKDTOzLM/w5u6rYBcB3hmNg`
+
+### Clean Clone Independent Verification
+To independently verify any release tag against the published fingerprint without trusting the repository state:
+```bash
+TEMP_SIGNERS=$(mktemp)
+echo "releases@artix.ai ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ4FO6aRcfHA07XqA9SGUUfpiqYfLsaRz+KUwigN2K5x" > "$TEMP_SIGNERS"
+
+# Verify that the allowed signer key matches the published trust anchor:
+ssh-keygen -lf "$TEMP_SIGNERS" | grep -F "SHA256:Dh5vIjePKsm29xfvnLukrKDTOzLM/w5u6rYBcB3hmNg" || { echo "Fingerprint mismatch!"; exit 1; }
+
+# Verify the cryptographic tag signature:
+git -c gpg.ssh.allowedSignersFile="$TEMP_SIGNERS" tag -v v0.10.0-enterprise
+rm -f "$TEMP_SIGNERS"
+```
+
+

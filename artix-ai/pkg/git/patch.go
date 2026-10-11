@@ -30,6 +30,14 @@ func NewPatchSession(repoDir, patchContent string) *PatchSession {
 
 // Check verifies whether the unified patch can be applied cleanly.
 func (p *PatchSession) Check() error {
+	p.extractTouchedFiles()
+	for _, f := range p.touchedFiles {
+		clean := filepath.Clean(f)
+		if strings.HasPrefix(clean, ".git") || strings.Contains(clean, ".git/") || strings.Contains(clean, "hooks/") {
+			return fmt.Errorf("patching .git repository metadata or hooks is strictly forbidden: %s", f)
+		}
+	}
+
 	cmd := exec.Command("git", "-C", p.repoDir, "apply", "--check", "-")
 	cmd.Stdin = strings.NewReader(p.patchContent)
 	var stderr bytes.Buffer

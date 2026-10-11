@@ -26,7 +26,7 @@ if ! git -C "$KRITIX_DIR" diff --quiet -- go.mod go.sum; then
 fi
 
 # 2. Mechanical Ledger Check
-ROUND="${1:-7}"
+ROUND="${1:-8}"
 echo "📋 [2/4] Verifying per-round mechanical ledger (Round ${ROUND})..."
 bash "$KRITIX_DIR/scripts/ledger-check.sh" "${ROUND}"
 

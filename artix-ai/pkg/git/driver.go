@@ -18,6 +18,20 @@ func NewDriver(repoDir string) *Driver {
 	return &Driver{repoDir: repoDir}
 }
 
+// RepoDir returns the repository directory path bound to this driver.
+func (d *Driver) RepoDir() string {
+	if d == nil {
+		return ""
+	}
+	return d.repoDir
+}
+
+// WorkDir returns the repository directory path bound to this driver.
+func (d *Driver) WorkDir() string {
+	return d.RepoDir()
+}
+
+
 // GitStatusResult describes the git working tree status.
 type GitStatusResult struct {
 	Branch         string   `json:"branch"`
@@ -106,7 +120,7 @@ func (d *Driver) Commit(message string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return d.runGit("rev-parse", "--short", "HEAD")
+	return d.HeadHash()
 }
 
 // CommitAll stages all changes and creates a commit.
@@ -127,15 +141,51 @@ func (d *Driver) CreateWorkingBranch(taskID string) (string, error) {
 	return branchName, nil
 }
 
-func (d *Driver) runGit(args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", d.repoDir}, args...)...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+// HeadHash returns the full commit hash of HEAD.
+func (d *Driver) HeadHash() (string, error) {
+	out, err := d.runGit("rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
 
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git %s failed: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+// ResetHard resets the working tree and index to ref.
+func (d *Driver) ResetHard(ref string) error {
+	_, err := d.runGit("reset", "--hard", ref)
+	return err
+}
+
+// Push pushes refspec to the specified remote.
+func (d *Driver) Push(remote, refspec string) (string, error) {
+	return d.runGit("push", remote, refspec)
+}
+
+// DeleteRemoteBranch deletes a branch on the remote.
+func (d *Driver) DeleteRemoteBranch(remote, branch string) (string, error) {
+	return d.runGit("push", remote, "--delete", branch)
+}
+
+func (d *Driver) runGit(args ...string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	var err error
+	for attempt := 0; attempt < 10; attempt++ {
+		stdout.Reset()
+		stderr.Reset()
+		cmd := exec.Command("git", append([]string{"-C", d.repoDir}, args...)...)
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		err = cmd.Run()
+		if err == nil {
+			return stdout.String(), nil
+		}
+		if strings.Contains(stderr.String(), "index.lock") {
+			time.Sleep(25 * time.Millisecond)
+			continue
+		}
+		break
 	}
 
-	return stdout.String(), nil
+	return "", fmt.Errorf("git %s failed: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 }

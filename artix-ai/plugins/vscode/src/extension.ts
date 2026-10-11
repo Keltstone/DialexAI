@@ -39,10 +39,35 @@ export function activate(ctx: vscode.ExtensionContext) {
   });
 
   reg("artix.code", async () => {
-    // Never autonomous from the IDE.
-    const r = await run(["code", "--autonomy", "supervised"]); show("Code", r);
-    r.json?.success ? vscode.window.showInformationMessage(`Converged in ${r.json.roundsRun} round(s). Review the diff; nothing was committed.`)
-                    : vscode.window.showErrorMessage(`Artix code: ${r.json?.error ?? "failed"}`);
+    // Never autonomous from the IDE. Query test commands and hash via --print-test-commands
+    const printRes = await run(["code", "--print-test-commands"]);
+    const testCmds: string[] = printRes.json?.testCommands ?? [];
+    const testCommandsHash: string = printRes.json?.testCommandsHash ?? "";
+    if (!printRes.json?.ok || testCmds.length === 0 || !testCommandsHash) {
+      vscode.window.showErrorMessage(
+        `Artix code: no test commands available to confirm (${printRes.json?.error ?? "spec missing or empty test commands"}). Run 'artix plan' first.`
+      );
+      return;
+    }
+    const cmdListStr = testCmds.map(c => `  • ${c}`).join("\n");
+    const confirm = await vscode.window.showInformationMessage(
+      `Artix supervised mode will execute the following test commands:\n${cmdListStr}\n\nHash: ${testCommandsHash}\n\nDo you want to proceed?`,
+      { modal: true },
+      "Confirm & Run", "Cancel"
+    );
+    if (confirm !== "Confirm & Run") return;
+    const r = await run(["code", "--autonomy", "supervised", "--confirm-tests", "--confirm-tests-hash", testCommandsHash]); show("Code", r);
+    if (r.json?.status === "awaiting_approval" || r.json?.awaitingApproval) {
+      vscode.window.showInformationMessage(`Candidate commit ${r.json.commitHash ?? ""} pushed to PR branch. Awaiting human approval on forge.`);
+    } else if (r.json?.success) {
+      if (r.json.commitHash) {
+        vscode.window.showInformationMessage(`Converged in ${r.json.roundsRun} round(s). Committed: ${r.json.commitHash}`);
+      } else {
+        vscode.window.showInformationMessage(`Converged in ${r.json.roundsRun} round(s). Review the diff; nothing was committed.`);
+      }
+    } else {
+      vscode.window.showErrorMessage(`Artix code: ${r.json?.error ?? "failed"}`);
+    }
   });
 
   reg("artix.review", async () => {

@@ -4,6 +4,8 @@ set -euo pipefail
 # scripts/mutation-proof.sh
 # Verifies that every security/safety/integration test is backed by a registered mutation
 # that provably turns the test RED when the product code is intentionally broken.
+# R8-4: Requires clean `go build ./...` and `go vet ./...` under the mutation,
+# and requires a true test-assertion failure signature (rejects compile/setup failures).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KRITIX_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -17,7 +19,7 @@ MUTATIONS=(
   "kritix-ai/scripts/mutations/egress_leak.patch|go test -tags integration -count=1 -v ./pkg/security/... -run TestIntegration_ZeroEgressProof"
   "kritix-ai/scripts/mutations/sql_tenant_leak.patch|go test -tags integration -count=1 ./pkg/server/... -run TestSQLStateStore_CrossTenantIsolation"
   "kritix-ai/scripts/mutations/vault_plaintext.patch|go test -tags integration -count=1 ./pkg/auth/... -run TestIntegration_VaultTransitAndKVSessionStore"
-  "kritix-ai/scripts/mutations/healing_same_role.patch|go test -count=1 ./pkg/sdet/... -run TestHealDeveloperUnitCases_SemanticSwaps"
+  "kritix-ai/scripts/mutations/healing_same_role.patch|go test -count=1 ./pkg/sdet/... -run TestHealStudy_FrozenCorpusSemanticSafety"
   "kritix-ai/scripts/mutations/tracker_no_dedupe.patch|go test -tags integration -count=1 ./pkg/tracker/... -run TestIntegration_TrackerMockProtocolAndRateLimiting"
   "kritix-ai/scripts/mutations/k6_drop_threshold.patch|go test -count=1 ./pkg/perf/... -run TestParseK6SummaryJSON"
   "kritix-ai/scripts/mutations/playwright_broken_locator.patch|go test -tags integration -count=1 ./pkg/triage/... -run TestIntegration_PlaywrightExportAndVanillaExecution"
@@ -30,7 +32,7 @@ MUTATIONS=(
   "kritix-ai/scripts/mutations/kill_switch_ignore.patch|go test -count=1 ./pkg/server/... -run TestRateLimiterAndKillSwitch"
 )
 
-ROUND="${1:-7}"
+ROUND="${1:-8}"
 EVIDENCE_DIR="${GIT_ROOT}/.dev/kritix-ai/evidence/round${ROUND}/mutations"
 mkdir -p "${EVIDENCE_DIR}"
 
@@ -89,6 +91,26 @@ for entry in "${MUTATIONS[@]}"; do
   echo "[2/4] Applying deliberate product code mutation..."
   git -C "${GIT_ROOT}" apply "${full_patch}"
 
+  # Step 2.5: Verify clean compilation and vet under mutation (R8-4)
+  echo "[2.5/4] Verifying package compiles and vets cleanly under mutation (R8-4)..."
+  set +e
+  BUILD_OUT=$(go build ./... 2>&1 && go vet ./... 2>&1 && go vet -tags integration ./... 2>&1)
+  BUILD_EXIT_CODE=$?
+  set -e
+  echo "" >> "${log_file}"
+  echo "=== Compile & Vet Output Under Mutation ===" >> "${log_file}"
+  echo "${BUILD_OUT}" >> "${log_file}"
+
+  if [ ${BUILD_EXIT_CODE} -ne 0 ]; then
+    echo "CRITICAL FAILURE: Mutation ${rel_patch} caused compilation or vet failure!"
+    echo "A mutation counts only if the package compiles and vets cleanly (no build failure or dead code)."
+    echo "MUTATION_RESULT: INVALID_BUILD_FAILURE (build/vet exit code ${BUILD_EXIT_CODE})" >> "${log_file}"
+    git -C "${GIT_ROOT}" apply -R "${full_patch}"
+    exit 1
+  fi
+  echo "      => COMPILE & VET CLEAN UNDER MUTATION (exit code 0)"
+  echo "BUILD_RESULT: CLEAN (exit code 0)" >> "${log_file}"
+
   # Step 3: Run target test and expect failure
   echo "[3/4] Running target test under mutation (MUST GO RED)..."
   set +e
@@ -110,8 +132,21 @@ for entry in "${MUTATIONS[@]}"; do
     exit 1
   fi
 
-  echo "      => RED (Successfully failed as expected with exit code ${TEST_EXIT_CODE})"
-  echo "MUTATION_RESULT: PROVEN_RED (exit code ${TEST_EXIT_CODE})" >> "${log_file}"
+  # Verify assertion failure signature
+  if ! echo "${MUT_OUT}" | grep -E "(--- FAIL:|FAIL:)" >/dev/null; then
+    echo "CRITICAL FAILURE: Mutation ${rel_patch} did not produce assertion failure signature!"
+    echo "MUTATION_RESULT: INVALID_FAILURE_SIGNATURE" >> "${log_file}"
+    exit 1
+  fi
+
+  if echo "${MUT_OUT}" | grep -E "(\[build failed\]|panic on setup)" >/dev/null; then
+    echo "CRITICAL FAILURE: Mutation ${rel_patch} failed with build error or setup panic!"
+    echo "MUTATION_RESULT: INVALID_SETUP_FAILURE" >> "${log_file}"
+    exit 1
+  fi
+
+  echo "      => RED (Successfully failed on assertion with exit code ${TEST_EXIT_CODE})"
+  echo "MUTATION_RESULT: PROVEN_RED (assertion failure signature verified; exit code ${TEST_EXIT_CODE})" >> "${log_file}"
   PASSED_MUTATIONS=$((PASSED_MUTATIONS + 1))
 done
 

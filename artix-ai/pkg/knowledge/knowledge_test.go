@@ -2,10 +2,12 @@ package knowledge
 
 import (
 	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
-	"artix/pkg/coder"
+	"artix/pkg/policy"
 	"artix/pkg/spec"
 )
 
@@ -71,12 +73,12 @@ func TestLearningExtractor_ExtractFromConvergence(t *testing.T) {
 		TestCommands: []string{"go test -v ./..."},
 	}
 
-	loopResult := &coder.LoopResult{
+	convInfo := ConvergenceInfo{
 		Success:   true,
 		RoundsRun: 3, // Multi-round convergence
 	}
 
-	ki, err := extractor.ExtractFromConvergence(storySpec, loopResult)
+	ki, err := extractor.ExtractFromConvergence(storySpec, convInfo)
 	if err != nil {
 		t.Fatalf("failed to extract knowledge item: %v", err)
 	}
@@ -313,4 +315,179 @@ func TestRuleConflictDetection(t *testing.T) {
 		t.Errorf("did not expect conflict between sqlite and coroutine rules")
 	}
 }
+
+func TestR13_6_KnowledgeStore_EnterpriseMode_ViaPolicyIsEnterprise(t *testing.T) {
+	policy.EnforceSignedPolicy()
+	defer func() {
+		policy.RequireSignedPolicyFlag = "false"
+		policy.ResetCachedPolicy()
+	}()
+	policy.ResetCachedPolicy()
+
+	t.Setenv("ARTIX_ENTERPRISE", "")
+	t.Setenv("KRITIX_ENTERPRISE", "")
+
+	if !policy.IsEnterprise() {
+		t.Fatalf("policy.IsEnterprise() must be true when EnforceSignedPolicy() is active")
+	}
+
+	tempDir := t.TempDir()
+	store := NewStore(tempDir)
+
+	if !store.IsEnterpriseMode() {
+		t.Errorf("R13-6 VIOLATION: NewStore must have enterpriseMode=true when policy.IsEnterprise() is true")
+	}
+	if store.globalDir != "" {
+		t.Errorf("R13-6 VIOLATION: NewStore must disable globalDir when policy.IsEnterprise() is true, got: %q", store.globalDir)
+	}
+}
+
+func TestKnowledgeStore_SaveConditional_OnlyOnModifications(t *testing.T) {
+	tempDir := t.TempDir()
+	store := NewStore(tempDir)
+
+	ki := &KnowledgeItem{
+		ID:           "ki-save-cond-01",
+		Title:        "Conditional Save Test",
+		Category:     CategoryDebugging,
+		Context:      "Testing conditional persistence",
+		Breakthrough: "Only write to disk when contents change",
+		SessionCount: 0,
+		CreatedAt:    time.Now().Truncate(time.Second),
+	}
+
+	if err := store.Save(ki); err != nil {
+		t.Fatalf("failed initial save: %v", err)
+	}
+
+	targetFile := filepath.Join(tempDir, ".artix", "knowledge", "ki-save-cond-01.json")
+	fi1, err := os.Stat(targetFile)
+	if err != nil {
+		t.Fatalf("failed to stat file: %v", err)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	// Save again with identical item: must NOT rewrite or update mtime
+	if err := store.Save(ki); err != nil {
+		t.Fatalf("failed second save: %v", err)
+	}
+
+	fi2, err := os.Stat(targetFile)
+	if err != nil {
+		t.Fatalf("failed to stat file after second save: %v", err)
+	}
+
+	if !fi1.ModTime().Equal(fi2.ModTime()) {
+		t.Errorf("kStore.Save was not conditional: ModTime changed without modifications (before: %v, after: %v)",
+			fi1.ModTime(), fi2.ModTime())
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	// Modify item: must trigger write and update mtime
+	ki.Breakthrough = "Changed breakthrough payload"
+	if err := store.Save(ki); err != nil {
+		t.Fatalf("failed third save: %v", err)
+	}
+
+	fi3, err := os.Stat(targetFile)
+	if err != nil {
+		t.Fatalf("failed to stat file after third save: %v", err)
+	}
+
+	if !fi3.ModTime().After(fi1.ModTime()) {
+		t.Errorf("expected ModTime to advance after actual modification, got %v <= %v", fi3.ModTime(), fi1.ModTime())
+	}
+}
+
+func TestKnowledgeStore_CompareAndSwapSessionCount(t *testing.T) {
+	tempDir := t.TempDir()
+	store := NewStore(tempDir)
+
+	ki := &KnowledgeItem{
+		ID:           "ki-cas-test-01",
+		Title:        "CAS Test",
+		Category:     CategoryDebugging,
+		SessionCount: 3,
+		CreatedAt:    time.Now(),
+	}
+
+	if err := store.Save(ki); err != nil {
+		t.Fatalf("failed initial save: %v", err)
+	}
+
+	// CAS with incorrect expected count should fail and not change value
+	ok, err := store.CompareAndSwapSessionCount("ki-cas-test-01", 2, 4)
+	if err != nil {
+		t.Fatalf("unexpected CAS error: %v", err)
+	}
+	if ok {
+		t.Errorf("expected CAS to fail when expected count did not match")
+	}
+
+	reloaded, _ := store.Get("ki-cas-test-01")
+	if reloaded.SessionCount != 3 {
+		t.Errorf("expected session count to remain 3 after failed CAS, got %d", reloaded.SessionCount)
+	}
+
+	// CAS with matching expected count should succeed
+	ok, err = store.CompareAndSwapSessionCount("ki-cas-test-01", 3, 4)
+	if err != nil {
+		t.Fatalf("unexpected CAS error: %v", err)
+	}
+	if !ok {
+		t.Errorf("expected CAS to succeed when expected count matched")
+	}
+
+	reloaded, _ = store.Get("ki-cas-test-01")
+	if reloaded.SessionCount != 4 {
+		t.Errorf("expected session count to update to 4, got %d", reloaded.SessionCount)
+	}
+}
+
+func TestKnowledgeStore_ConcurrentSessionCountIncrement_CAS(t *testing.T) {
+	tempDir := t.TempDir()
+	store := NewStore(tempDir)
+
+	ki := &KnowledgeItem{
+		ID:           "ki-concurrent-inc-01",
+		Title:        "Concurrent Inc Test",
+		Category:     CategoryDebugging,
+		SessionCount: 0,
+		CreatedAt:    time.Now(),
+	}
+	if err := store.Save(ki); err != nil {
+		t.Fatalf("failed to save: %v", err)
+	}
+
+	const numWorkers = 20
+	var wg sync.WaitGroup
+	wg.Add(numWorkers)
+
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			defer wg.Done()
+			workerStore := NewStore(tempDir)
+			newCount, err := workerStore.IncrementSessionCount("ki-concurrent-inc-01")
+			if err != nil {
+				t.Errorf("increment failed: %v", err)
+			}
+			if newCount <= 0 {
+				t.Errorf("expected positive count from increment, got %d", newCount)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	finalKI, err := store.Get("ki-concurrent-inc-01")
+	if err != nil {
+		t.Fatalf("failed to get item: %v", err)
+	}
+	if finalKI.SessionCount != numWorkers {
+		t.Fatalf("expected SessionCount to be %d after %d concurrent increments, got %d", numWorkers, numWorkers, finalKI.SessionCount)
+	}
+}
+
 

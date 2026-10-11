@@ -26,6 +26,7 @@ const (
 type ReviewVerdict struct {
 	Status             ReviewStatus `json:"status"` // "approved", "rejected", "unreviewed"
 	Approved           bool         `json:"approved"`
+	ScanMode           string       `json:"scanMode,omitempty"`
 	Summary            string       `json:"summary"`
 	BlockingIssues     []string     `json:"blockingIssues"`
 	Warnings           []string     `json:"warnings"`
@@ -85,19 +86,35 @@ type ReviewContext struct {
 	Ctx              context.Context
 	Criteria         []string
 	WorkspaceDir     string
-	TestCountBefore  int
-	TestCountAfter   int
-	CoverageBefore   float64
-	CoverageAfter    float64
+	TestCountBefore          int
+	TestCountAfter           int
+	CoverageBefore           float64
+	CoverageAfter            float64
+	RequiresTestGates        bool
+	SemanticRunnerConfigured bool
+	SemanticRunnerExecuted   bool
+}
+
+func determineScanMode(diff string) string {
+	touched := extractTouchedFiles(diff)
+	for _, f := range touched {
+		ext := strings.ToLower(filepath.Ext(f))
+		if ext == ".kt" || ext == ".swift" || ext == ".py" || ext == ".ts" || ext == ".js" || ext == ".java" || ext == ".rb" || ext == ".sh" {
+			return "heuristic"
+		}
+	}
+	return "diff-literal | AST"
 }
 
 // Evaluate performs deterministic pre-filtering (tests, diff, taboos, static analyzers) and
 // runs the model-backed Critic against security and correctness rubrics.
 // If no model is configured or reachable, it returns StatusUnreviewed with Approved=false.
 func (r *AdversarialReviewer) Evaluate(ctx *ReviewContext) *ReviewVerdict {
+	scanMode := determineScanMode(ctx.Diff)
 	verdict := &ReviewVerdict{
 		Status:         StatusApproved,
 		Approved:       true,
+		ScanMode:       scanMode,
 		BlockingIssues: make([]string, 0),
 		Warnings:       make([]string, 0),
 	}
@@ -139,8 +156,12 @@ func (r *AdversarialReviewer) Evaluate(ctx *ReviewContext) *ReviewVerdict {
 	}
 
 	// 2bb. Deterministic Pre-Filter: Disjoint Model Families Enforcement
-	if pol.Reviewer.EnforceDisjointModelFamilies && r.critic != nil {
-		if r.coderFamily != "" && r.criticFamily != "" && strings.EqualFold(r.coderFamily, r.criticFamily) {
+	if pol.IsDisjointModelFamiliesEnforced() && r.critic != nil {
+		if r.coderFamily == "" || r.criticFamily == "" {
+			verdict.Approved = false
+			verdict.Status = StatusRejected
+			verdict.BlockingIssues = append(verdict.BlockingIssues, fmt.Sprintf("reviewer policy violation: model families must be explicitly configured (coder=%q, critic=%q); disjoint model families required", r.coderFamily, r.criticFamily))
+		} else if strings.EqualFold(r.coderFamily, r.criticFamily) {
 			verdict.Approved = false
 			verdict.Status = StatusRejected
 			verdict.BlockingIssues = append(verdict.BlockingIssues, fmt.Sprintf("reviewer policy violation: critic model family %q matches coder family %q (disjoint model families required)", r.criticFamily, r.coderFamily))
@@ -156,15 +177,24 @@ func (r *AdversarialReviewer) Evaluate(ctx *ReviewContext) *ReviewVerdict {
 	}
 
 	// 2cc. Deterministic Pre-Filter: Test Count & Coverage Delta Gates
+	if ctx.RequiresTestGates {
+		if ctx.TestCountBefore == 0 && ctx.TestCountAfter == 0 {
+			verdict.Approved = false
+			verdict.Status = StatusRejected
+			verdict.BlockingIssues = append(verdict.BlockingIssues, "test integrity gate violation: new implementation requires test coverage for acceptance criteria (found 0 tests); fail-closed")
+		}
+	}
 	if ctx.TestCountBefore > 0 && ctx.TestCountAfter < ctx.TestCountBefore {
 		verdict.Approved = false
 		verdict.Status = StatusRejected
 		verdict.BlockingIssues = append(verdict.BlockingIssues, fmt.Sprintf("test integrity violation: test count decreased from %d to %d (test elimination is strictly forbidden)", ctx.TestCountBefore, ctx.TestCountAfter))
 	}
-	if ctx.CoverageBefore > 0 && ctx.CoverageAfter > 0 && ctx.CoverageAfter < ctx.CoverageBefore-0.01 {
-		verdict.Approved = false
-		verdict.Status = StatusRejected
-		verdict.BlockingIssues = append(verdict.BlockingIssues, fmt.Sprintf("test coverage gate violation: test coverage decreased from %.2f%% to %.2f%%", ctx.CoverageBefore*100, ctx.CoverageAfter*100))
+	if ctx.CoverageBefore > 0 {
+		if ctx.CoverageAfter < ctx.CoverageBefore-0.0001 {
+			verdict.Approved = false
+			verdict.Status = StatusRejected
+			verdict.BlockingIssues = append(verdict.BlockingIssues, fmt.Sprintf("test coverage gate violation: test coverage decreased from %.2f%% to %.2f%%", ctx.CoverageBefore*100, ctx.CoverageAfter*100))
+		}
 	}
 
 	// 2d. Deterministic Pre-Filter: Script/Makefile Indirection Detection
@@ -192,22 +222,6 @@ func (r *AdversarialReviewer) Evaluate(ctx *ReviewContext) *ReviewVerdict {
 		}
 	}
 
-	// 2f. Deterministic Pre-Filter: Fail Closed for Non-Go Languages without Semantic Runner
-	hasNonGo := false
-	for _, tf := range touchedFiles {
-		ext := filepath.Ext(tf)
-		if ext == ".kt" || ext == ".swift" || ext == ".ts" || ext == ".py" || ext == ".js" {
-			hasNonGo = true
-			break
-		}
-	}
-	if hasNonGo && len(ctx.AnalyzerFindings) == 0 {
-		verdict.Approved = false
-		verdict.Status = StatusUnreviewed
-		verdict.BlockingIssues = append(verdict.BlockingIssues, "UNREVIEWED: diff touches non-Go files (.kt, .swift, .ts, .py) and no semantic rule runner (Konsist/Detekt/Semgrep/SwiftLint) is configured; fail-closed")
-		return verdict
-	}
-
 	// 3. Deterministic Pre-Filter: Static Analyzer Findings
 	for _, f := range ctx.AnalyzerFindings {
 		if f.Severity == "ERROR" {
@@ -232,6 +246,51 @@ func (r *AdversarialReviewer) Evaluate(ctx *ReviewContext) *ReviewVerdict {
 		verdict.Approved = false
 		verdict.Status = StatusRejected
 		verdict.BlockingIssues = append(verdict.BlockingIssues, tabooViolations...)
+	}
+
+	// 4b. Review Escalation: Modifications to go.work, testdata/, or //go:generate directives must escalate to unreviewed (human review required)
+	for _, tf := range touchedFiles {
+		base := filepath.Base(tf)
+		if base == "go.work" || base == "go.work.sum" || strings.Contains(tf, "testdata/") || strings.HasPrefix(tf, "testdata/") {
+			if verdict.Status != StatusRejected {
+				verdict.Approved = false
+				verdict.Status = StatusUnreviewed
+				verdict.BlockingIssues = append(verdict.BlockingIssues, fmt.Sprintf("UNREVIEWED: review escalation required for modification to baseline/governance file %q; fail-closed for human review", tf))
+				return verdict
+			}
+		}
+	}
+	if strings.Contains(ctx.Diff, "//go:generate") {
+		if verdict.Status != StatusRejected {
+			verdict.Approved = false
+			verdict.Status = StatusUnreviewed
+			verdict.BlockingIssues = append(verdict.BlockingIssues, "UNREVIEWED: review escalation required for //go:generate directive; fail-closed for human review")
+			return verdict
+		}
+	}
+
+	// 5. Deterministic Pre-Filter: Fail Closed for Non-Go Languages without Semantic Runner
+	hasNonGo := false
+	for _, tf := range touchedFiles {
+		ext := strings.ToLower(filepath.Ext(tf))
+		if ext == ".go" {
+			continue
+		}
+		if !isDocsOnlyAllowedFile(tf, ctx.Diff) {
+			hasNonGo = true
+			break
+		}
+	}
+	if hasNonGo {
+		hasRunner := ctx.SemanticRunnerConfigured && ctx.SemanticRunnerExecuted
+		if !hasRunner {
+			if verdict.Status != StatusRejected {
+				verdict.Approved = false
+				verdict.Status = StatusUnreviewed
+				verdict.BlockingIssues = append(verdict.BlockingIssues, "UNREVIEWED: diff touches non-Go / non-allowlisted files and no semantic rule runner (Konsist/Detekt/Semgrep/SwiftLint) is configured and executed; fail-closed")
+				return verdict
+			}
+		}
 	}
 
 	// If pre-filter failed, reject immediately without calling model
@@ -265,7 +324,7 @@ func (r *AdversarialReviewer) Evaluate(ctx *ReviewContext) *ReviewVerdict {
 
 	if verdict.Approved {
 		verdict.Status = StatusApproved
-		verdict.Summary = fmt.Sprintf("Approved by rule-based pre-filter (%d test(s) passed, diff non-empty, no taboos violated) and model review against security/correctness rubric.", len(ctx.TestResults))
+		verdict.Summary = fmt.Sprintf("[scan mode: %s] Approved by rule-based pre-filter (%d test(s) passed, diff non-empty, no taboos violated) and model review against security/correctness rubric.", verdict.ScanMode, len(ctx.TestResults))
 	} else {
 		verdict.Status = StatusRejected
 		var sb strings.Builder
@@ -273,11 +332,34 @@ func (r *AdversarialReviewer) Evaluate(ctx *ReviewContext) *ReviewVerdict {
 		for i, issue := range verdict.BlockingIssues {
 			fmt.Fprintf(&sb, "%d. %s\n", i+1, issue)
 		}
-		verdict.Summary = fmt.Sprintf("Review rejected with %d blocking issue(s).", len(verdict.BlockingIssues))
+		verdict.Summary = fmt.Sprintf("[scan mode: %s] Review rejected with %d blocking issue(s).", verdict.ScanMode, len(verdict.BlockingIssues))
 		verdict.ActionableFeedback = sb.String()
 	}
 
 	return verdict
+}
+
+func isDocsOnlyAllowedFile(path string, diff string) bool {
+	tfLower := strings.ToLower(path)
+	ext := strings.ToLower(filepath.Ext(tfLower))
+
+	// Image files
+	if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".svg" || ext == ".ico" || ext == ".webp" {
+		return true
+	}
+	// Plain text files
+	if ext == ".txt" {
+		return true
+	}
+	// Markdown files (if no taboo attack payload or script commands present)
+	if ext == ".md" {
+		diffLower := strings.ToLower(diff)
+		if strings.Contains(diffLower, "curl ") || strings.Contains(diffLower, "wget ") || strings.Contains(diffLower, "$github_token") || strings.Contains(diffLower, "aws_") || strings.Contains(diffLower, "/etc/") {
+			return false
+		}
+		return true
+	}
+	return false
 }
 
 func isScriptOrBuildFile(path string) bool {

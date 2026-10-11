@@ -187,40 +187,55 @@ func (a *Auditor) CheckProvenance() ([]Violation, error) {
 	if headCommit != "" && commit != "" {
 		matchesExact := strings.HasPrefix(headCommit, commit) || strings.HasPrefix(commit, headCommit)
 		if !matchesExact {
-			// Check if only evidence/summary files have changed between the recorded commit and HEAD
-			diffCmd := exec.Command("git", "diff", "--name-only", commit, "HEAD")
-			diffCmd.Dir = a.KritixDir
-			diffOut, err := diffCmd.Output()
-			if err != nil {
+			// 1. Verify that recorded commit is an ancestor of HEAD
+			ancestorCmd := exec.Command("git", "-C", a.KritixDir, "merge-base", "--is-ancestor", commit, "HEAD")
+			if err := ancestorCmd.Run(); err != nil {
 				violations = append(violations, Violation{
 					Gate:        "Provenance",
 					File:        "benchmark.json",
-					Description: fmt.Sprintf("stale git commit in benchmark.json: recorded %q vs actual HEAD %q (git diff error: %v)", commit, headCommit, err),
+					Description: fmt.Sprintf("stale git commit in benchmark.json: recorded %q is not an ancestor of HEAD %q", commit, headCommit),
 				})
 			} else {
-				diffFiles := strings.Split(strings.TrimSpace(string(diffOut)), "\n")
-				onlyEvidenceDiff := true
-				var nonEvidenceFiles []string
-				for _, df := range diffFiles {
-					df = strings.TrimSpace(df)
-					if df == "" {
-						continue
-					}
-					isEvidence := strings.HasSuffix(df, "benchmark.json") ||
-						strings.Contains(df, "evidence/") ||
-						strings.Contains(df, ".dev/") ||
-						strings.Contains(df, "capture_log")
-					if !isEvidence {
-						onlyEvidenceDiff = false
-						nonEvidenceFiles = append(nonEvidenceFiles, df)
-					}
+				// 2. Scope the diff to kritix-ai/** (path-limited diff)
+				var diffCmd *exec.Cmd
+				if a.RepoRoot != "" && a.RepoRoot != a.KritixDir {
+					diffCmd = exec.Command("git", "-C", a.RepoRoot, "diff", "--name-only", commit+"..HEAD", "--", "kritix-ai/")
+				} else {
+					diffCmd = exec.Command("git", "-C", a.KritixDir, "diff", "--name-only", commit+"..HEAD", "--", ".")
 				}
-				if !onlyEvidenceDiff {
+
+				diffOut, err := diffCmd.Output()
+				if err != nil {
 					violations = append(violations, Violation{
 						Gate:        "Provenance",
 						File:        "benchmark.json",
-						Description: fmt.Sprintf("stale git commit in benchmark.json: recorded %q vs HEAD %q; non-evidence files modified: %v", commit, headCommit, nonEvidenceFiles),
+						Description: fmt.Sprintf("stale git commit in benchmark.json: recorded %q vs actual HEAD %q (git diff error: %v)", commit, headCommit, err),
 					})
+				} else {
+					diffFiles := strings.Split(strings.TrimSpace(string(diffOut)), "\n")
+					onlyEvidenceDiff := true
+					var nonEvidenceFiles []string
+					for _, df := range diffFiles {
+						df = strings.TrimSpace(df)
+						if df == "" {
+							continue
+						}
+						isEvidence := strings.HasSuffix(df, "benchmark.json") ||
+							strings.Contains(df, "evidence/") ||
+							strings.Contains(df, ".dev/") ||
+							strings.Contains(df, "capture_log")
+						if !isEvidence {
+							onlyEvidenceDiff = false
+							nonEvidenceFiles = append(nonEvidenceFiles, df)
+						}
+					}
+					if !onlyEvidenceDiff {
+						violations = append(violations, Violation{
+							Gate:        "Provenance",
+							File:        "benchmark.json",
+							Description: fmt.Sprintf("stale git commit in benchmark.json: recorded %q vs HEAD %q; non-evidence files modified: %v", commit, headCommit, nonEvidenceFiles),
+						})
+					}
 				}
 			}
 		}

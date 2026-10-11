@@ -67,3 +67,40 @@ func TestSandboxParentContextCancel(t *testing.T) {
 		t.Fatalf("cancel not honored: %+v after %v", res, time.Since(start))
 	}
 }
+
+func TestSandbox_ChildEnvAllowlist_StripsSecretsAndCanaries(t *testing.T) {
+	t.Setenv("ARTIX_ENTERPRISE_KEY", "canary-enterprise-signing-key-12345")
+	t.Setenv("GITHUB_TOKEN", "canary-github-token-98765")
+	t.Setenv("FORGE_SECRET", "canary-forge-secret-abcde")
+	t.Setenv("AUDIT_TOKEN", "canary-audit-token-xyz")
+	t.Setenv("OPENAI_API_KEY", "canary-openai-key-999")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "canary-aws-secret-444")
+	t.Setenv("MY_ALLOWLISTED_LANG", "C.UTF-8")
+
+	ws := t.TempDir()
+	box := NewSandbox(ws)
+	res := box.Run(context.Background(), "env", nil)
+	if !res.Success() {
+		t.Fatalf("command failed: %+v", res)
+	}
+
+	for _, canary := range []string{
+		"canary-enterprise-signing-key-12345",
+		"canary-github-token-98765",
+		"canary-forge-secret-abcde",
+		"canary-audit-token-xyz",
+		"canary-openai-key-999",
+		"canary-aws-secret-444",
+		"ARTIX_ENTERPRISE_KEY",
+		"GITHUB_TOKEN",
+		"FORGE_SECRET",
+		"AUDIT_TOKEN",
+		"OPENAI_API_KEY",
+		"AWS_SECRET_ACCESS_KEY",
+	} {
+		if strings.Contains(res.Stdout, canary) {
+			t.Errorf("SECURITY LEAK: child process env contains sensitive canary/key %q", canary)
+		}
+	}
+}
+

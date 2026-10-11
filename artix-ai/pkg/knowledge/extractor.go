@@ -5,9 +5,14 @@ import (
 	"strings"
 	"time"
 
-	"artix/pkg/coder"
 	"artix/pkg/spec"
 )
+
+// ConvergenceInfo contains convergence summary metrics for learning extraction.
+type ConvergenceInfo struct {
+	Success   bool
+	RoundsRun int
+}
 
 // LearningExtractor synthesizes institutional knowledge from converged coding sessions.
 type LearningExtractor struct {
@@ -21,8 +26,8 @@ func NewLearningExtractor(store *Store) *LearningExtractor {
 
 // ExtractFromConvergence inspects a completed coder loop result.
 // If the loop required 2 or more rounds to resolve test/reviewer failures, it creates a Knowledge Item.
-func (le *LearningExtractor) ExtractFromConvergence(s *spec.StorySpec, res *coder.LoopResult) (*KnowledgeItem, error) {
-	if res == nil || !res.Success {
+func (le *LearningExtractor) ExtractFromConvergence(s *spec.StorySpec, res ConvergenceInfo) (*KnowledgeItem, error) {
+	if !res.Success {
 		return nil, fmt.Errorf("cannot extract learning from uncompleted run")
 	}
 

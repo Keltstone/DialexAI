@@ -161,14 +161,19 @@ func ParseFromMarkdown(content string) (*StorySpec, error) {
 			}
 		}
 
-		// Parse Test Commands Code Block
-		if strings.HasPrefix(currentSection, "## 5.") {
+		// Parse Test Commands Code Block or Bullet List
+		if strings.HasPrefix(currentSection, "## 5.") || strings.Contains(strings.ToLower(currentSection), "verification") || strings.Contains(strings.ToLower(currentSection), "test") {
 			if strings.HasPrefix(line, "```") {
 				inCodeBlock = !inCodeBlock
 				continue
 			}
 			if inCodeBlock && line != "" {
 				spec.TestCommands = append(spec.TestCommands, line)
+			} else if !inCodeBlock && strings.HasPrefix(line, "- ") {
+				cmd := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+				if cmd != "" {
+					spec.TestCommands = append(spec.TestCommands, cmd)
+				}
 			}
 		}
 	}

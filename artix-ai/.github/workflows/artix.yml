@@ -3,11 +3,13 @@ name: Artix CI
 on:
   push:
     branches: [ "**" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "**" ]
 
 jobs:
   test:
+    name: Build, Vet, Test and Enterprise Release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,20 +17,43 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: 'go.mod'
+          check-latest: true
 
-      - name: Build and Vet
-        run: |
-          go build ./...
-          go vet ./...
+      - name: Go Build All
+        run: go build ./...
 
-      - name: Enterprise Build
-        run: |
-          go build -ldflags "-X artix/pkg/policy.RequireSignedPolicyFlag=true" -o bin/artix-enterprise ./cli
+      - name: Go Vet
+        run: go vet ./...
 
       - name: Run Tests with Race Detector
+        run: go test -race -count=1 ./...
+
+      - name: Enterprise Binary Builds
         run: |
-          go test -race -count=1 ./...
+          mkdir -p bin
+          TRUSTED_PUBKEY="${{ secrets.ARTIX_POLICY_COMPILED_PUBKEY }}"
+          if [ -z "$TRUSTED_PUBKEY" ]; then
+            echo "ERROR: ARTIX_POLICY_COMPILED_PUBKEY secret is required for enterprise build but is unset" >&2
+            exit 1
+          fi
+          go build -ldflags "-X artix/pkg/policy.RequireSignedPolicyFlag=true -X artix/pkg/policy.CompiledTrustedPublicKeyHex=${TRUSTED_PUBKEY} -s -w" -o bin/artix ./cli
+          go build -ldflags "-X artix/pkg/policy.RequireSignedPolicyFlag=true -X artix/pkg/policy.CompiledTrustedPublicKeyHex=${TRUSTED_PUBKEY} -s -w" -o bin/artixd ./cmd/artixd
+
+      - name: Compute Checksums
+        run: |
+          cd bin
+          sha256sum artix artixd > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload Binaries and Checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-binaries
+          path: |
+            bin/artix
+            bin/artixd
+            bin/SHA256SUMS
 
   plugins:
     name: Build IDE Plugins
@@ -44,8 +69,9 @@ jobs:
       - name: Build VS Code Plugin (.vsix)
         working-directory: plugins/vscode
         run: |
-          npm ci
-          npx @vscode/vsce package --no-git-tag-version
+          npm ci || npm install
+          npm run build
+          npx @vscode/vsce package --no-git-tag-version --allow-missing-repository
 
       - name: Set up JDK for IntelliJ Plugin
         uses: actions/setup-java@v4
@@ -56,8 +82,8 @@ jobs:
       - name: Build IntelliJ Plugin (.zip)
         working-directory: plugins/intellij
         run: |
-          chmod +x ../../gradlew || true
-          ../../gradlew buildPlugin --no-daemon
+          chmod +x ./gradlew || true
+          ./gradlew buildPlugin --no-daemon
 
       - name: Upload Plugin Artifacts
         uses: actions/upload-artifact@v4
@@ -66,3 +92,4 @@ jobs:
           path: |
             plugins/vscode/*.vsix
             plugins/intellij/build/distributions/*.zip
+

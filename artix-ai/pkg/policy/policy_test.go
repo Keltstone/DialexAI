@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -300,51 +301,31 @@ func TestValidateForgeApproval_EnforcesFourEyes(t *testing.T) {
 	}
 
 	// 2. Empty approver -> error
-	recEmpty := &PRApproval{
-		ApproverUsername: "",
-		AuthorUsername:   "artix-agent",
-		State:            "APPROVED",
-	}
+	recEmpty := MintVerifiedForgeApprovalForTest("", "artix-agent", "APPROVED", "sha1", "forge")
 	if err := ValidateForgeApproval(recEmpty, "artix-agent", "artix-agent"); err == nil {
 		t.Errorf("expected error for empty approver")
 	}
 
 	// 3. Status not APPROVED -> error
-	recPending := &PRApproval{
-		ApproverUsername: "human-lead",
-		AuthorUsername:   "artix-agent",
-		State:            "CHANGES_REQUESTED",
-	}
+	recPending := MintVerifiedForgeApprovalForTest("human-lead", "artix-agent", "CHANGES_REQUESTED", "sha1", "forge")
 	if err := ValidateForgeApproval(recPending, "artix-agent", "artix-agent"); err == nil {
 		t.Errorf("expected error for non-approved review state")
 	}
 
 	// 4. Author self-approval -> error
-	recSelf := &PRApproval{
-		ApproverUsername: "alice",
-		AuthorUsername:   "alice",
-		State:            "APPROVED",
-	}
+	recSelf := MintVerifiedForgeApprovalForTest("alice", "alice", "APPROVED", "sha1", "forge")
 	if err := ValidateForgeApproval(recSelf, "alice", "artix-agent"); err == nil {
 		t.Errorf("expected error for author self-approval")
 	}
 
 	// 5. Bot approval -> error
-	recBot := &PRApproval{
-		ApproverUsername: "dependabot[bot]",
-		AuthorUsername:   "artix-agent",
-		State:            "APPROVED",
-	}
+	recBot := MintVerifiedForgeApprovalForTest("dependabot[bot]", "artix-agent", "APPROVED", "sha1", "forge")
 	if err := ValidateForgeApproval(recBot, "artix-agent", "artix-agent"); err == nil {
 		t.Errorf("expected error for bot approver")
 	}
 
 	// 6. Valid human review -> success
-	recValid := &PRApproval{
-		ApproverUsername: "security-lead",
-		AuthorUsername:   "artix-agent",
-		State:            "APPROVED",
-	}
+	recValid := MintVerifiedForgeApprovalForTest("security-lead", "artix-agent", "APPROVED", "sha1", "forge")
 	if err := ValidateForgeApproval(recValid, "artix-agent", "artix-agent"); err != nil {
 		t.Errorf("unexpected error for valid human approval: %v", err)
 	}
@@ -381,5 +362,169 @@ func TestValidateTestCommands_RejectsUnsignedCommandsInEnterprise(t *testing.T) 
 		t.Errorf("expected unapproved test command to be blocked in enterprise mode")
 	}
 }
+
+func TestBoard1_SignedPolicyAutonomyGate_FailClosed(t *testing.T) {
+	ResetCache()
+	defer ResetCache()
+
+	tempDir := t.TempDir()
+	signingKey := "board1-test-signing-key-32bytes!!"
+	SetTrustedKey("corp-board1", signingKey)
+
+	// 1. Absent signature -> VerifyAutonomyGate must fail closed
+	unsignedFile := filepath.Join(tempDir, "unsigned_policy.json")
+	_ = os.WriteFile(unsignedFile, []byte(`{"allowAutonomous": true, "enterpriseMode": true}`), 0644)
+	SetDefaultPolicyPath(unsignedFile)
+	ResetCache()
+
+	if IsAutonomousAllowed() {
+		t.Errorf("IsAutonomousAllowed must return false for unsigned policy file")
+	}
+	if err := VerifyAutonomyGate(); err == nil {
+		t.Errorf("VerifyAutonomyGate must fail closed for unsigned policy file, got nil")
+	}
+
+	// 2. Env var alone cannot grant autonomy without signed policy (env vars demoted to path only)
+	t.Setenv("ARTIX_ALLOW_AUTONOMOUS", "1")
+	t.Setenv("ARTIX_ENTERPRISE", "1")
+	ResetCache()
+	if IsAutonomousAllowed() {
+		t.Errorf("ARTIX_ALLOW_AUTONOMOUS=1 must not bypass missing signed policy")
+	}
+	if err := VerifyAutonomyGate(); err == nil {
+		t.Errorf("VerifyAutonomyGate must fail closed despite ARTIX_ALLOW_AUTONOMOUS=1 when policy unsigned")
+	}
+
+	// 3. Expired signed policy -> must fail closed
+	expiredFile := filepath.Join(tempDir, "expired_policy.json")
+	_ = os.WriteFile(expiredFile, []byte(`{
+		"allowAutonomous": true,
+		"enterpriseMode": true,
+		"approverIdentity": "security-council@corp.internal",
+		"expiresAt": "2020-01-01T00:00:00Z"
+	}`), 0644)
+	if err := SignPolicyFile(expiredFile, signingKey); err != nil {
+		t.Fatalf("failed to sign expired policy: %v", err)
+	}
+	SetDefaultPolicyPath(expiredFile)
+	ResetCache()
+
+	if IsAutonomousAllowed() {
+		t.Errorf("IsAutonomousAllowed must return false for expired signed policy")
+	}
+	if err := VerifyAutonomyGate(); err == nil {
+		t.Errorf("VerifyAutonomyGate must fail for expired signed policy")
+	}
+
+	// 4. Valid signed non-expired policy allowing autonomy -> must pass
+	validFile := filepath.Join(tempDir, "valid_policy.json")
+	_ = os.WriteFile(validFile, []byte(`{
+		"allowAutonomous": true,
+		"enterpriseMode": true,
+		"approverIdentity": "security-council@corp.internal",
+		"expiresAt": "2039-12-31T23:59:59Z"
+	}`), 0644)
+	if err := SignPolicyFile(validFile, signingKey); err != nil {
+		t.Fatalf("failed to sign valid policy: %v", err)
+	}
+	SetDefaultPolicyPath(validFile)
+	ResetCache()
+
+	if !IsAutonomousAllowed() {
+		t.Errorf("IsAutonomousAllowed must return true for valid signed policy")
+	}
+	if err := VerifyAutonomyGate(); err != nil {
+		t.Errorf("VerifyAutonomyGate must succeed for valid signed policy, got: %v", err)
+	}
+
+	// 5. PolicyHash must be populated and non-empty
+	p := Active()
+	if p.PolicyHash == "" {
+		t.Errorf("expected non-empty PolicyHash on verified policy")
+	}
+	if GetPolicyHash() != p.PolicyHash {
+		t.Errorf("GetPolicyHash() mismatch: got %s, want %s", GetPolicyHash(), p.PolicyHash)
+	}
+}
+
+func TestRequireSignedPolicy_RejectsUnsignedFileEvenIfRootOwned(t *testing.T) {
+	tempDir := t.TempDir()
+	polFile := filepath.Join(tempDir, "unsigned_policy.json")
+	_ = os.WriteFile(polFile, []byte(`{"enterpriseMode": true, "allowAutonomous": true}`), 0644)
+
+	// Enable RequireSignedPolicyFlag
+	oldFlag := RequireSignedPolicyFlag
+	RequireSignedPolicyFlag = "true"
+	defer func() {
+		RequireSignedPolicyFlag = oldFlag
+		ResetCache()
+	}()
+
+	ResetCache()
+
+	p, err := LoadPolicy(polFile)
+	if err == nil {
+		t.Fatalf("expected LoadPolicy to FAIL for unsigned policy when RequireSignedPolicyFlag is enforced, got policy: %+v", p)
+	}
+	if !strings.Contains(err.Error(), "signed-policy enforcement active") {
+		t.Errorf("expected error to mention signed-policy enforcement active, got: %v", err)
+	}
+}
+
+func TestReleaseWorkflow_NoLiteralKeyAndFailsWhenSecretUnset(t *testing.T) {
+	workflowPaths := []string{
+		filepath.Join("..", "..", ".github", "workflows", "artix.yml"),
+		filepath.Join("..", "..", "artix-ai", ".github", "workflows", "artix.yml"),
+	}
+
+	for _, workflowPath := range workflowPaths {
+		data, err := os.ReadFile(workflowPath)
+		if err != nil {
+			continue
+		}
+		content := string(data)
+
+		// 1. Must NOT contain literal hex fallback keys
+		if strings.Contains(content, "8a6d9536") || strings.Contains(content, "CompiledTrustedPublicKeyHex=8a") {
+			t.Errorf("%s contains hardcoded literal key fallback", workflowPath)
+		}
+
+		// 2. Must reference ARTIX_POLICY_COMPILED_PUBKEY secret
+		if !strings.Contains(content, "ARTIX_POLICY_COMPILED_PUBKEY") {
+			t.Errorf("%s must reference secrets.ARTIX_POLICY_COMPILED_PUBKEY", workflowPath)
+		}
+
+		// 3. Must fail build if secret is unset
+		if !strings.Contains(content, "ARTIX_POLICY_COMPILED_PUBKEY") ||
+			(!strings.Contains(content, "-z \"$POLICY_PUBKEY\"") && !strings.Contains(content, "-z \"$TRUSTED_PUBKEY\"")) {
+			t.Errorf("%s must validate that compiled pubkey is set and fail if empty", workflowPath)
+		}
+	}
+}
+
+func TestEnterpriseBuild_RequiresCompiledPublicKeyInAllEnterpriseBuildSteps(t *testing.T) {
+	workflowPaths := []string{
+		filepath.Join("..", "..", ".github", "workflows", "artix.yml"),
+		filepath.Join("..", "..", "..", ".github", "workflows", "artix.yml"),
+	}
+	for _, workflowPath := range workflowPaths {
+		data, err := os.ReadFile(workflowPath)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(data), "\n")
+		for idx, line := range lines {
+			if strings.Contains(line, "RequireSignedPolicyFlag=true") {
+				if !strings.Contains(line, "CompiledTrustedPublicKeyHex") {
+					t.Errorf("%s line %d sets RequireSignedPolicyFlag=true without CompiledTrustedPublicKeyHex: %s", workflowPath, idx+1, line)
+				}
+			}
+		}
+	}
+}
+
+
+
+
 
 

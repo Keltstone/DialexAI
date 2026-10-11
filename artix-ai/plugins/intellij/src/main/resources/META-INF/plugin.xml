@@ -6,6 +6,7 @@
   <depends>com.intellij.modules.platform</depends>
   <extensions defaultExtensionNs="com.intellij">
     <notificationGroup id="Artix" displayType="BALLOON"/>
+    <toolWindow id="Artix AI" secondary="true" icon="AllIcons.Toolwindows.ToolWindowInspection" anchor="right" factoryClass="ai.artix.ide.ArtixToolWindowFactory"/>
   </extensions>
   <actions>
     <group id="Artix.Menu" text="Artix" popup="true">
@@ -13,6 +14,7 @@
       <action id="Artix.Plan" class="ai.artix.ide.PlanAction" text="Plan Story…"/>
       <action id="Artix.Code" class="ai.artix.ide.CodeAction" text="Code (supervised)"/>
       <action id="Artix.Review" class="ai.artix.ide.ReviewAction" text="Review Working Diff"/>
+      <action id="Artix.ShowDiff" class="ai.artix.ide.ShowDiffAction" text="View Candidate Diff"/>
     </group>
   </actions>
 </idea-plugin>

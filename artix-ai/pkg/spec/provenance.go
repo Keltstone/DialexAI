@@ -8,8 +8,9 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"artix/pkg/policy"
 )
 
 // CouncilMemberProvenance records an individual stakeholder council participant.
@@ -58,7 +59,7 @@ func BuildStoryProvenance(spec *StorySpec, pCtx *PlanningContext, modelProvider,
 		username = "unknown"
 	}
 
-	enterpriseMode := os.Getenv("ARTIX_ENTERPRISE") == "1" || strings.EqualFold(os.Getenv("ARTIX_ENTERPRISE"), "true")
+	enterpriseMode := policy.IsEnterprise()
 
 	method := "deterministic_template"
 	roundCount := len(spec.DeliberationRounds)

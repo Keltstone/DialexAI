@@ -99,7 +99,7 @@ func main() {
 	}
 
 	fmt.Printf("Starting Artix Daemon on %s...\n", *addr)
-	fmt.Printf("Endpoints:\n  - GET  /healthz\n  - POST /webhook/github\n  - POST /webhook/gitlab\n  - GET  /jobs\n")
+	fmt.Printf("Endpoints:\n  - GET  /healthz\n  - GET  /readyz\n  - GET  /metrics\n  - POST /webhook/github\n  - POST /webhook/gitlab\n  - GET  /jobs\n  - GET/POST /tasks\n")
 
 	if err := http.ListenAndServe(*addr, server.Handler()); err != nil {
 		fmt.Fprintf(os.Stderr, "Server fatal error: %v\n", err)

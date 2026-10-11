@@ -2,9 +2,45 @@ package knowledge
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// Provenance captures origin metadata for synthesized knowledge items and rules.
+type Provenance struct {
+	SessionID    string        `json:"sessionId,omitempty"`
+	PRCommentURL string        `json:"prCommentUrl,omitempty"`
+	Author       string        `json:"author,omitempty"`
+	TTL          time.Duration `json:"ttl,omitempty"`
+}
+
+var promptInjectionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(ignore|disregard|forget)\s+(all\s+)?(previous|prior|above)\s+(instructions|prompts|rules|taboos)`),
+	regexp.MustCompile(`(?i)bypass\s+all\s+(rules|taboos|security|safety|restrictions|policies)`),
+	regexp.MustCompile(`(?i)(disable|override|replace|alter)\s+(all\s+)?(safety|taboos|rules|policies|security)`),
+	regexp.MustCompile(`(?i)#\s*system\s+override`),
+	regexp.MustCompile(`(?i)<script[\s\S]*?>[\s\S]*?<\/script>`),
+	regexp.MustCompile(`(?i)<[\s\S]*?>`),
+}
+
+// SanitizePRComment treats reviewer input as untrusted and strips malicious prompt injections, HTML/scripts, and control characters.
+func SanitizePRComment(text string) string {
+	cleaned := text
+	// Remove null bytes and non-printable control characters
+	cleaned = strings.Map(func(r rune) rune {
+		if r == 0 || (r < 32 && r != '\n' && r != '\t' && r != '\r') {
+			return -1
+		}
+		return r
+	}, cleaned)
+
+	for _, pattern := range promptInjectionPatterns {
+		cleaned = pattern.ReplaceAllString(cleaned, "")
+	}
+
+	return strings.TrimSpace(cleaned)
+}
 
 // RuleSynthesizer converts human review comments into structured steering rules.
 type RuleSynthesizer struct{}
@@ -16,12 +52,17 @@ func NewRuleSynthesizer() *RuleSynthesizer {
 
 // SynthesizeFromComment analyzes reviewer text and outputs a structured rule.
 func (rs *RuleSynthesizer) SynthesizeFromComment(comment string) (*SynthesizedRule, error) {
-	trimmed := strings.TrimSpace(comment)
-	if trimmed == "" {
-		return nil, fmt.Errorf("comment cannot be empty")
+	return rs.SynthesizeFromCommentWithProvenance(comment, Provenance{})
+}
+
+// SynthesizeFromCommentWithProvenance analyzes reviewer text with provenance metadata.
+func (rs *RuleSynthesizer) SynthesizeFromCommentWithProvenance(comment string, prov Provenance) (*SynthesizedRule, error) {
+	sanitized := SanitizePRComment(comment)
+	if sanitized == "" {
+		return nil, fmt.Errorf("comment is empty after sanitization")
 	}
 
-	lower := strings.ToLower(trimmed)
+	lower := strings.ToLower(sanitized)
 	isTaboo := strings.Contains(lower, "never") ||
 		strings.Contains(lower, "don't") ||
 		strings.Contains(lower, "do not") ||
@@ -41,21 +82,29 @@ func (rs *RuleSynthesizer) SynthesizeFromComment(comment string) (*SynthesizedRu
 	}
 
 	ruleID := fmt.Sprintf("rule-syn-%d", time.Now().UnixNano()%1000000)
-	name := deriveRuleName(trimmed)
+	name := deriveRuleName(sanitized)
 	now := time.Now()
-	ttl := now.Add(90 * 24 * time.Hour) // 90-day default TTL
+	ttl := 90 * 24 * time.Hour // 90-day default TTL
+	if prov.TTL > 0 {
+		ttl = prov.TTL
+	}
+	expires := now.Add(ttl)
 
 	return &SynthesizedRule{
-		RuleID:      ruleID,
-		Name:        name,
-		IsTaboo:     isTaboo,
-		RuleText:    trimmed,
-		Rationale:   "Synthesized automatically from human code review comment.",
-		TargetRoles: roles,
-		Confidence:  0.80,
-		Status:      RuleStatusProposed, // Defaults to proposed; requires human approval before becoming active
-		CreatedAt:   now,
-		ExpiresAt:   &ttl,
+		RuleID:       ruleID,
+		Name:         name,
+		IsTaboo:      isTaboo,
+		RuleText:     sanitized,
+		Rationale:    "Synthesized automatically from human code review comment.",
+		TargetRoles:  roles,
+		Confidence:   0.80,
+		Status:       RuleStatusProposed, // Defaults to proposed; requires CODEOWNER approval before becoming active
+		SessionID:    prov.SessionID,
+		PRCommentURL: prov.PRCommentURL,
+		Author:       prov.Author,
+		TTL:          ttl,
+		CreatedAt:    now,
+		ExpiresAt:    &expires,
 	}, nil
 }
 

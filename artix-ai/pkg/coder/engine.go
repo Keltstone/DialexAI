@@ -2,8 +2,10 @@ package coder
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
+	"artix/pkg/knowledge"
 	"artix/pkg/persona"
 	"artix/pkg/repo"
 	"artix/pkg/spec"
@@ -15,6 +17,7 @@ import (
 type DomainCoder struct {
 	persona  model.Persona
 	registry *persona.Registry
+	domain   string
 }
 
 // NewDomainCoder creates a DomainCoder for a specific engineering domain persona ID.
@@ -31,6 +34,7 @@ func NewDomainCoder(domainPersonaID string, registry *persona.Registry) (*Domain
 	return &DomainCoder{
 		persona:  p,
 		registry: registry,
+		domain:   domainPersonaID,
 	}, nil
 }
 
@@ -41,15 +45,25 @@ type PromptContext struct {
 	SteeringContext  *steering.PersonaSteeringContext
 	ReviewerFeedback string
 	PriorFailures    []string
+	KnowledgeItems   []knowledge.KnowledgeItem
+}
+
+// CompilePromptForHost builds system and task instructions for a specific host OS.
+func (c *DomainCoder) CompilePromptForHost(hostOS string, ctx *PromptContext) (systemPrompt, userPrompt string) {
+	return c.compilePromptWithHost(hostOS, ctx, TaskCodeGeneration)
 }
 
 // CompilePrompt builds the comprehensive system and task instructions for the coder.
 func (c *DomainCoder) CompilePrompt(ctx *PromptContext) (systemPrompt, userPrompt string) {
-	return c.CompilePromptForTask(ctx, TaskCodeGeneration)
+	return c.CompilePromptForHost(runtime.GOOS, ctx)
 }
 
 // CompilePromptForTask builds task-specific system and task instructions for the coder.
 func (c *DomainCoder) CompilePromptForTask(ctx *PromptContext, task TaskType) (systemPrompt, userPrompt string) {
+	return c.compilePromptWithHost(runtime.GOOS, ctx, task)
+}
+
+func (c *DomainCoder) compilePromptWithHost(hostOS string, ctx *PromptContext, task TaskType) (systemPrompt, userPrompt string) {
 	var sys strings.Builder
 
 	fmt.Fprintf(&sys, "You are %s, an elite %s.\n", c.persona.Name, c.persona.Role)
@@ -58,6 +72,12 @@ func (c *DomainCoder) CompilePromptForTask(ctx *PromptContext, task TaskType) (s
 		if dnaCompiled != "" {
 			sys.WriteString(dnaCompiled)
 		}
+	}
+
+	// For iOS / Apple engineering personas on non-macOS hosts, notify that output could not be compiled
+	isIOS := c.persona.ID == "ios_engineer" || c.domain == "ios_engineer" || strings.Contains(strings.ToLower(c.domain), "ios") || strings.Contains(strings.ToLower(c.persona.Role), "apple")
+	if isIOS && strings.ToLower(hostOS) != "darwin" {
+		sys.WriteString("\nNOTICE ON HOST LIMITATION: Host platform unsupported for native Apple build tools (host: " + hostOS + "). Your output could not be compiled or verified against native iOS/macOS toolchains.\n")
 	}
 
 	// Injected dynamic steering rules
@@ -78,6 +98,22 @@ func (c *DomainCoder) CompilePromptForTask(ctx *PromptContext, task TaskType) (s
 			sys.WriteString("\nPROJECT CODING INVARIANTS & STANDARDS:\n")
 			for _, h := range ctx.SteeringContext.Heuristics {
 				fmt.Fprintf(&sys, "- %s\n", h.FormulaOrMaxime)
+			}
+		}
+	}
+
+	// Injected active institutional knowledge items (governed memory)
+	if len(ctx.KnowledgeItems) > 0 {
+		var activeKIs []knowledge.KnowledgeItem
+		for _, ki := range ctx.KnowledgeItems {
+			if ki.IsActive() {
+				activeKIs = append(activeKIs, ki)
+			}
+		}
+		if len(activeKIs) > 0 {
+			sys.WriteString("\nINSTITUTIONAL KNOWLEDGE & ACTIVE LEARNINGS:\n")
+			for _, ki := range activeKIs {
+				fmt.Fprintf(&sys, "- [%s] %s: %s (Context: %s)\n", ki.Category, ki.Title, ki.Breakthrough, ki.Context)
 			}
 		}
 	}

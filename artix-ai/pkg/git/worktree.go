@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -119,6 +120,15 @@ func (sw *ShadowWorktree) RecordCheckpoint(round int, feedback string, approved 
 
 // MergeInto merges the shadow worktree branch into the target branch, performing pre-merge collision checks.
 func (m *WorktreeManager) MergeInto(sw *ShadowWorktree, targetBranch string, squash bool) (string, error) {
+	return m.MergeIntoContext(context.Background(), sw, targetBranch, squash)
+}
+
+// MergeIntoContext merges the shadow worktree branch into the target branch with context cancellation support.
+// If the context is cancelled or the merge fails, any half-merged state is rolled back and cleaned up.
+func (m *WorktreeManager) MergeIntoContext(ctx context.Context, sw *ShadowWorktree, targetBranch string, squash bool) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if targetBranch == "" {
 		targetBranch = "HEAD"
 	}
@@ -132,6 +142,29 @@ func (m *WorktreeManager) MergeInto(sw *ShadowWorktree, targetBranch string, squ
 			_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 			_ = lockFile.Close()
 		}()
+	}
+
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	// Record pre-merge HEAD commit
+	revCmd := exec.Command("git", "rev-parse", "HEAD")
+	revCmd.Dir = m.repoRoot
+	preOut, err := revCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get HEAD: %w", err)
+	}
+	preCommit := strings.TrimSpace(string(preOut))
+
+	cleanupOnFailure := func() {
+		_ = m.runGit("merge", "--abort")
+		if preCommit != "" {
+			_ = m.runGit("reset", "--hard", preCommit)
+		} else {
+			_ = m.runGit("reset", "--hard", "HEAD")
+		}
+		_ = m.runGit("clean", "-fd")
 	}
 
 	// Re-verification: Check if target branch has advanced since worktree was branched
@@ -151,29 +184,50 @@ func (m *WorktreeManager) MergeInto(sw *ShadowWorktree, targetBranch string, squ
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		cleanupOnFailure()
+		return "", err
+	}
+
 	args := []string{"merge"}
 	if squash {
 		args = append(args, "--squash")
 	}
 	args = append(args, sw.Branch)
 
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = m.repoRoot
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		cleanupOnFailure()
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		return "", fmt.Errorf("failed to merge shadow branch %s: %v\nOutput: %s", sw.Branch, err, string(out))
 	}
 
 	if squash {
-		commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("feat: merge shadow worktree %s", sw.TaskID))
+		if err := ctx.Err(); err != nil {
+			cleanupOnFailure()
+			return "", err
+		}
+		commitCmd := exec.CommandContext(ctx, "git", "commit", "-m", fmt.Sprintf("feat: merge shadow worktree %s", sw.TaskID))
 		commitCmd.Dir = m.repoRoot
-		_ = commitCmd.Run()
+		if err := commitCmd.Run(); err != nil {
+			cleanupOnFailure()
+			return "", err
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		cleanupOnFailure()
+		return "", err
 	}
 
 	// Get latest commit hash
-	revCmd := exec.Command("git", "rev-parse", "HEAD")
-	revCmd.Dir = m.repoRoot
-	hashBytes, _ := revCmd.Output()
+	revCmdPost := exec.Command("git", "rev-parse", "HEAD")
+	revCmdPost.Dir = m.repoRoot
+	hashBytes, _ := revCmdPost.Output()
 	return strings.TrimSpace(string(hashBytes)), nil
 }
 

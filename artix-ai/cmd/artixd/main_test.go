@@ -1,9 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"artix/pkg/knowledge"
 )
 
 func TestBuildDaemonServer_Success(t *testing.T) {
@@ -119,6 +126,103 @@ func TestBuildDaemonServer_RefusesNonLoopbackWithoutAuth(t *testing.T) {
 	}
 	if server == nil {
 		t.Errorf("expected server to be non-nil")
+	}
+}
+
+func TestDaemon_PRReviewCommentToSynthesizedRule_IngestionAndRatification(t *testing.T) {
+	tmpDir := t.TempDir()
+	secret := "whsec_test_secret_r3"
+
+	server, err := BuildDaemonServer(DaemonOptions{
+		Addr:      "127.0.0.1:8080",
+		GHSecret:  secret,
+		WorkDir:   tmpDir,
+		JobsToken: "test-jobs-token",
+	})
+	if err != nil {
+		t.Fatalf("BuildDaemonServer failed: %v", err)
+	}
+
+	handler := server.Handler()
+
+	payload := map[string]any{
+		"action": "created",
+		"pull_request": map[string]any{
+			"number": 42,
+			"title":  "Add Coroutine Worker",
+		},
+		"comment": map[string]any{
+			"body":               "Never use GlobalScope.launch in our viewmodels, always use viewModelScope!",
+			"author_association": "MEMBER",
+			"html_url":           "https://github.com/org/repo/pull/42#discussion_r998877",
+			"user": map[string]any{
+				"login": "senior-engineer",
+			},
+		},
+		"repository": map[string]any{
+			"name":      "my-repo",
+			"clone_url": "https://github.com/org/my-repo.git",
+			"owner": map[string]any{
+				"login": "org",
+			},
+			"default_branch": "main",
+		},
+		"sender": map[string]any{
+			"login":              "senior-engineer",
+			"author_association": "MEMBER",
+		},
+	}
+	bodyBytes, _ := json.Marshal(payload)
+
+	// Compute HMAC signature
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(bodyBytes)
+	sigHex := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(bodyBytes))
+	req.Header.Set("X-GitHub-Event", "pull_request_review_comment")
+	req.Header.Set("X-Hub-Signature-256", sigHex)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK && rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 200/202 from PR review comment webhook, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Status string `json:"status"`
+		RuleID string `json:"ruleId"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response JSON: %v", err)
+	}
+
+	if resp.Status != "proposed" {
+		t.Errorf("expected synthesized rule to start with status 'proposed', got %q", resp.Status)
+	}
+	if resp.RuleID == "" {
+		t.Fatalf("expected non-empty ruleId in webhook response")
+	}
+
+	// Verify the rule was persisted in the knowledge store
+	kStore := knowledge.NewStore(tmpDir)
+	ki, err := kStore.Get(resp.RuleID)
+	if err != nil {
+		t.Fatalf("expected stored rule %s in knowledge store, got: %v", resp.RuleID, err)
+	}
+
+	if ki.Status != "proposed" || ki.IsActive() {
+		t.Errorf("expected stored rule to be proposed (inactive), got status=%q isActive=%v", ki.Status, ki.IsActive())
+	}
+
+	// Ratify rule as CODEOWNER
+	if err := ki.Ratify("senior-codeowner", []string{"senior-codeowner"}); err != nil {
+		t.Fatalf("failed to ratify rule: %v", err)
+	}
+	if !ki.IsActive() || ki.Status != "active" {
+		t.Errorf("expected ratified rule to be active, got status=%q isActive=%v", ki.Status, ki.IsActive())
 	}
 }
 

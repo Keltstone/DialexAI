@@ -46,11 +46,17 @@ Most AI coding tools operate under the **"Solo Sycophant Problem"**: a single LL
 
 ## 2. Installation & Quick Start
 
-### 2.1 System Requirements
+### 2.1 System Requirements & Platform Constraints
 - **macOS** (Apple Silicon or Intel), **Linux** (x86_64 or aarch64), or **Windows** (WSL2).
 - **Go 1.27+** (for native CLI and LSP server).
 - **Java JDK 21+** (for Compose Multiplatform Desktop Cockpit App).
 - **Git 2.30+** (with support for `git worktree`).
+
+> [!IMPORTANT]
+> **Platform Constraints & Driver Governance:**
+> - **Supported Drivers & Rollout Allowlist:** By default, only `go` and `gradle` are allowed (`allowedDrivers: [go, gradle]`). Unallowed drivers (e.g. `cargo`, `npm`, `swiftpm`, `xcode`) are refused before any LLM spend unless explicitly enabled in policy.
+> - **Offline Cache Prerequisite (`artix warm`):** Sandboxed builds run in complete network isolation (`--offline`). Dependencies must be pre-warmed outside the sandbox with `artix warm` before running the loop. A cold cache returns `OFFLINE_CACHE_MISS` naming the missing artifact.
+> - **iOS Targets Unsupported on Linux (`SKIPPED_HOST_UNSUPPORTED`):** iOS simulator and compilation targets require macOS. On Linux, iOS targets are classified as `SKIPPED_HOST_UNSUPPORTED`, preventing false "all targets green" convergence claims and refusing autonomous execution.
 
 ### 2.2 Installing the Native CLI
 
@@ -359,15 +365,23 @@ artix steering bind backend_engineer taboo-storage
 artix steering sync
 ```
 
-### 6.3 PR-to-Rule Synthesizer (Learning from Human Reviews)
-Artix includes an automatic synthesizer that converts human PR comments into permanent institutional rules:
-- Human senior engineer comments on a PR:  
+### 6.3 Reviewer Scan Modes & Multi-Language Coverage
+The Adversarial Reviewer applies deterministic pre-filtering and taboo verification before invoking model critics:
+- **Go diffs:** Native Go AST parsing (`scan mode: diff-literal | AST`), identifying syntax structures, call graphs, import graphs, and package aliases deterministically.
+- **Non-Go languages (Kotlin, Swift, Python, TypeScript/JavaScript):** Semantic alias, reflection, and de-concatenation pattern scanning (`scan mode: heuristic`). Because native compilers for these languages are not embedded in the engine, Taboo enforcement for Kotlin and Swift runs in heuristic mode, scrutinizing import aliases (`import java.lang.Runtime as EvilRuntime`), type aliases (`typealias TaskRunner = Process`), dynamic reflection (`Class.forName(...)`), and string concatenations (`"NS" + "Task"`).
+
+---
+
+### 6.4 PR-to-Rule Synthesizer (Learning from Human Reviews)
+Artix includes an automatic synthesizer in `artixd` that ingests human PR review comments and synthesizes structured rules:
+- A reviewer comments on a pull request:  
   `"Never use GlobalScope.launch in our viewmodels, always use viewModelScope!"`
-- The Synthesizer parses the comment:
+- The Synthesizer parses and sanitizes the comment into a **PROPOSED** rule:
   - **Category:** Taboo Constraint.
   - **Target Persona:** `android_engineer`, `adversarial_code_reviewer`.
-  - **Action:** Persists rule to `.artix/steering.json`.
-- The mistake is permanently prevented from occurring again.
+  - **Status:** Starts as `proposed` (stored in `.artix/knowledge/`).
+  - **Governance:** Rules start `proposed` and require human CODEOWNER ratification via `artix knowledge ratify <ruleId> --approver <username>` before becoming active.
+- Once ratified by a CODEOWNER, the rule activates and permanently prevents the regression across all subsequent agent runs.
 
 ---
 
@@ -561,7 +575,7 @@ Options for 'plan':
 
 Options for 'code':
   --domain <domain>        Target SWE persona (default: backend_engineer, android_engineer)
-  --autonomy <gate>        supervised (confirm diff), interactive (pause per round), autonomous (auto-commit)
+  --autonomy <gate>        supervised (confirm diff), interactive (pause per round), autonomous (auto-commit; requires verified, cryptographically signed policy with allowAutonomous=true)
   --rounds <n>             Maximum convergence rounds (default: 3)
 ```
 
@@ -580,3 +594,46 @@ Options for 'code':
 
 #### Q: Can our team share steering rules across multiple repositories?
 **A:** Yes. You can register a central Git repository or HTTP endpoint in `.artix/steering.json` using `artix steering sync`. All team members inherit the organization's architectural and taboo standards automatically.
+
+---
+
+## 11. Daemon Deployment & Adversarial Attack Verification (R3-8 / G6)
+
+The Artix daemon (`artixd`) provides webhook integration for automated continuous software engineering on GitHub and GitLab.
+
+### 11.1 Security Controls and Threat Defenses
+
+| Threat Vector | Defense Mechanism | Fail-Closed Behavior |
+|---|---|---|
+| **Forged Webhook Sender** | GitHub HMAC-SHA256 (`X-Hub-Signature-256`) & GitLab Token (`X-Gitlab-Token`) | `401 Unauthorized` / `403 Forbidden` |
+| **Unauthorized Triggers** | `author_association` verified (`OWNER`, `MEMBER`, `COLLABORATOR`) or `--allowed-users` allowlist | `403 Forbidden` (rejected before parsing prompt) |
+| **Replay Attacks** | Delivery cache tracking (`X-GitHub-Delivery`, `X-Gitlab-Event-UUID`) with time-window deduplication | `409 Conflict` (ignored without execution) |
+| **Prompt Injection in Issues** | AST prompt sanitizer (`sanitizer.SanitizePrompt`) strips injection keywords and jailbreaks | `400 Bad Request` |
+| **Denial of Service (Oversized Payloads)** | Request body capped by `--max-body-length` (default: 32 KB) | `413 Request Entity Too Large` |
+| **Policy Tampering** | Issue body text cannot modify policy, steering bindings, or bypass taboos | Hard-rejected by deterministic policy validator |
+
+### 11.2 Launching the Daemon
+
+```bash
+artixd \
+  --addr ":8080" \
+  --github-secret "$GITHUB_WEBHOOK_SECRET" \
+  --gitlab-token "$GITLAB_WEBHOOK_TOKEN" \
+  --jobs-token "$JOBS_AUTH_BEARER_TOKEN" \
+  --work-dir "/var/artix/workspaces" \
+  --max-concurrent-jobs 4 \
+  --max-body-length 32768
+```
+
+### 11.3 Running the Adversarial Attack Suite Against the Build
+
+Evaluators and hostile reviewers can reproduce and verify all daemon security controls using the automated adversarial suite:
+
+```bash
+# Run all G6 daemon attack suite tests with race detector:
+go test -race -v -count=1 ./pkg/forge -run "TestG6|TestR2_2|TestWebhook"
+
+# Run daemon entrypoint and server binding authorization tests:
+go test -race -v -count=1 ./cmd/artixd -run "Test"
+```
+

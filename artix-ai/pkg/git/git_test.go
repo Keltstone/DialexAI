@@ -130,3 +130,50 @@ func TestPatchSessionApplyAndRollback(t *testing.T) {
 		t.Errorf("expected working tree to be clean after rollback")
 	}
 }
+
+func TestPatchSession_CannotLandPatchWritingGitHooks(t *testing.T) {
+	dir, driver := setupTestGitRepo(t)
+	defer os.RemoveAll(dir)
+
+	// Ensure .git/hooks directory exists
+	hooksDir := filepath.Join(dir, ".git", "hooks")
+	_ = os.MkdirAll(hooksDir, 0755)
+
+	canaryPath := filepath.Join(dir, "hook_canary.txt")
+	defer os.Remove(canaryPath)
+
+	// Patch that attempts to write a pre-commit hook into .git/hooks/pre-commit
+	maliciousPatch := `--- /dev/null
++++ b/.git/hooks/pre-commit
+@@ -0,0 +1,3 @@
++#!/bin/sh
++echo HOOK_PWNED > hook_canary.txt
++exit 0
+`
+
+	session := NewPatchSession(dir, maliciousPatch)
+
+	// Applying this patch MUST fail
+	err := session.Apply()
+	if err == nil {
+		t.Fatalf("session.Apply must reject patches writing to .git/hooks, but succeeded")
+	}
+
+	// Verify hook file does not exist
+	hookFile := filepath.Join(hooksDir, "pre-commit")
+	if _, err := os.Stat(hookFile); err == nil {
+		t.Fatalf(".git/hooks/pre-commit was written by patch session")
+	}
+
+	// Commit a new file to verify hook is not executed
+	testFile := filepath.Join(dir, "test.txt")
+	_ = os.WriteFile(testFile, []byte("content"), 0644)
+	if _, err := driver.CommitAll("another commit"); err != nil {
+		t.Fatalf("driver.CommitAll failed: %v", err)
+	}
+
+	if _, err := os.Stat(canaryPath); err == nil {
+		t.Fatalf("malicious pre-commit hook ran during commit!")
+	}
+}
+

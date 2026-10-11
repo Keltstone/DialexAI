@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"artix/pkg/policy"
+	"artix/pkg/sandbox"
 )
 
 var (
@@ -103,6 +104,7 @@ type AuditEvent struct {
 	Cost            float64        `json:"cost,omitempty"`
 	SandboxExitCode int            `json:"sandboxExitCode,omitempty"`
 	Approver        string         `json:"approver,omitempty"`
+	PolicyHash      string         `json:"policyHash,omitempty"`
 	Details         map[string]any `json:"details,omitempty"`
 	PrevHash        string         `json:"prevHash"`
 	RecordHash      string         `json:"recordHash"`
@@ -115,7 +117,7 @@ func ComputeRecordHash(e *AuditEvent) string {
 	if e.Details != nil {
 		detailsJSON, _ = json.Marshal(e.Details)
 	}
-	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s|%s|%s|%s|%d|%.6f|%d|%s|%s",
+	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s|%s|%s|%s|%d|%.6f|%d|%s|%s|%s",
 		e.PrevHash,
 		e.EventID,
 		e.Timestamp.UTC().Format(time.RFC3339Nano),
@@ -134,6 +136,7 @@ func ComputeRecordHash(e *AuditEvent) string {
 		e.Cost,
 		e.SandboxExitCode,
 		e.Approver,
+		e.PolicyHash,
 		string(detailsJSON),
 	)
 	h := sha256.Sum256([]byte(payload))
@@ -181,11 +184,19 @@ type Logger struct {
 	asymSigningKey ed25519.PrivateKey
 	remoteSinks    []policy.RemoteSinkConfig
 	lastHash       string
+	initError      error
 	mu             sync.Mutex
 	httpClient     *http.Client
 	spoolChan      chan spooledSinkItem
 	stopChan       chan struct{}
 	spoolWg        sync.WaitGroup
+}
+
+// InitError returns any fatal error encountered during logger initialization.
+func (l *Logger) InitError() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.initError
 }
 
 var (
@@ -233,6 +244,41 @@ func NewLogger(workspaceDir string) *Logger {
 		stopChan:     make(chan struct{}),
 	}
 
+	// G7: Asymmetric audit signing wired by default in enterprise mode.
+	// Enterprise mode must require an ed25519 key path outside sandbox-readable paths and refuse otherwise.
+	if policy.IsEnterprise() {
+		keyPath := pol.AuditPrivateKeyPath
+		if keyPath == "" {
+			keyPath = os.Getenv("ARTIX_AUDIT_PRIVATE_KEY_PATH")
+		}
+		if keyPath == "" {
+			keyPath = os.Getenv("ARTIX_AUDIT_KEY_PATH")
+		}
+		if keyPath == "" {
+			l.initError = fmt.Errorf("enterprise audit policy violation: ed25519 private key path is required in enterprise mode (set pol.AuditPrivateKeyPath or ARTIX_AUDIT_PRIVATE_KEY_PATH outside sandbox-readable paths)")
+		} else {
+			if err := l.SetPrivateKeyPath(keyPath); err != nil {
+				l.initError = fmt.Errorf("enterprise audit policy violation: %w", err)
+			}
+		}
+
+		// Mandatory external sink under ARTIX_ENTERPRISE
+		if len(l.remoteSinks) == 0 {
+			if ep := os.Getenv("ARTIX_AUDIT_REMOTE_SINK"); ep != "" {
+				l.remoteSinks = append(l.remoteSinks, policy.RemoteSinkConfig{Type: "http", Endpoint: ep})
+			} else if ep := os.Getenv("ARTIX_AUDIT_HTTP_ENDPOINT"); ep != "" {
+				l.remoteSinks = append(l.remoteSinks, policy.RemoteSinkConfig{Type: "http", Endpoint: ep})
+			} else if ep := os.Getenv("ARTIX_AUDIT_OTEL_ENDPOINT"); ep != "" {
+				l.remoteSinks = append(l.remoteSinks, policy.RemoteSinkConfig{Type: "http", Endpoint: ep})
+			} else if ep := os.Getenv("ARTIX_AUDIT_SYSLOG_ENDPOINT"); ep != "" {
+				l.remoteSinks = append(l.remoteSinks, policy.RemoteSinkConfig{Type: "syslog", Endpoint: ep})
+			}
+		}
+		if len(l.remoteSinks) == 0 && l.initError == nil {
+			l.initError = fmt.Errorf("enterprise audit policy violation: external sink (syslog/OTel/S3) is mandatory under ARTIX_ENTERPRISE")
+		}
+	}
+
 	// Initialize lastHash from existing log file if available
 	l.initLastHash()
 
@@ -268,6 +314,35 @@ func (l *Logger) initLastHash() {
 	}
 }
 
+// ReadEvents reads and parses all recorded audit events from the log file.
+func (l *Logger) ReadEvents() ([]AuditEvent, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.logPath == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(l.logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var events []AuditEvent
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var evt AuditEvent
+		if err := json.Unmarshal([]byte(line), &evt); err == nil {
+			events = append(events, evt)
+		}
+	}
+	return events, nil
+}
+
 // SetSigningKey configures an HMAC key for cryptographic record signatures.
 func (l *Logger) SetSigningKey(key string) {
 	l.mu.Lock()
@@ -287,11 +362,23 @@ func (l *Logger) AddRemoteSink(sink policy.RemoteSinkConfig) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.remoteSinks = append(l.remoteSinks, sink)
+	if l.initError != nil && strings.Contains(l.initError.Error(), "external sink") {
+		l.initError = nil
+	}
 }
 
 // LogPath returns the path to the active audit log file.
 func (l *Logger) LogPath() string {
 	return l.logPath
+}
+
+// RemoteSinks returns a copy of configured remote audit sinks.
+func (l *Logger) RemoteSinks() []policy.RemoteSinkConfig {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	copied := make([]policy.RemoteSinkConfig, len(l.remoteSinks))
+	copy(copied, l.remoteSinks)
+	return copied
 }
 
 // Close gracefully flushes pending spooled sinks and stops workers.
@@ -333,9 +420,22 @@ func (l *Logger) Emit(event AuditEvent) error {
 	if event.Approver != "" {
 		event.Approver = RedactSecrets(event.Approver)
 	}
+	if event.PolicyHash == "" {
+		event.PolicyHash = policy.GetPolicyHash()
+	}
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	if l.initError != nil {
+		return fmt.Errorf("audit logging refused: %w", l.initError)
+	}
+	if policy.IsEnterprise() && l.asymSigningKey == nil {
+		return fmt.Errorf("audit logging refused: ed25519 asymmetric signing key is required in enterprise mode")
+	}
+	if policy.IsEnterprise() && len(l.remoteSinks) == 0 {
+		return fmt.Errorf("enterprise audit policy violation: external sink (syslog/OTel/S3) is mandatory under ARTIX_ENTERPRISE")
+	}
 
 	// Hash Chaining
 	if l.lastHash == "" {
@@ -483,6 +583,10 @@ func VerifyLog(logPath string, signingKey ...string) (*VerificationResult, error
 		return &VerificationResult{TotalRecords: 0, ValidRecords: 0}, nil
 	}
 
+	if policy.IsEnterprise() {
+		return nil, fmt.Errorf("enterprise audit policy violation: symmetric HMAC verification is prohibited in enterprise mode; use ed25519 asymmetric verification with public key")
+	}
+
 	expectedPrevHash := GenesisHash
 	key := ""
 	if len(signingKey) > 0 {
@@ -565,9 +669,21 @@ func VerifyLogWithPubKey(logPath string, pubKey ed25519.PublicKey) (*Verificatio
 			return nil, fmt.Errorf("tampering detected at record #%d (event ID %s): record payload altered", i+1, event.EventID)
 		}
 
-		if event.Signature != "" {
+		if policy.IsEnterprise() {
+			if event.Signature == "" {
+				return nil, fmt.Errorf("enterprise audit violation: record #%d (event ID %s) has no ed25519 signature", i+1, event.EventID)
+			}
+			if len(pubKey) == 0 {
+				return nil, fmt.Errorf("enterprise audit violation: ed25519 public key required to verify enterprise audit records")
+			}
 			if !VerifyRecordSignatureEd25519(event.RecordHash, event.Signature, pubKey) {
 				return nil, fmt.Errorf("tampering detected at record #%d (event ID %s): invalid ed25519 signature", i+1, event.EventID)
+			}
+		} else {
+			if event.Signature != "" && len(pubKey) > 0 {
+				if !VerifyRecordSignatureEd25519(event.RecordHash, event.Signature, pubKey) {
+					return nil, fmt.Errorf("tampering detected at record #%d (event ID %s): invalid ed25519 signature", i+1, event.EventID)
+				}
 			}
 		}
 
@@ -599,6 +715,41 @@ func (l *Logger) SetPrivateKeyPath(path string) error {
 		}
 	}
 
+	// Check if path is protected from sandbox reads via SensitiveReadDenyPaths (e.g. .artix, .ssh, .aws)
+	isProtectedDenyPath := false
+	for _, denyRel := range sandbox.SensitiveReadDenyPaths {
+		if strings.Contains(absPath, "/"+denyRel+"/") || strings.HasSuffix(absPath, "/"+denyRel) || strings.Contains(absPath, "\\"+denyRel+"\\") {
+			isProtectedDenyPath = true
+			break
+		}
+	}
+
+	// If not inside a protected denied directory, reject if located in open temp directories readable by sandbox
+	if !isProtectedDenyPath {
+		tempRoots := []string{os.TempDir(), "/tmp", "/private/tmp", "/var/tmp"}
+		for _, tr := range tempRoots {
+			if tr == "" {
+				continue
+			}
+			absTr, errTr := filepath.Abs(tr)
+			if errTr == nil {
+				rel, errRel := filepath.Rel(absTr, absPath)
+				if errRel == nil && !strings.HasPrefix(rel, "..") {
+					return fmt.Errorf("signing key refused: private key must be located outside sandbox-readable temp paths (%s is inside temp dir %s)", absPath, absTr)
+				}
+			}
+		}
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat private key file: %w", err)
+	}
+	// Require owner-only mode (0600 or 0400), reject group/other read/write bits
+	if info.Mode().Perm()&0077 != 0 {
+		return fmt.Errorf("signing key refused: private key file %s has insecure permissions %04o (must be owner-only 0600 or 0400)", absPath, info.Mode().Perm())
+	}
+
 	data, err := os.ReadFile(absPath)
 	if err != nil {
 		return fmt.Errorf("failed to read private key: %w", err)
@@ -607,6 +758,10 @@ func (l *Logger) SetPrivateKeyPath(path string) error {
 	raw := strings.TrimSpace(string(data))
 	if keyBytes, err := hex.DecodeString(raw); err == nil && len(keyBytes) == ed25519.PrivateKeySize {
 		l.SetAsymmetricSigningKey(ed25519.PrivateKey(keyBytes))
+		return nil
+	} else if keyBytes, err := hex.DecodeString(raw); err == nil && len(keyBytes) == ed25519.SeedSize {
+		priv := ed25519.NewKeyFromSeed(keyBytes)
+		l.SetAsymmetricSigningKey(priv)
 		return nil
 	} else if len(data) == ed25519.PrivateKeySize {
 		l.SetAsymmetricSigningKey(ed25519.PrivateKey(data))
@@ -617,7 +772,7 @@ func (l *Logger) SetPrivateKeyPath(path string) error {
 		return nil
 	}
 
-	return nil
+	return fmt.Errorf("invalid ed25519 private key in file %s (expected 32-byte seed or 64-byte private key)", absPath)
 }
 
 // RecordSpoolLoss records that spooled audit records were lost due to unrecoverable delivery failure.

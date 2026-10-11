@@ -43,7 +43,9 @@ type TokenBudget struct {
 	UsedTeamCost    float64            `json:"usedTeamCost"`
 	UsedDayCost     float64            `json:"usedDayCost"`
 	TeamID          string             `json:"teamId,omitempty"`
+	TaskID          string             `json:"taskId,omitempty"`
 	LedgerPath      string             `json:"ledgerPath,omitempty"`
+	LedgerError     error              `json:"-"`
 }
 
 // LoadBudgetFromEnv loads budget limits from policy and ARTIX_BUDGET_* environment variables.
@@ -76,6 +78,17 @@ func LoadBudgetFromEnv() *TokenBudget {
 		}
 		if pol.Budget.MaxDayCost > 0 {
 			b.MaxDayCost = pol.Budget.MaxDayCost
+			hasConfig = true
+		}
+		if len(pol.Budget.PriceTable) > 0 {
+			b.PriceTable = make(map[string]float64)
+			for k, v := range pol.Budget.PriceTable {
+				b.PriceTable[k] = v
+			}
+			hasConfig = true
+		}
+		if pol.Budget.CostPer1kTokens > 0 {
+			b.CostPer1kTokens = pol.Budget.CostPer1kTokens
 			hasConfig = true
 		}
 	}
@@ -133,20 +146,32 @@ func LoadBudgetFromEnv() *TokenBudget {
 
 var ledgerMu sync.Mutex
 
-func withFileLock(path string, fn func()) {
+func withFileLock(path string, fn func() error) error {
 	ledgerMu.Lock()
 	defer ledgerMu.Unlock()
 
+	dir := filepath.Dir(path)
+	if dir != "" {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return fmt.Errorf("failed to create ledger directory %s: %w", dir, err)
+		}
+	}
+
 	lockPath := path + ".lock"
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
-	if err == nil {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
-		defer func() {
-			_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-			_ = f.Close()
-		}()
+	if err != nil {
+		return fmt.Errorf("failed to open lock file %s: %w", lockPath, err)
 	}
-	fn()
+	defer f.Close()
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("failed to acquire flock on %s: %w", lockPath, err)
+	}
+	defer func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}()
+
+	return fn()
 }
 
 // HasFinancialCap returns true if any USD budget cap is configured.
@@ -165,8 +190,40 @@ func (b *TokenBudget) ValidatePricing() error {
 	return nil
 }
 
-// CheckExhaustion checks if any token or USD cap is exceeded.
+// GetModelPrice returns the cost per 1k tokens for the given model key deterministically.
+// If a financial cap is active and the model key is not configured, it returns an error refusing operation.
+func (b *TokenBudget) GetModelPrice(modelKey string) (float64, error) {
+	if b == nil {
+		return 0, nil
+	}
+	trimmedKey := strings.TrimSpace(modelKey)
+	if len(b.PriceTable) > 0 {
+		if p, ok := b.PriceTable[trimmedKey]; ok && p > 0 {
+			return p, nil
+		}
+		for k, p := range b.PriceTable {
+			if strings.EqualFold(k, trimmedKey) && p > 0 {
+				return p, nil
+			}
+		}
+		if b.HasFinancialCap() {
+			return 0, fmt.Errorf("budget error: model %q missing from price table (refusing operation to prevent silent under-reporting under USD financial cap)", modelKey)
+		}
+	}
+	if b.CostPer1kTokens > 0 {
+		return b.CostPer1kTokens, nil
+	}
+	if b.HasFinancialCap() {
+		return 0, fmt.Errorf("budget error: no price table or pricing configured for model %q under active USD financial cap (refusing operation)", modelKey)
+	}
+	return 0, nil
+}
+
+// CheckExhaustion checks if any token or USD cap is exceeded or if ledger operations failed with a cap active.
 func (b *TokenBudget) CheckExhaustion() (bool, string) {
+	if b.LedgerError != nil && (b.HasFinancialCap() || b.MaxStoryTokens > 0 || b.MaxTeamTokens > 0 || b.MaxDayTokens > 0) {
+		return true, fmt.Sprintf("budget aborted due to ledger failure: %v", b.LedgerError)
+	}
 	if b.MaxStoryTokens > 0 && b.UsedStoryTokens > b.MaxStoryTokens {
 		return true, fmt.Sprintf("story token budget exceeded: %d used > %d max cap", b.UsedStoryTokens, b.MaxStoryTokens)
 	}
@@ -188,11 +245,18 @@ func (b *TokenBudget) CheckExhaustion() (bool, string) {
 	return false, ""
 }
 
+// TaskLedgerEntry records total token consumption and USD cost for a specific task.
+type TaskLedgerEntry struct {
+	Tokens int64   `json:"tokens"`
+	USD    float64 `json:"usd"`
+}
+
 type sharedLedgerData struct {
-	TeamTokens map[string]int     `json:"teamTokens"`
-	TeamCost   map[string]float64 `json:"teamCost"`
-	DayTokens  map[string]int     `json:"dayTokens"`
-	DayCost    map[string]float64 `json:"dayCost"`
+	TeamTokens map[string]int              `json:"teamTokens"`
+	TeamCost   map[string]float64          `json:"teamCost"`
+	DayTokens  map[string]int              `json:"dayTokens"`
+	DayCost    map[string]float64          `json:"dayCost"`
+	Tasks      map[string]TaskLedgerEntry  `json:"tasks"`
 }
 
 func (b *TokenBudget) getEffectiveLedgerPath() string {
@@ -202,22 +266,53 @@ func (b *TokenBudget) getEffectiveLedgerPath() string {
 	if p := os.Getenv("ARTIX_BUDGET_LEDGER"); p != "" {
 		return p
 	}
-	return filepath.Join(os.TempDir(), "artix-budget-ledger.json")
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		dir := filepath.Join(home, ".artix")
+		_ = os.MkdirAll(dir, 0700)
+		return filepath.Join(dir, "budget-ledger.json")
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf("artix-budget-ledger-%d.json", os.Getuid()))
+}
+
+// ValidateLedgerSecurity verifies that the ledger file has secure permissions (mode 0600) and is user-owned.
+func (b *TokenBudget) ValidateLedgerSecurity() error {
+	path := b.getEffectiveLedgerPath()
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	mode := info.Mode()
+	if mode.Perm()&0077 != 0 {
+		return fmt.Errorf("insecure ledger file permissions %04o on %s: group/other access forbidden; must be mode 0600 and user-owned", mode.Perm(), path)
+	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		if int(stat.Uid) != os.Getuid() {
+			return fmt.Errorf("ledger file %s owned by uid %d, expected current user uid %d (refusing untrusted ledger)", path, stat.Uid, os.Getuid())
+		}
+	}
+	return nil
 }
 
 // SyncWithSharedLedger refreshes UsedTeamTokens, UsedDayTokens, UsedTeamCost, UsedDayCost
 // from the atomic shared cross-process ledger file using kernel file locking.
 func (b *TokenBudget) SyncWithSharedLedger() {
+	if err := b.ValidateLedgerSecurity(); err != nil {
+		b.LedgerError = err
+		return
+	}
 	path := b.getEffectiveLedgerPath()
-	withFileLock(path, func() {
+	errLock := withFileLock(path, func() error {
 		data, err := os.ReadFile(path)
 		if err != nil || len(data) == 0 {
-			return
+			return nil
 		}
 
 		var state sharedLedgerData
 		if err := json.Unmarshal(data, &state); err != nil {
-			return
+			return err
 		}
 
 		today := time.Now().Format("2006-01-02")
@@ -238,7 +333,11 @@ func (b *TokenBudget) SyncWithSharedLedger() {
 		if state.DayCost != nil {
 			b.UsedDayCost = state.DayCost[today]
 		}
+		return nil
 	})
+	if errLock != nil {
+		b.LedgerError = errLock
+	}
 }
 
 // ProviderUsage contains actual metered token consumption reported by the model provider API.
@@ -252,14 +351,24 @@ type ProviderUsage struct {
 // reconciling with provider-reported usage when available, and atomically updates the shared ledger
 // under an OS kernel file lock.
 func (b *TokenBudget) RecordRoundUsage(roundTokens int, roundCostUSD float64, providerUsage ...*ProviderUsage) {
+	if err := b.ValidateLedgerSecurity(); err != nil {
+		b.LedgerError = err
+		return
+	}
+
 	// Reconcile against provider-reported usage if present
 	if len(providerUsage) > 0 && providerUsage[0] != nil {
 		pu := providerUsage[0]
 		if pu.TotalTokens > 0 {
+			effectiveUnitCost := 0.0
+			if roundTokens > 0 {
+				effectiveUnitCost = roundCostUSD / float64(roundTokens)
+			}
 			roundTokens = pu.TotalTokens
-			costPer1k := b.CostPer1kTokens
-			if costPer1k > 0 {
-				roundCostUSD = (float64(roundTokens) / 1000.0) * costPer1k
+			if effectiveUnitCost > 0 {
+				roundCostUSD = float64(roundTokens) * effectiveUnitCost
+			} else if b.CostPer1kTokens > 0 {
+				roundCostUSD = (float64(roundTokens) / 1000.0) * b.CostPer1kTokens
 			}
 		}
 	}
@@ -268,7 +377,7 @@ func (b *TokenBudget) RecordRoundUsage(roundTokens int, roundCostUSD float64, pr
 	b.UsedStoryCost += roundCostUSD
 
 	path := b.getEffectiveLedgerPath()
-	withFileLock(path, func() {
+	errLock := withFileLock(path, func() error {
 		var state sharedLedgerData
 		data, err := os.ReadFile(path)
 		if err == nil && len(data) > 0 {
@@ -287,6 +396,9 @@ func (b *TokenBudget) RecordRoundUsage(roundTokens int, roundCostUSD float64, pr
 		if state.DayCost == nil {
 			state.DayCost = make(map[string]float64)
 		}
+		if state.Tasks == nil {
+			state.Tasks = make(map[string]TaskLedgerEntry)
+		}
 
 		today := time.Now().Format("2006-01-02")
 		teamID := b.TeamID
@@ -299,15 +411,36 @@ func (b *TokenBudget) RecordRoundUsage(roundTokens int, roundCostUSD float64, pr
 		state.DayTokens[today] += roundTokens
 		state.DayCost[today] += roundCostUSD
 
+		if b.TaskID != "" {
+			curTask := state.Tasks[b.TaskID]
+			curTask.Tokens += int64(roundTokens)
+			curTask.USD += roundCostUSD
+			state.Tasks[b.TaskID] = curTask
+		}
+
 		b.UsedTeamTokens = state.TeamTokens[teamID]
 		b.UsedTeamCost = state.TeamCost[teamID]
 		b.UsedDayTokens = state.DayTokens[today]
 		b.UsedDayCost = state.DayCost[today]
 
-		if marshaled, err := json.MarshalIndent(state, "", "  "); err == nil {
-			_ = os.WriteFile(path, marshaled, 0600)
+		marshaled, err := json.MarshalIndent(state, "", "  ")
+		if err != nil {
+			return err
 		}
+		dir := filepath.Dir(path)
+		if dir != "" {
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				return err
+			}
+		}
+		if err := os.WriteFile(path, marshaled, 0600); err != nil {
+			return err
+		}
+		return os.Chmod(path, 0600)
 	})
+	if errLock != nil {
+		b.LedgerError = errLock
+	}
 }
 
 func getEnv(keys ...string) string {

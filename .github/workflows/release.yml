@@ -26,6 +26,7 @@ permissions:
 jobs:
   prepare-release:
     name: Prepare Release Metadata
+    if: "!contains(github.ref, '-enterprise')"
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}

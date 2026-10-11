@@ -13,7 +13,9 @@ import (
 	"strings"
 	"testing"
 
+	"artix/pkg/audit"
 	"artix/pkg/persona"
+	"artix/pkg/pilot"
 	"artix/pkg/policy"
 )
 
@@ -149,8 +151,9 @@ func TestWebhookServer_GitHub_PingAndIssue(t *testing.T) {
 	issuePayload := map[string]interface{}{
 		"action": "opened",
 		"issue": map[string]string{
-			"title": "/artix: Implement caching",
-			"body":  "Add Redis caching to hot query paths",
+			"title":              "/artix: Implement caching",
+			"body":               "Add Redis caching to hot query paths",
+			"author_association": "MEMBER",
 		},
 		"repository": map[string]interface{}{
 			"clone_url": "https://github.com/org/repo.git",
@@ -228,6 +231,10 @@ func TestWebhookServer_GitLab_Issue(t *testing.T) {
 
 func TestRemoteWorker_Execute_LocalSimulated(t *testing.T) {
 	t.Setenv("ARTIX_ALLOW_AUTONOMOUS", "1")
+	t.Setenv("GIT_AUTHOR_NAME", "Artix Bot")
+	t.Setenv("GIT_AUTHOR_EMAIL", "bot@artix.ai")
+	t.Setenv("GIT_COMMITTER_NAME", "Artix Bot")
+	t.Setenv("GIT_COMMITTER_EMAIL", "bot@artix.ai")
 	remoteDir, err := os.MkdirTemp("", "kritix-sim-remote-*")
 	if err != nil {
 		t.Fatalf("failed to create temp remote dir: %v", err)
@@ -254,7 +261,7 @@ func TestRemoteWorker_Execute_LocalSimulated(t *testing.T) {
 
 	// Set up basic Go project so test execution passes
 	_ = os.WriteFile(filepath.Join(remoteDir, "go.mod"), []byte("module simrepo\n\ngo 1.22\n"), 0644)
-	_ = os.WriteFile(filepath.Join(remoteDir, "sim_test.go"), []byte("package simrepo\nimport \"testing\"\nfunc TestDummy(t *testing.T){}\n"), 0644)
+	_ = os.WriteFile(filepath.Join(remoteDir, "sim_test.go"), []byte("package simrepo\nimport \"testing\"\nfunc TestDummy(t *testing.T) {\n\ta, b := 1, 1\n\tif a+b != 2 { t.Fatalf(\"math broke\") }\n}\n"), 0644)
 	_ = os.WriteFile(filepath.Join(remoteDir, "README.md"), []byte("# Simulated Repo\n"), 0644)
 	runCmd(remoteDir, "git", "add", ".")
 	runCmd(remoteDir, "git", "commit", "-m", "initial commit")
@@ -275,6 +282,11 @@ func TestRemoteWorker_Execute_LocalSimulated(t *testing.T) {
 	registry := persona.NewRegistry("")
 	worker := NewRemoteWorker(workDir, registry, "", "localhost", "127.0.0.1")
 	worker.SetAllowInsecureLocalCloneForTest(true)
+	policy.SetActivePolicyForTest(&policy.Policy{
+		IsVerified:      true,
+		AllowAutonomous: true,
+	})
+	defer policy.ResetTestPolicy()
 
 	task := &RemoteWorkerTask{
 		Target: RemoteRepoTarget{
@@ -319,6 +331,85 @@ func TestRemoteWorker_Execute_LocalSimulated(t *testing.T) {
 	}
 }
 
+func TestRemoteWorker_EnforceDisjointModelFamilies_RejectsEmptyFamily(t *testing.T) {
+	workDir := t.TempDir()
+	remoteDir := t.TempDir()
+
+	runCmd := func(dir string, name string, args ...string) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("cmd %s %v failed: %v\nOutput: %s", name, args, err, string(out))
+		}
+	}
+
+	runCmd(remoteDir, "git", "init", "-b", "main")
+	runCmd(remoteDir, "git", "config", "user.name", "Test Admin")
+	runCmd(remoteDir, "git", "config", "user.email", "admin@test.local")
+	_ = os.WriteFile(filepath.Join(remoteDir, "go.mod"), []byte("module simrepo\n\ngo 1.22\n"), 0644)
+	_ = os.WriteFile(filepath.Join(remoteDir, "sim_test.go"), []byte("package simrepo\nimport \"testing\"\nfunc TestDummy(t *testing.T) {\n\ta, b := 1, 1\n\tif a+b != 2 { t.Fatalf(\"math broke\") }\n}\n"), 0644)
+	_ = os.WriteFile(filepath.Join(remoteDir, "README.md"), []byte("# Simulated Repo\n"), 0644)
+	runCmd(remoteDir, "git", "add", ".")
+	runCmd(remoteDir, "git", "commit", "-m", "initial commit")
+
+	forgeMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id": 101, "number": 1, "state": "open"}`))
+	}))
+	defer forgeMock.Close()
+
+	registry := persona.NewRegistry("")
+	worker := NewRemoteWorker(workDir, registry, "", "localhost", "127.0.0.1")
+	worker.SetAllowInsecureLocalCloneForTest(true)
+	policy.SetActivePolicyForTest(&policy.Policy{
+		IsVerified:      true,
+		AllowAutonomous: true,
+		Reviewer: policy.ReviewerPolicyConfig{
+			EnforceDisjointModelFamilies: true,
+		},
+	})
+	defer policy.ResetTestPolicy()
+
+	task := &RemoteWorkerTask{
+		Target: RemoteRepoTarget{
+			CloneURL: remoteDir,
+			Owner:    "sim",
+			Repo:     "repo",
+			Branch:   "main",
+		},
+		Auth: ForgeAuth{
+			Type:    ForgeGitHub,
+			Token:   "dummy-token",
+			BaseURL: forgeMock.URL,
+		},
+		Prompt:       "Add an architecture section to README.md",
+		Domain:       "backend_engineer",
+		CoderFamily:  "", // empty family must be rejected under EnforceDisjointModelFamilies
+		CriticFamily: "",
+		MockPatchGen: func(round int, feedback string) string {
+			return `diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1,1 +1,3 @@
+ # Simulated Repo
++
++## Architecture
+`
+		},
+	}
+
+	ctx := context.Background()
+	result := worker.Execute(ctx, task)
+
+	if result.Success {
+		t.Fatalf("expected remote worker to REJECT empty model families under EnforceDisjointModelFamilies, but it succeeded")
+	}
+	if !strings.Contains(result.Error, "model families must be explicitly configured") && !strings.Contains(result.Error, "disjoint model families") {
+		t.Errorf("expected error mentioning disjoint model families, got: %s", result.Error)
+	}
+}
+
 func TestWebhookServer_ConcurrencyAndQueueCap(t *testing.T) {
 	cfg := WebhookServerConfig{
 		DefaultDomain:     "backend_engineer",
@@ -334,7 +425,8 @@ func TestWebhookServer_ConcurrencyAndQueueCap(t *testing.T) {
 			"action": "opened",
 			"issue": {
 				"title": "/artix: Fix memory leak",
-				"body": "Profile traces show unbounded slice growth"
+				"body": "Profile traces show unbounded slice growth",
+				"author_association": "MEMBER"
 			},
 			"repository": {
 				"clone_url": "https://github.com/myorg/myrepo.git",
@@ -381,7 +473,11 @@ func TestWebhookServer_DeliveryDeduplication(t *testing.T) {
 
 	payload := []byte(`{
 		"action": "opened",
-		"issue": {"title": "/artix: Fix bug", "body": "description"},
+		"issue": {
+			"title": "/artix: Fix bug",
+			"body": "description",
+			"author_association": "MEMBER"
+		},
 		"repository": {
 			"clone_url": "https://github.com/myorg/myrepo.git",
 			"name": "myrepo",
@@ -425,7 +521,11 @@ func TestWebhookServer_StatePersistenceAndRecovery(t *testing.T) {
 
 	payload := []byte(`{
 		"action": "opened",
-		"issue": {"title": "/artix: Fix memory leak", "body": "description"},
+		"issue": {
+			"title": "/artix: Fix memory leak",
+			"body": "description",
+			"author_association": "MEMBER"
+		},
 		"repository": {
 			"clone_url": "https://github.com/myorg/myrepo.git",
 			"name": "myrepo",
@@ -1054,3 +1154,500 @@ func TestG6_BodyContainingSteeringOrPolicyInstructions(t *testing.T) {
 		}
 	}
 }
+
+func TestR2_2_GitHub_RejectsEmptyTargetCommitSHA(t *testing.T) {
+	prJSON := `{"user":{"login":"alice","type":"User"},"head":{"sha":"commit-abc"}}`
+	reviewsJSON := `[{"id":1,"user":{"login":"bob","type":"User"},"state":"APPROVED","commit_id":"commit-abc"}]`
+	srv, client := setupMockGitHubReviewServer(prJSON, reviewsJSON, 200, 200)
+	defer srv.Close()
+
+	target := &RemoteRepoTarget{Owner: "acme", Repo: "core"}
+	approval, err := client.VerifyPRApproval(context.Background(), target, 42, "")
+	if err == nil || approval != nil {
+		t.Fatalf("expected error when targetCommitSHA is empty, got approval=%+v, err=nil", approval)
+	}
+	if !strings.Contains(err.Error(), "targetCommitSHA") && !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("expected error mentioning targetCommitSHA / empty, got: %v", err)
+	}
+}
+
+func TestR2_2_GitHub_Pagination_CatchesPage2ChangesRequested(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/pulls/42") {
+			_, _ = w.Write([]byte(`{"user":{"login":"alice","type":"User"},"head":{"sha":"commit-abc"}}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/pulls/42/reviews") {
+			page := r.URL.Query().Get("page")
+			if page == "1" || page == "" {
+				// Page 1 has 100 items (or full page) with an APPROVED review from bob
+				var items []map[string]any
+				for i := 1; i <= 100; i++ {
+					items = append(items, map[string]any{
+						"id":        i,
+						"user":      map[string]any{"login": "bob", "type": "User"},
+						"state":     "APPROVED",
+						"commit_id": "commit-abc",
+					})
+				}
+				_ = json.NewEncoder(w).Encode(items)
+				return
+			}
+			if page == "2" {
+				// Page 2 has a CHANGES_REQUESTED review from charlie
+				_ = json.NewEncoder(w).Encode([]map[string]any{
+					{
+						"id":        101,
+						"user":      map[string]any{"login": "charlie", "type": "User"},
+						"state":     "CHANGES_REQUESTED",
+						"commit_id": "commit-abc",
+					},
+				})
+				return
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	client := NewGitHubClient(ForgeAuth{Type: ForgeGitHub, Token: "tok", BaseURL: srv.URL})
+	target := &RemoteRepoTarget{Owner: "acme", Repo: "core"}
+	approval, err := client.VerifyPRApproval(context.Background(), target, 42, "commit-abc")
+	if err == nil || approval != nil {
+		t.Fatalf("expected error when page 2 has CHANGES_REQUESTED, got approval=%+v, err=nil", approval)
+	}
+	if !strings.Contains(err.Error(), "changes requested") && !strings.Contains(err.Error(), "CHANGES_REQUESTED") {
+		t.Fatalf("expected error mentioning changes requested on page 2, got: %v", err)
+	}
+}
+
+func TestR2_2_GitHub_AnyChangesRequestedBlocks(t *testing.T) {
+	prJSON := `{"user":{"login":"alice","type":"User"},"head":{"sha":"commit-abc"}}`
+	reviewsJSON := `[
+		{"id":1,"user":{"login":"bob","type":"User"},"state":"APPROVED","commit_id":"commit-abc"},
+		{"id":2,"user":{"login":"charlie","type":"User"},"state":"CHANGES_REQUESTED","commit_id":"commit-abc"}
+	]`
+	srv, client := setupMockGitHubReviewServer(prJSON, reviewsJSON, 200, 200)
+	defer srv.Close()
+
+	target := &RemoteRepoTarget{Owner: "acme", Repo: "core"}
+	approval, err := client.VerifyPRApproval(context.Background(), target, 42, "commit-abc")
+	if err == nil || approval != nil {
+		t.Fatalf("expected error when any reviewer requested changes, got approval=%+v, err=nil", approval)
+	}
+	if !strings.Contains(err.Error(), "changes requested") {
+		t.Fatalf("expected error mentioning changes requested, got: %v", err)
+	}
+}
+
+func TestR2_2_GitLab_VerifyMRApproval(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/merge_requests/10") {
+			_, _ = w.Write([]byte(`{
+				"id": 10,
+				"iid": 10,
+				"sha": "commit-gl-123",
+				"state": "opened",
+				"author": {"username": "alice"}
+			}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/merge_requests/10/approvals") {
+			_, _ = w.Write([]byte(`{
+				"id": 10,
+				"iid": 10,
+				"approved_by": [
+					{"user": {"id": 2, "username": "bob", "name": "Bob"}}
+				]
+			}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	client := NewGitLabClient(ForgeAuth{Type: ForgeGitLab, Token: "gl-tok", BaseURL: srv.URL})
+	target := &RemoteRepoTarget{Owner: "mygroup", Repo: "myproj"}
+
+	// 1. Success case
+	appr, err := client.VerifyMRApproval(context.Background(), target, 10, "commit-gl-123")
+	if err != nil {
+		t.Fatalf("expected successful GitLab approval verification, got: %v", err)
+	}
+	if appr == nil || appr.ApproverUsername != "bob" || appr.State != "APPROVED" {
+		t.Fatalf("unexpected approval payload: %+v", appr)
+	}
+
+	// 2. Empty target commit SHA
+	_, errEmpty := client.VerifyMRApproval(context.Background(), target, 10, "")
+	if errEmpty == nil {
+		t.Fatalf("expected error with empty targetCommitSHA")
+	}
+
+	// 3. Stale commit SHA
+	_, errStale := client.VerifyMRApproval(context.Background(), target, 10, "stale-commit-sha")
+	if errStale == nil {
+		t.Fatalf("expected error with stale targetCommitSHA")
+	}
+}
+
+func TestR2_2_Policy_ValidateForgeApproval_RejectsForgedApprovalWithoutSignature(t *testing.T) {
+	policy.ResetCache()
+	defer policy.ResetCache()
+	t.Setenv("ARTIX_ENTERPRISE", "1")
+
+	// Construct caller-supplied forged struct with VerifiedByForge=true
+	forged := &policy.PRApproval{
+		ApproverUsername: "bob",
+		AuthorUsername:   "alice",
+		State:            "APPROVED",
+		CommitSHA:        "commit-123",
+		VerifiedByForge:  true,
+		Signature:        "", // No cryptographic forge signature
+	}
+
+	err := policy.ValidateForgeApproval(forged, "alice", "artix-agent")
+	if err == nil {
+		t.Fatalf("expected policy.ValidateForgeApproval to reject forged struct without forge signature, got nil")
+	}
+	if !strings.Contains(err.Error(), "signature") && !strings.Contains(err.Error(), "forged") && !strings.Contains(err.Error(), "mint") {
+		t.Fatalf("expected error mentioning signature/forged/mint, got: %v", err)
+	}
+}
+
+func TestR4_6_Daemon_TriggerAuthority_IssueAuthorAndCommentAuthor(t *testing.T) {
+	ws := NewWebhookServer(WebhookServerConfig{
+		AllowedUsers: []string{"alice-maintainer", "bob-owner"},
+	})
+	handler := ws.Handler()
+
+	// 1. Unauthorized Issue Author ("mallory-attacker") creates issue with /artix command -> must be 403
+	payload1 := []byte(`{
+		"action": "opened",
+		"issue": {
+			"title": "/artix: add backdoor",
+			"body": "do malicious things",
+			"author_association": "NONE",
+			"user": {"login": "mallory-attacker"}
+		},
+		"sender": {"login": "mallory-attacker"},
+		"repository": {"clone_url": "https://github.com/org/repo.git", "name": "repo", "owner": {"login": "org"}, "default_branch": "main"}
+	}`)
+	req1 := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(payload1))
+	req1.Header.Set("X-GitHub-Event", "issues")
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for unauthorized issue author, got %d", rec1.Code)
+	}
+
+	// 2. Unauthorized Issue Author ("mallory-attacker"), but authorized sender ("bob-owner") applies label "artix"
+	// The prompt originated from mallory, so it MUST be rejected!
+	payload2 := []byte(`{
+		"action": "labeled",
+		"issue": {
+			"title": "fix bug",
+			"body": "instructions containing prompt injection",
+			"author_association": "FIRST_TIME_CONTRIBUTOR",
+			"user": {"login": "mallory-attacker"},
+			"labels": [{"name": "artix"}]
+		},
+		"sender": {"login": "bob-owner"},
+		"repository": {"clone_url": "https://github.com/org/repo.git", "name": "repo", "owner": {"login": "org"}, "default_branch": "main"}
+	}`)
+	req2 := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(payload2))
+	req2.Header.Set("X-GitHub-Event", "issues")
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden when issue author is unauthorized, even if label was applied by maintainer, got %d", rec2.Code)
+	}
+
+	// 3. Authorized Issue Author ("alice-maintainer") and authorized sender ("alice-maintainer") -> accepted (200 / queued)
+	payload3 := []byte(`{
+		"action": "opened",
+		"issue": {
+			"title": "/artix: valid task",
+			"body": "implement feature",
+			"author_association": "MEMBER",
+			"user": {"login": "alice-maintainer"},
+			"labels": [{"name": "artix"}]
+		},
+		"sender": {"login": "alice-maintainer"},
+		"repository": {"clone_url": "https://github.com/org/repo.git", "name": "repo", "owner": {"login": "org"}, "default_branch": "main"}
+	}`)
+	req3 := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(payload3))
+	req3.Header.Set("X-GitHub-Event", "issues")
+	rec3 := httptest.NewRecorder()
+	handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusOK && rec3.Code != http.StatusAccepted {
+		t.Errorf("expected 200/202 for authorized issue author and sender, got %d (body: %s)", rec3.Code, rec3.Body.String())
+	}
+}
+
+func TestR5_4_Daemon_DefaultDeny_And_IssueComment_Authorization(t *testing.T) {
+	// Server configured WITHOUT AllowedUsers: must rely on author_association with default-deny
+	ws := NewWebhookServer(WebhookServerConfig{})
+	handler := ws.Handler()
+
+	// 1. Default-deny: Author association empty outside enterprise mode -> must be 403 Forbidden (not permitted by default)
+	payloadEmptyAssoc := []byte(`{
+		"action": "opened",
+		"issue": {
+			"title": "/artix: task",
+			"body": "do something",
+			"author_association": "",
+			"user": {"login": "unknown-user"}
+		},
+		"sender": {"login": "unknown-user"},
+		"repository": {"clone_url": "https://github.com/org/repo.git", "name": "repo", "owner": {"login": "org"}, "default_branch": "main"}
+	}`)
+	req1 := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(payloadEmptyAssoc))
+	req1.Header.Set("X-GitHub-Event", "issues")
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for empty author_association under default-deny, got %d", rec1.Code)
+	}
+
+	// 2. Sender authorization always checked: authorized issue author ("MEMBER") but unauthorized sender ("NONE") applying label
+	payloadUnauthorizedSender := []byte(`{
+		"action": "labeled",
+		"issue": {
+			"title": "valid issue",
+			"body": "valid spec",
+			"author_association": "MEMBER",
+			"user": {"login": "member-alice"},
+			"labels": [{"name": "artix"}]
+		},
+		"sender": {"login": "random-attacker", "author_association": "NONE"},
+		"repository": {"clone_url": "https://github.com/org/repo.git", "name": "repo", "owner": {"login": "org"}, "default_branch": "main"}
+	}`)
+	req2 := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(payloadUnauthorizedSender))
+	req2.Header.Set("X-GitHub-Event", "issues")
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden when trigger sender is unauthorized, got %d", rec2.Code)
+	}
+
+	// 3. Issue comment: /artix comment by unauthorized commenter -> must be 403 Forbidden
+	payloadCommentUnauthorized := []byte(`{
+		"action": "created",
+		"issue": {
+			"title": "core feature",
+			"body": "spec description",
+			"author_association": "MEMBER",
+			"user": {"login": "member-alice"}
+		},
+		"comment": {
+			"body": "/artix run task",
+			"author_association": "NONE",
+			"user": {"login": "mallory-attacker"}
+		},
+		"sender": {"login": "mallory-attacker", "author_association": "NONE"},
+		"repository": {"clone_url": "https://github.com/org/repo.git", "name": "repo", "owner": {"login": "org"}, "default_branch": "main"}
+	}`)
+	req3 := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(payloadCommentUnauthorized))
+	req3.Header.Set("X-GitHub-Event", "issue_comment")
+	rec3 := httptest.NewRecorder()
+	handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for unauthorized /artix comment author, got %d", rec3.Code)
+	}
+
+	// 4. Issue comment: /artix comment by authorized commenter ("COLLABORATOR") on authorized issue ("MEMBER") -> 200/202
+	payloadCommentAuthorized := []byte(`{
+		"action": "created",
+		"issue": {
+			"title": "core feature",
+			"body": "spec description",
+			"author_association": "MEMBER",
+			"user": {"login": "member-alice"}
+		},
+		"comment": {
+			"body": "/artix implement feature",
+			"author_association": "COLLABORATOR",
+			"user": {"login": "collab-bob"}
+		},
+		"sender": {"login": "collab-bob", "author_association": "COLLABORATOR"},
+		"repository": {"clone_url": "https://github.com/org/repo.git", "name": "repo", "owner": {"login": "org"}, "default_branch": "main"}
+	}`)
+	req4 := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(payloadCommentAuthorized))
+	req4.Header.Set("X-GitHub-Event", "issue_comment")
+	rec4 := httptest.NewRecorder()
+	handler.ServeHTTP(rec4, req4)
+	if rec4.Code != http.StatusOK && rec4.Code != http.StatusAccepted {
+		t.Errorf("expected 200/202 for authorized /artix comment, got %d (body: %s)", rec4.Code, rec4.Body.String())
+	}
+}
+
+// TestR6_5_IssueCommentAuthorizesOnCommentAuthorWithoutSenderAssociation verifies that
+// issue_comment webhooks strictly check the comment author's identity and association,
+// correctly handling realistic GitHub payloads where sender object does not carry author_association.
+func TestR6_5_IssueCommentAuthorizesOnCommentAuthorWithoutSenderAssociation(t *testing.T) {
+	ws := NewWebhookServer(WebhookServerConfig{})
+	handler := ws.Handler()
+
+	// 1. Issue created by OWNER, but /artix comment created by NONE (attacker), sender has no author_association -> 403 Forbidden
+	unauthorizedCommentPayload := []byte(`{
+		"action": "created",
+		"issue": {
+			"title": "production task",
+			"body": "task description",
+			"author_association": "OWNER",
+			"user": {"login": "repo-owner"}
+		},
+		"comment": {
+			"body": "/artix execute malicious command",
+			"author_association": "NONE",
+			"user": {"login": "untrusted-commenter"}
+		},
+		"sender": {
+			"login": "untrusted-commenter"
+		},
+		"repository": {
+			"clone_url": "https://github.com/org/repo.git",
+			"name": "repo",
+			"owner": {"login": "org"},
+			"default_branch": "main"
+		}
+	}`)
+	req1 := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(unauthorizedCommentPayload))
+	req1.Header.Set("X-GitHub-Event", "issue_comment")
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+
+	if rec1.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden when comment author is NONE (attacker), got: %d (%s)", rec1.Code, rec1.Body.String())
+	}
+
+	// 2. Issue created by MEMBER, /artix comment created by COLLABORATOR, sender has no author_association -> 202 Accepted
+	authorizedCommentPayload := []byte(`{
+		"action": "created",
+		"issue": {
+			"title": "production task",
+			"body": "task description",
+			"author_association": "MEMBER",
+			"user": {"login": "member-user"}
+		},
+		"comment": {
+			"body": "/artix build feature",
+			"author_association": "COLLABORATOR",
+			"user": {"login": "collab-user"}
+		},
+		"sender": {
+			"login": "collab-user"
+		},
+		"repository": {
+			"clone_url": "https://github.com/org/repo.git",
+			"name": "repo",
+			"owner": {"login": "org"},
+			"default_branch": "main"
+		}
+	}`)
+	req2 := httptest.NewRequest(http.MethodPost, "/webhook/github", bytes.NewReader(authorizedCommentPayload))
+	req2.Header.Set("X-GitHub-Event", "issue_comment")
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusAccepted && rec2.Code != http.StatusOK {
+		t.Fatalf("expected 202 Accepted when comment author is COLLABORATOR, got: %d (%s)", rec2.Code, rec2.Body.String())
+	}
+}
+
+func TestWebhookServer_TasksEndpoint(t *testing.T) {
+	cfg := WebhookServerConfig{
+		DefaultDomain: "backend_engineer",
+	}
+	server := NewWebhookServer(cfg)
+	handler := server.Handler()
+
+	// 1. Submit task
+	payload := []byte(`{"prompt":"Add OAuth2 authentication","domain":"backend_engineer"}`)
+	req := httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted for /tasks POST, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var res map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("failed to unmarshal /tasks response: %v", err)
+	}
+	if res["taskId"] == nil || res["status"] != "queued" {
+		t.Errorf("unexpected /tasks response: %+v", res)
+	}
+
+	// 2. Query tasks
+	getReq := httptest.NewRequest(http.MethodGet, "/tasks", nil)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for /tasks GET, got %d", getRec.Code)
+	}
+}
+
+func TestWebhookServer_PilotStopRule_RefusesJob(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Seed audit log with 2 failed jobs
+	_ = audit.Default(tempDir).Emit(audit.AuditEvent{
+		EventType:   audit.EventCodeConvergence,
+		Status:      "FAILED",
+		StorySpecID: "FAIL-1",
+	})
+	_ = audit.Default(tempDir).Emit(audit.AuditEvent{
+		EventType:   audit.EventCodeConvergence,
+		Status:      "FAILED",
+		StorySpecID: "FAIL-2",
+	})
+
+	cfg := WebhookServerConfig{
+		DefaultDomain: "backend_engineer",
+		WorkspaceDir:  tempDir,
+		PilotStopRuleConfig: pilot.PilotStopRuleConfig{
+			MaxAbortRate: 0.50,
+		},
+	}
+	server := NewWebhookServer(cfg)
+	handler := server.Handler()
+
+	payload := []byte(`{"prompt":"Implement feature","domain":"backend_engineer"}`)
+	req := httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 Service Unavailable when stop rule exceeded, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "abort rate") {
+		t.Errorf("expected response body to name 'abort rate', got: %s", rec.Body.String())
+	}
+
+	// Verify STOP_RULE_TRIGGERED audit event
+	events, err := audit.Default(tempDir).ReadEvents()
+	if err != nil {
+		t.Fatalf("failed to read audit events: %v", err)
+	}
+	found := false
+	for _, e := range events {
+		if e.EventType == "STOP_RULE_TRIGGERED" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected STOP_RULE_TRIGGERED audit event")
+	}
+}
+

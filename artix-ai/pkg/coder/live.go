@@ -11,13 +11,15 @@ import (
 // providerEnv maps each supported provider to the environment variable holding its API key.
 // Keys are read from the environment only: never stored, never logged.
 var providerEnv = map[model.Provider]string{
-	model.ProviderAnthropic: "ANTHROPIC_API_KEY",
-	model.ProviderOpenAI:    "OPENAI_API_KEY",
-	model.ProviderGemini:    "GEMINI_API_KEY",
-	model.ProviderGrok:      "XAI_API_KEY",
-	model.ProviderDeepSeek:  "DEEPSEEK_API_KEY",
-	model.ProviderMistral:   "MISTRAL_API_KEY",
-	model.ProviderOllama:    "", // local, no key
+	model.ProviderAnthropic:   "ANTHROPIC_API_KEY",
+	model.ProviderOpenAI:      "OPENAI_API_KEY",
+	model.ProviderGemini:      "GEMINI_API_KEY",
+	model.ProviderGrok:        "XAI_API_KEY",
+	model.ProviderDeepSeek:    "DEEPSEEK_API_KEY",
+	model.ProviderMistral:     "MISTRAL_API_KEY",
+	model.ProviderOllama:      "", // local, no key
+	model.Provider("BEDROCK"): "AWS_ACCESS_KEY_ID",
+	model.Provider("AWS"):     "AWS_ACCESS_KEY_ID",
 }
 
 // NewAPIRunnerFromEnv builds a direct-API runner and agent for the named provider, taking the
@@ -26,7 +28,7 @@ func NewAPIRunnerFromEnv(providerName, modelName string, getenv func(string) str
 	provider := model.Provider(strings.ToUpper(strings.TrimSpace(providerName)))
 	envVar, ok := providerEnv[provider]
 	if !ok {
-		return nil, model.Agent{}, fmt.Errorf("unsupported provider %q (supported: anthropic, openai, gemini, grok, deepseek, mistral, ollama)", providerName)
+		return nil, model.Agent{}, fmt.Errorf("unsupported provider %q (supported: anthropic, openai, gemini, grok, deepseek, mistral, ollama, bedrock)", providerName)
 	}
 	if strings.TrimSpace(modelName) == "" {
 		return nil, model.Agent{}, fmt.Errorf("a model name is required for provider %s", providerName)
@@ -41,5 +43,9 @@ func NewAPIRunnerFromEnv(providerName, modelName string, getenv func(string) str
 	}
 	agent := model.NewAgent(provider, modelName)
 	agent.RunMode = model.RunModeAPI
-	return runner.NewApiAgentRunner(keys), agent, nil
+	apiRunner := runner.NewApiAgentRunner(keys)
+	if customURL := getenv("ARTIX_API_URL"); customURL != "" {
+		apiRunner.URLs[provider] = customURL
+	}
+	return apiRunner, agent, nil
 }

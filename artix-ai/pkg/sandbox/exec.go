@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -61,6 +62,105 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 	}
 	c.buf.Write(p)
 	return n, nil
+}
+
+// BuildSanitizedChildEnv constructs a clean child process environment from an allowlist
+// (PATH, HOME=temp, LANG, GOPATH, GOCACHE, etc.) and strictly strips all provider, forge,
+// audit, and secret variables.
+func BuildSanitizedChildEnv(cwd string, extraEnv map[string]string) []string {
+	allowlistKeys := map[string]bool{
+		"PATH":             true,
+		"LANG":             true,
+		"LC_ALL":           true,
+		"LC_CTYPE":         true,
+		"TERM":             true,
+		"TZ":               true,
+		"USER":             true,
+		"LOGNAME":          true,
+		"SHELL":            true,
+		"GOPATH":           true,
+		"GOROOT":           true,
+		"GOCACHE":          true,
+		"GOPROXY":          true,
+		"GONOSUMDB":        true,
+		"GOPRIVATE":        true,
+		"GOFLAGS":          true,
+		"CGO_ENABLED":      true,
+		"GO111MODULE":      true,
+		"GOMODCACHE":       true,
+		"GOTMPDIR":         true,
+		"TMPDIR":           true,
+		"TEMP":             true,
+		"TMP":              true,
+		"NODE_PATH":        true,
+		"PYTHONPATH":       true,
+		"CARGO_HOME":       true,
+		"RUSTUP_HOME":      true,
+		"GRADLE_USER_HOME": true,
+		"M2_HOME":          true,
+	}
+
+	isDeniedKey := func(key string) bool {
+		kUpper := strings.ToUpper(key)
+		if strings.Contains(kUpper, "TOKEN") ||
+			strings.Contains(kUpper, "KEY") ||
+			strings.Contains(kUpper, "SECRET") ||
+			strings.Contains(kUpper, "PASSWORD") ||
+			strings.Contains(kUpper, "AUTH") ||
+			strings.Contains(kUpper, "CREDENTIAL") ||
+			strings.Contains(kUpper, "FORGE") ||
+			strings.Contains(kUpper, "AUDIT") ||
+			strings.Contains(kUpper, "SIGN") ||
+			strings.Contains(kUpper, "ENTERPRISE") ||
+			strings.Contains(kUpper, "OPENAI") ||
+			strings.Contains(kUpper, "ANTHROPIC") ||
+			strings.Contains(kUpper, "GEMINI") ||
+			strings.Contains(kUpper, "GITHUB") ||
+			strings.Contains(kUpper, "GITLAB") ||
+			strings.Contains(kUpper, "BITBUCKET") ||
+			strings.Contains(kUpper, "AWS") ||
+			strings.Contains(kUpper, "SSH") ||
+			strings.Contains(kUpper, "PRIVATE") ||
+			strings.Contains(kUpper, "BEARER") ||
+			strings.HasPrefix(kUpper, "KRITIX_") {
+			return true
+		}
+		if strings.HasPrefix(kUpper, "ARTIX_") && !strings.HasPrefix(kUpper, "ARTIX_ARG_") {
+			return true
+		}
+		return false
+	}
+
+	var childEnv []string
+	for _, envStr := range os.Environ() {
+		parts := strings.SplitN(envStr, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		k, v := parts[0], parts[1]
+		if isDeniedKey(k) {
+			continue
+		}
+		if allowlistKeys[strings.ToUpper(k)] {
+			childEnv = append(childEnv, fmt.Sprintf("%s=%s", k, v))
+		}
+	}
+
+	// Set HOME to workspace temp directory
+	sandboxHome := filepath.Join(os.TempDir(), "artix-sandbox-home")
+	_ = os.MkdirAll(sandboxHome, 0700)
+	childEnv = append(childEnv, fmt.Sprintf("HOME=%s", sandboxHome))
+
+	// Merge extraEnv (filtering out denied keys)
+	if extraEnv != nil {
+		for k, v := range extraEnv {
+			if !isDeniedKey(k) {
+				childEnv = append(childEnv, fmt.Sprintf("%s=%s", k, v))
+			}
+		}
+	}
+
+	return childEnv
 }
 
 // Sandbox provides safe, isolated command execution.
@@ -124,12 +224,11 @@ func (s *Sandbox) Run(ctx context.Context, cmdStr string, opts *ExecOptions) *Ex
 	cmd.Stdout = stdoutBuf
 	cmd.Stderr = stderrBuf
 
-	if opts != nil && len(opts.Env) > 0 {
-		cmd.Env = os.Environ() // extend, never replace, the inherited environment
-		for k, v := range opts.Env {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
-		}
+	var extraEnv map[string]string
+	if opts != nil {
+		extraEnv = opts.Env
 	}
+	cmd.Env = BuildSanitizedChildEnv(cwd, extraEnv)
 
 	runErr := cmd.Run()
 	duration := time.Since(start)

@@ -516,3 +516,60 @@ func findRepoRoot(t *testing.T) string {
 	}
 }
 
+// TestHealStudy_FrozenCorpusSemanticSafety validates that the self-healing locator
+// strictly refuses to falsely heal any semantic bug cases present in the frozen corpus.
+// It verifies the safety claim (0 false heals on semantic swaps) on the actual frozen corpus data.
+func TestHealStudy_FrozenCorpusSemanticSafety(t *testing.T) {
+	corpusPath := findCorpusPath(t, "testdata/corpus/independent_heal_corpus.json")
+	data, err := os.ReadFile(corpusPath)
+	if err != nil {
+		t.Fatalf("Failed to read frozen corpus: %v", err)
+	}
+
+	type CorpusMetadata struct {
+		Generator    string `json:"generator"`
+		CorpusSHA256 string `json:"corpus_sha256"`
+	}
+	type IndependentHealCorpus struct {
+		Metadata CorpusMetadata `json:"metadata"`
+		Cases    []HealTestCase `json:"cases"`
+	}
+
+	var corpus IndependentHealCorpus
+	if err := json.Unmarshal(data, &corpus); err != nil {
+		t.Fatalf("Corpus JSON unmarshal error: %v", err)
+	}
+
+	registry := NewSelfHealingLocatorRegistry()
+	var falsePasses int
+	var semanticCasesEvaluated int
+
+	for _, tc := range corpus.Cases {
+		if !tc.IsSemanticBug {
+			continue
+		}
+		semanticCasesEvaluated++
+		fp := ExtractFingerprintFromElement(tc.Original)
+		registry.RegisterFingerprint(fp)
+
+		// Both advisory and strict modes must refuse to pass or heal dangerous swaps
+		res := registry.ResolveWithMode(HealModeAdvisory, fp.ID, tc.LiveCandidates)
+		if res != nil && (res.Status == StatusExactPass || (res.Status == StatusHealed && res.ConfidenceScore >= 0.70)) {
+			falsePasses++
+			resolvedText := ""
+			if res.ResolvedElement != nil {
+				resolvedText = res.ResolvedElement.Text
+			}
+			t.Errorf("[%s] CRITICAL SAFETY BREACH: Semantic swap was falsely healed! Original: %q -> Mutated: %q (score=%.2f)",
+				tc.ID, tc.Original.Text, resolvedText, res.ConfidenceScore)
+		}
+	}
+
+	if semanticCasesEvaluated == 0 {
+		t.Fatalf("Zero semantic bug cases evaluated from corpus")
+	}
+	if falsePasses > 0 {
+		t.Fatalf("SAFETY STUDY VIOLATION: %d / %d semantic swap cases were falsely healed (false pass rate > 0%%)", falsePasses, semanticCasesEvaluated)
+	}
+}
+

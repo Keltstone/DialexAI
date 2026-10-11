@@ -1,6 +1,7 @@
 package knowledge
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -8,7 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+
+	"artix/pkg/policy"
 )
 
 // Store manages persistence of Knowledge Items with schema versioning and enterprise isolation.
@@ -21,7 +25,7 @@ type Store struct {
 
 // NewStore creates a knowledge store for a repository.
 func NewStore(projectDir string) *Store {
-	isEnterprise := os.Getenv("ARTIX_ENTERPRISE") == "1" || os.Getenv("KRITIX_ENTERPRISE") == "1"
+	isEnterprise := policy.IsEnterprise()
 
 	globalDir := ""
 	if !isEnterprise {
@@ -85,7 +89,50 @@ func computeHash(ki *KnowledgeItem) string {
 	return fmt.Sprintf("%x", sum)
 }
 
-// Save persists a Knowledge Item to JSON disk with schema versioning and hash computation.
+var fileLockMu sync.Mutex
+
+func withFileLock(path string, fn func() error) error {
+	fileLockMu.Lock()
+	defer fileLockMu.Unlock()
+
+	dir := filepath.Dir(path)
+	if dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+	}
+
+	lockPath := path + ".lock"
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open lock file %s: %w", lockPath, err)
+	}
+	defer f.Close()
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("failed to acquire flock on %s: %w", lockPath, err)
+	}
+	defer func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}()
+
+	return fn()
+}
+
+func atomicWriteFile(targetFile string, data []byte) error {
+	tmpFile := fmt.Sprintf("%s.tmp.%d", targetFile, time.Now().UnixNano())
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpFile, targetFile); err != nil {
+		_ = os.Remove(tmpFile)
+		return err
+	}
+	return nil
+}
+
+// Save persists a Knowledge Item to JSON disk conditionally (only on change)
+// using atomic write and file locking.
 func (s *Store) Save(ki *KnowledgeItem) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -116,12 +163,115 @@ func (s *Store) Save(ki *KnowledgeItem) error {
 	_ = os.MkdirAll(dir, 0755)
 
 	targetFile := filepath.Join(dir, fmt.Sprintf("%s.json", ki.ID))
-	data, err := json.MarshalIndent(ki, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal knowledge item: %w", err)
+
+	return withFileLock(targetFile, func() error {
+		// Read existing file if present to check if SessionCount or contents should be preserved
+		if existingData, err := os.ReadFile(targetFile); err == nil {
+			var existingKI KnowledgeItem
+			if err := json.Unmarshal(existingData, &existingKI); err == nil {
+				if existingKI.SessionCount > ki.SessionCount {
+					ki.SessionCount = existingKI.SessionCount
+				}
+			}
+		}
+
+		data, err := json.MarshalIndent(ki, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal knowledge item: %w", err)
+		}
+
+		// Conditional save: if content matches disk exactly, skip write
+		if existingData, err := os.ReadFile(targetFile); err == nil {
+			if bytes.Equal(existingData, data) {
+				return nil
+			}
+		}
+
+		return atomicWriteFile(targetFile, data)
+	})
+}
+
+// CompareAndSwapSessionCount atomically updates session count if it matches expected.
+func (s *Store) CompareAndSwapSessionCount(id string, expected, newCount int) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dirs := []string{s.projectDir}
+	if !s.enterpriseMode && s.globalDir != "" {
+		dirs = append(dirs, s.globalDir)
 	}
 
-	return os.WriteFile(targetFile, data, 0644)
+	var targetFile string
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		candidate := filepath.Join(dir, fmt.Sprintf("%s.json", id))
+		if _, err := os.Stat(candidate); err == nil {
+			targetFile = candidate
+			break
+		}
+	}
+	if targetFile == "" {
+		if s.projectDir != "" {
+			targetFile = filepath.Join(s.projectDir, fmt.Sprintf("%s.json", id))
+		} else if s.globalDir != "" {
+			targetFile = filepath.Join(s.globalDir, fmt.Sprintf("%s.json", id))
+		} else {
+			return false, fmt.Errorf("no storage directory available to locate %s", id)
+		}
+	}
+
+	var swapped bool
+	err := withFileLock(targetFile, func() error {
+		data, err := os.ReadFile(targetFile)
+		if err != nil {
+			return err
+		}
+		var ki KnowledgeItem
+		if err := json.Unmarshal(data, &ki); err != nil {
+			return err
+		}
+		if ki.SessionCount != expected {
+			swapped = false
+			return nil
+		}
+		ki.SessionCount = newCount
+		marshaled, err := json.MarshalIndent(&ki, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := atomicWriteFile(targetFile, marshaled); err != nil {
+			return err
+		}
+		swapped = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return swapped, nil
+}
+
+// IncrementSessionCount increments session count using compare-and-swap.
+func (s *Store) IncrementSessionCount(id string) (int, error) {
+	for retries := 0; retries < 100; retries++ {
+		ki, err := s.Get(id)
+		if err != nil {
+			return 0, err
+		}
+		current := ki.SessionCount
+		next := current + 1
+		ok, err := s.CompareAndSwapSessionCount(id, current, next)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			return next, nil
+		}
+		time.Sleep(time.Duration(1+retries) * time.Millisecond)
+	}
+	return 0, fmt.Errorf("failed to increment session count for %s after retries", id)
 }
 
 // Get retrieves a Knowledge Item by ID and applies schema migrations if needed.
@@ -226,7 +376,7 @@ func (s *Store) ListActive() ([]KnowledgeItem, error) {
 	}
 	var active []KnowledgeItem
 	for _, ki := range all {
-		if !ki.IsExpired() {
+		if ki.IsActive() {
 			active = append(active, ki)
 		}
 	}

@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
+	"artix/internal/forgesec"
 	"artix/pkg/policy"
 )
 
@@ -95,6 +98,10 @@ func (c *GitHubClient) CreatePullRequest(target *RemoteRepoTarget, req *PullRequ
 
 // VerifyPRApproval fetches PR and review details server-side from GitHub API.
 func (c *GitHubClient) VerifyPRApproval(ctx context.Context, target *RemoteRepoTarget, prNumber int, targetCommitSHA string) (*policy.PRApproval, error) {
+	if strings.TrimSpace(targetCommitSHA) == "" {
+		return nil, errors.New("forge approval verification failed: targetCommitSHA cannot be empty")
+	}
+
 	// 1. Fetch PR details (Author and Head commit SHA)
 	prURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", c.baseURL, target.Owner, target.Repo, prNumber)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, prURL, nil)
@@ -128,29 +135,11 @@ func (c *GitHubClient) VerifyPRApproval(ctx context.Context, target *RemoteRepoT
 	}
 
 	headSHA := prDetails.Head.SHA
-	if targetCommitSHA != "" && headSHA != targetCommitSHA {
-		return nil, fmt.Errorf("forge approval verification failed: PR head commit %s differs from target commit %s (stale commit)", headSHA, targetCommitSHA)
+	if headSHA != targetCommitSHA {
+		return nil, fmt.Errorf("%w: PR head commit %s differs from target commit %s (stale commit)", ErrStaleCommitMismatch, headSHA, targetCommitSHA)
 	}
 
-	// 2. Fetch all PR reviews
-	reviewsURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews", c.baseURL, target.Owner, target.Repo, prNumber)
-	rReq, err := http.NewRequestWithContext(ctx, http.MethodGet, reviewsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create http request: %w", err)
-	}
-	rReq.Header.Set("Authorization", "Bearer "+c.auth.Token)
-	rReq.Header.Set("Accept", "application/vnd.github.v3+json")
-
-	rResp, err := c.httpClient.Do(rReq)
-	if err != nil {
-		return nil, fmt.Errorf("forge api error fetching reviews: %w", err)
-	}
-	defer rResp.Body.Close()
-
-	if rResp.StatusCode < 200 || rResp.StatusCode >= 300 {
-		return nil, fmt.Errorf("forge api error fetching reviews: status %d", rResp.StatusCode)
-	}
-
+	// 2. Fetch all PR reviews with pagination
 	type GHReview struct {
 		ID   int64 `json:"id"`
 		User struct {
@@ -161,28 +150,98 @@ func (c *GitHubClient) VerifyPRApproval(ctx context.Context, target *RemoteRepoT
 		CommitID string `json:"commit_id"`
 	}
 
-	var reviews []GHReview
-	if err := json.NewDecoder(rResp.Body).Decode(&reviews); err != nil {
-		return nil, fmt.Errorf("failed to decode reviews response: %w", err)
+	var allReviews []GHReview
+	page := 1
+	for {
+		reviewsURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews?per_page=100&page=%d", c.baseURL, target.Owner, target.Repo, prNumber, page)
+		rReq, err := http.NewRequestWithContext(ctx, http.MethodGet, reviewsURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create http request: %w", err)
+		}
+		rReq.Header.Set("Authorization", "Bearer "+c.auth.Token)
+		rReq.Header.Set("Accept", "application/vnd.github.v3+json")
+
+		rResp, err := c.httpClient.Do(rReq)
+		if err != nil {
+			return nil, fmt.Errorf("%w: fetching reviews: %v", ErrForgeUnavailable, err)
+		}
+
+		if rResp.StatusCode < 200 || rResp.StatusCode >= 300 {
+			rResp.Body.Close()
+			return nil, fmt.Errorf("%w: status %d fetching reviews", ErrForgeUnavailable, rResp.StatusCode)
+		}
+
+		var pageReviews []GHReview
+		if err := json.NewDecoder(rResp.Body).Decode(&pageReviews); err != nil {
+			rResp.Body.Close()
+			return nil, fmt.Errorf("failed to decode reviews response: %w", err)
+		}
+		rResp.Body.Close()
+
+		if len(pageReviews) == 0 {
+			break
+		}
+		allReviews = append(allReviews, pageReviews...)
+		if len(pageReviews) < 100 {
+			break
+		}
+		page++
 	}
 
-	if len(reviews) == 0 {
-		return nil, fmt.Errorf("forge approval verification failed: no reviews found on PR #%d", prNumber)
+	if len(allReviews) == 0 {
+		return nil, fmt.Errorf("%w: no reviews found on PR #%d", ErrNoReviewsYet, prNumber)
 	}
 
 	// Order matters: reviews are chronological. Track latest review state per reviewer.
 	latestByUser := make(map[string]GHReview)
-	for _, rev := range reviews {
+	for _, rev := range allReviews {
 		latestByUser[strings.ToLower(rev.User.Login)] = rev
 	}
 
-	// Find an approved review
-	for _, rev := range latestByUser {
+	// Sort reviewers deterministically
+	var logins []string
+	for login := range latestByUser {
+		logins = append(logins, login)
+	}
+	sort.Strings(logins)
+
+	// Any CHANGES_REQUESTED
+	for _, login := range logins {
+		rev := latestByUser[login]
+		if strings.EqualFold(rev.State, "CHANGES_REQUESTED") {
+			isBot := strings.EqualFold(rev.User.Type, "Bot") ||
+				strings.Contains(strings.ToLower(rev.User.Login), "[bot]") ||
+				strings.HasSuffix(strings.ToLower(rev.User.Login), "-bot") ||
+				strings.EqualFold(rev.User.Login, "artix-agent") ||
+				strings.EqualFold(rev.User.Login, "artix-bot")
+			if isBot {
+				return nil, fmt.Errorf("%w: bot %q changes requested (unauthorized rejection)", ErrBotApprover, rev.User.Login)
+			}
+			pol := policy.Active()
+			if len(pol.AllowedApprovers) > 0 {
+				allowed := false
+				for _, a := range pol.AllowedApprovers {
+					if strings.EqualFold(a, rev.User.Login) {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					return nil, fmt.Errorf("%w: unauthorized reviewer %q changes requested", ErrUnauthorizedApprover, rev.User.Login)
+				}
+			}
+			return nil, fmt.Errorf("%w: review changes requested by authorized reviewer %q", ErrChangesRequested, rev.User.Login)
+		}
+	}
+
+	// Find an approved review deterministically
+	for _, login := range logins {
+		rev := latestByUser[login]
 		if strings.EqualFold(rev.State, "APPROVED") {
 			// Check rejections:
 			// 1. Approver == PR author
 			if strings.EqualFold(rev.User.Login, prDetails.User.Login) {
-				return nil, fmt.Errorf("forge approval verification failed: PR author %q cannot approve their own PR", rev.User.Login)
+				return nil, fmt.Errorf("%w: PR author %q cannot approve their own PR", ErrAuthorSelfApproval, rev.User.Login)
 			}
 			// 2. Bot / App account
 			if strings.EqualFold(rev.User.Type, "Bot") ||
@@ -190,11 +249,11 @@ func (c *GitHubClient) VerifyPRApproval(ctx context.Context, target *RemoteRepoT
 				strings.HasSuffix(strings.ToLower(rev.User.Login), "-bot") ||
 				strings.EqualFold(rev.User.Login, "artix-agent") ||
 				strings.EqualFold(rev.User.Login, "artix-bot") {
-				return nil, fmt.Errorf("forge approval verification failed: bot or App account %q cannot approve PR", rev.User.Login)
+				return nil, fmt.Errorf("%w: bot or App account %q cannot approve PR", ErrBotApprover, rev.User.Login)
 			}
 			// 3. Stale commit on review
-			if headSHA != "" && rev.CommitID != "" && rev.CommitID != headSHA {
-				return nil, fmt.Errorf("forge approval verification failed: approval on stale commit %s (current head is %s)", rev.CommitID, headSHA)
+			if rev.CommitID != targetCommitSHA {
+				return nil, fmt.Errorf("%w: approval on stale commit %s (current head is %s)", ErrStaleCommitMismatch, rev.CommitID, targetCommitSHA)
 			}
 			// 4. Allowed approvers in policy
 			pol := policy.Active()
@@ -207,22 +266,31 @@ func (c *GitHubClient) VerifyPRApproval(ctx context.Context, target *RemoteRepoT
 					}
 				}
 				if !allowed {
-					return nil, fmt.Errorf("forge approval verification failed: approver %q is not authorized in allowedApprovers list %v", rev.User.Login, pol.AllowedApprovers)
+					return nil, fmt.Errorf("%w: approver %q is not authorized in allowedApprovers list %v", ErrUnauthorizedApprover, rev.User.Login, pol.AllowedApprovers)
 				}
 			}
 
+			sig := forgesec.SignToken(rev.User.Login, prDetails.User.Login, "APPROVED", rev.CommitID, "github_api_server_verified")
 			return &policy.PRApproval{
 				ApproverUsername: rev.User.Login,
 				AuthorUsername:   prDetails.User.Login,
 				State:            "APPROVED",
 				CommitSHA:        rev.CommitID,
+				Signature:        sig,
 				Source:           "github_api_server_verified",
 				VerifiedByForge:  true,
 			}, nil
 		}
 	}
 
-	return nil, fmt.Errorf("forge approval verification failed: no valid human APPROVED review found")
+	return nil, fmt.Errorf("%w: no valid human APPROVED review found", ErrNoReviewsYet)
+}
+
+// NewGitHubVerifier creates a LoopOptions.ForgeVerifier callback wired to the GitHub API client.
+func NewGitHubVerifier(client *GitHubClient, target *RemoteRepoTarget, prNumber int) func(ctx context.Context, commitSHA string) (*policy.PRApproval, error) {
+	return func(ctx context.Context, commitSHA string) (*policy.PRApproval, error) {
+		return client.VerifyPRApproval(ctx, target, prNumber, commitSHA)
+	}
 }
 
 

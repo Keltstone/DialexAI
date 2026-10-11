@@ -1,0 +1,11 @@
+Contact: mailto:security@artix.ai
+Expires: 2028-12-31T23:59:59.000Z
+Preferred-Languages: en
+Canonical: https://raw.githubusercontent.com/Kolta-Labs/DialexAI/main/.well-known/security.txt
+Policy: https://github.com/Kolta-Labs/DialexAI/security/policy
+
+# Artix AI Official Release Signing Key
+# Principal / Identity: releases@artix.ai
+# Key Type: ED25519 (SSH Format)
+# Public Key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ4FO6aRcfHA07XqA9SGUUfpiqYfLsaRz+KUwigN2K5x
+# Fingerprint (SHA256): SHA256:Dh5vIjePKsm29xfvnLukrKDTOzLM/w5u6rYBcB3hmNg

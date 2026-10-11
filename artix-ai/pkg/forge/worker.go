@@ -13,6 +13,8 @@ import (
 	"artix/pkg/coder"
 	"artix/pkg/git"
 	"artix/pkg/persona"
+	"artix/pkg/plugins"
+	"artix/pkg/policy"
 	"artix/pkg/repo"
 	"artix/pkg/reviewer"
 	"artix/pkg/sandbox"
@@ -26,6 +28,8 @@ type RemoteWorkerTask struct {
 	Auth         ForgeAuth                               `json:"auth"`
 	Prompt       string                                  `json:"prompt"`
 	Domain       string                                  `json:"domain"`
+	CoderFamily  string                                  `json:"coderFamily,omitempty"`
+	CriticFamily string                                  `json:"criticFamily,omitempty"`
 	Critic       reviewer.Critic                         `json:"-"`
 	MockPatchGen func(round int, feedback string) string // for tests
 }
@@ -60,6 +64,14 @@ func NewRemoteWorker(workRoot string, registry *persona.Registry, allowedHosts .
 		registry:          registry,
 		allowedCloneHosts: hosts,
 	}
+}
+
+// WorkRoot returns the base working directory for ephemeral clones.
+func (w *RemoteWorker) WorkRoot() string {
+	if w == nil {
+		return ""
+	}
+	return w.workRoot
 }
 
 // SetAllowInsecureLocalCloneForTest permits local file clones strictly within unit/integration tests.
@@ -143,6 +155,17 @@ func (w *RemoteWorker) Execute(ctx context.Context, task *RemoteWorkerTask) *Rem
 	}
 	res.Branch = branchName
 
+	// Enforce driver allowlist before any LLM planning or warm execution
+	if reg := plugins.NewRegistry(); reg != nil {
+		if buildDrv, ok := reg.DetectDriver(cloneDir); ok {
+			if err := policy.Active().ValidateDriverAllowed(buildDrv.Name()); err != nil {
+				res.Error = fmt.Sprintf("job execution blocked: %v", err)
+				return res
+			}
+			_ = buildDrv.Warm(ctx, cloneDir)
+		}
+	}
+
 	// 3. Plan: Stakeholder Council generates Story Spec
 	council := spec.NewCouncil(w.registry)
 	pCtx := &spec.PlanningContext{
@@ -171,6 +194,21 @@ func (w *RemoteWorker) Execute(ctx context.Context, task *RemoteWorkerTask) *Rem
 	}
 
 	rev := reviewer.NewAdversarialReviewer(w.registry)
+	rev.SetCoderFamily(task.CoderFamily)
+	rev.SetCriticFamily(task.CriticFamily)
+
+	pol := policy.Active()
+	if pol.IsDisjointModelFamiliesEnforced() {
+		if task.CoderFamily == "" || task.CriticFamily == "" {
+			res.Error = fmt.Sprintf("disjoint model families policy violation: model families must be explicitly configured (coder=%q, critic=%q); disjoint model families required", task.CoderFamily, task.CriticFamily)
+			return res
+		}
+		if strings.EqualFold(task.CoderFamily, task.CriticFamily) {
+			res.Error = fmt.Sprintf("disjoint model families policy violation: critic model family %q matches coder family %q (disjoint model families required)", task.CriticFamily, task.CoderFamily)
+			return res
+		}
+	}
+
 	if task.Critic != nil {
 		rev.SetCritic(task.Critic)
 	} else if task.MockPatchGen != nil {
@@ -193,6 +231,22 @@ func (w *RemoteWorker) Execute(ctx context.Context, task *RemoteWorkerTask) *Rem
 		MaxRounds:    3,
 		Autonomy:     coder.AutonomyAutonomous,
 		MockPatchGen: task.MockPatchGen,
+	}
+
+	if task.Auth.Type == ForgeGitLab {
+		glClient := NewGitLabClient(task.Auth)
+		prNum := task.Target.PRNumber
+		if prNum <= 0 {
+			prNum = task.Target.IssueNumber
+		}
+		opts.ForgeVerifier = NewGitLabVerifier(glClient, &task.Target, prNum)
+	} else if task.Auth.Type == ForgeGitHub {
+		ghClient := NewGitHubClient(task.Auth)
+		prNum := task.Target.PRNumber
+		if prNum <= 0 {
+			prNum = task.Target.IssueNumber
+		}
+		opts.ForgeVerifier = NewGitHubVerifier(ghClient, &task.Target, prNum)
 	}
 
 	loopRes := coord.Run(ctx, storySpec, repoCtx, coderSteering, revSteering, opts)

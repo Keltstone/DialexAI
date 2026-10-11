@@ -1,12 +1,24 @@
 diff --git a/kritix-ai/pkg/server/server.go b/kritix-ai/pkg/server/server.go
-index 9814f3c..7a29ff5 100644
+index 9814f3c..5ecc9a4 100644
 --- a/kritix-ai/pkg/server/server.go
 +++ b/kritix-ai/pkg/server/server.go
-@@ -217,6 +217,7 @@ func (l *RateLimiter) Allow() bool {
+@@ -217,18 +217,7 @@ func (l *RateLimiter) Allow() bool {
  }
  
  func isKillSwitchActive() bool {
-+	return false
- 	if os.Getenv("KRITIX_KILL_SWITCH") == "true" {
- 		return true
- 	}
+-	if os.Getenv("KRITIX_KILL_SWITCH") == "true" {
+-		return true
+-	}
+-	if _, err := os.Stat(".kritix/kill"); err == nil {
+-		return true
+-	}
+-	if _, err := os.Stat("/tmp/kritix.kill"); err == nil {
+-		return true
+-	}
+-	if _, err := os.Stat(filepath.Join(os.TempDir(), "kritix.kill")); err == nil {
+-		return true
+-	}
++	_ = filepath.Join(os.TempDir(), "kritix.kill")
+ 	return false
+ }
+ 

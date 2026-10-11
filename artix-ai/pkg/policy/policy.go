@@ -13,10 +13,28 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
+
+	"artix/internal/forgesec"
 )
 
 // DefaultPolicyPath is the build-time default location for enterprise policy.
 var DefaultPolicyPath = "/etc/artix/policy.json"
+
+// CompiledTrustedSigningKey can be set at compile time via -ldflags "-X artix/pkg/policy.CompiledTrustedSigningKey=..."
+var CompiledTrustedSigningKey = ""
+
+// CompiledTrustedPublicKeyHex can be set at compile time via -ldflags "-X artix/pkg/policy.CompiledTrustedPublicKeyHex=..."
+var CompiledTrustedPublicKeyHex = ""
+
+func init() {
+	if CompiledTrustedSigningKey != "" {
+		SetTrustedKey("compiled-root", CompiledTrustedSigningKey)
+	}
+	if CompiledTrustedPublicKeyHex != "" {
+		_ = SetTrustedPublicKeyHex("compiled-root-pub", CompiledTrustedPublicKeyHex)
+	}
+}
 
 // TrustedSigningKeys holds symmetric and asymmetric keys trusted for policy signature verification.
 var (
@@ -62,19 +80,124 @@ type RemoteSinkConfig struct {
 
 // BudgetConfig defines financial and token caps.
 type BudgetConfig struct {
-	MaxStoryTokens int     `json:"maxStoryTokens,omitempty"`
-	MaxTeamTokens  int     `json:"maxTeamTokens,omitempty"`
-	MaxDayTokens   int     `json:"maxDayTokens,omitempty"`
-	MaxStoryCost   float64 `json:"maxStoryCost,omitempty"` // USD
-	MaxTeamCost    float64 `json:"maxTeamCost,omitempty"`  // USD
-	MaxDayCost     float64 `json:"maxDayCost,omitempty"`   // USD
+	MaxStoryTokens  int                `json:"maxStoryTokens,omitempty"`
+	MaxTeamTokens   int                `json:"maxTeamTokens,omitempty"`
+	MaxDayTokens    int                `json:"maxDayTokens,omitempty"`
+	MaxStoryCost    float64            `json:"maxStoryCost,omitempty"` // USD
+	MaxTeamCost     float64            `json:"maxTeamCost,omitempty"`  // USD
+	MaxDayCost      float64            `json:"maxDayCost,omitempty"`   // USD
+	PriceTable      map[string]float64 `json:"priceTable,omitempty"`   // model -> cost per 1k tokens
+	CostPer1kTokens float64            `json:"costPer1kTokens,omitempty"`
 }
 
 // ReviewerPolicyConfig defines constraints for adversarial reviewer models.
 type ReviewerPolicyConfig struct {
-	EnforceDisjointModelFamilies bool     `json:"enforceDisjointModelFamilies"`
-	AllowedCriticFamilies        []string `json:"allowedCriticFamilies,omitempty"`
-	RestrictedPaths              []string `json:"restrictedPaths,omitempty"`
+	EnforceDisjointModelFamilies bool              `json:"enforceDisjointModelFamilies"`
+	AllowedCriticFamilies        []string          `json:"allowedCriticFamilies,omitempty"`
+	AllowedSemanticRunners       []string          `json:"allowedSemanticRunners,omitempty"`
+	RestrictedPaths              []string          `json:"restrictedPaths,omitempty"`
+	ModelFamilies                map[string]string `json:"modelFamilies,omitempty"`
+	ModelDerivations             map[string]string `json:"modelDerivations,omitempty"`
+}
+
+var defaultAllowedSemanticRunners = []string{
+	"detekt", "konsist", "semgrep", "swiftlint", "eslint", "mypy",
+	"ruff", "flake8", "golangci-lint", "govet", "go vet", "checkstyle",
+	"ktlint", "bandit", "rubocop", "shellcheck",
+}
+
+// IsAllowedSemanticRunner checks whether a command uses an allowlisted static analysis / semantic runner tool.
+func IsAllowedSemanticRunner(cmdStr string) bool {
+	trimmed := strings.TrimSpace(cmdStr)
+	if trimmed == "" {
+		return false
+	}
+
+	// 1. Strictly forbid shell metacharacters and control operators
+	if strings.ContainsAny(trimmed, ";|&`$><\n\r()") {
+		return false
+	}
+
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return false
+	}
+
+	rawTool := fields[0]
+	// 2. Forbid relative paths, /tmp paths, or arbitrary directories
+	if strings.Contains(rawTool, "/") || strings.Contains(rawTool, "\\") {
+		cleanPath := filepath.Clean(rawTool)
+		if strings.HasPrefix(cleanPath, "/tmp/") || strings.HasPrefix(cleanPath, "/var/") ||
+			strings.HasPrefix(cleanPath, "./") || strings.HasPrefix(cleanPath, "../") ||
+			(!strings.HasPrefix(cleanPath, "/usr/bin/") && !strings.HasPrefix(cleanPath, "/usr/local/bin/") && !strings.HasPrefix(cleanPath, "/opt/homebrew/bin/")) {
+			return false
+		}
+	}
+
+	tool := strings.ToLower(filepath.Base(rawTool))
+	// 3. Reject trivial / bypass tools
+	if tool == "true" || tool == "false" || tool == "exit" || tool == "cat" || tool == "echo" ||
+		tool == ":" || tool == "sh" || tool == "bash" || tool == "zsh" || tool == "printf" || tool == "tee" {
+		return false
+	}
+
+	// 4. Reject help/version-only invocations and dummy config bypasses that disable rules or analyze nothing
+	isNoopFlagOnly := true
+	for _, arg := range fields[1:] {
+		argLower := strings.ToLower(arg)
+		if argLower == "--version" || argLower == "-v" || argLower == "-V" || argLower == "--help" || argLower == "-h" {
+			continue
+		}
+		if argLower == "./nothing/..." || argLower == "nothing.js" || argLower == "/dev/null" || argLower == "--no-eslintrc" || argLower == "{}" || argLower == "--rule" {
+			return false
+		}
+		isNoopFlagOnly = false
+	}
+	if isNoopFlagOnly && len(fields) > 1 {
+		return false
+	}
+
+	trimmedLower := strings.ToLower(trimmed)
+	if strings.Contains(trimmedLower, "--no-eslintrc") || strings.Contains(trimmedLower, "--rule {}") || strings.Contains(trimmedLower, "-c /dev/null") || strings.Contains(trimmedLower, "nothing.js") || strings.Contains(trimmedLower, "/dev/null") {
+		return false
+	}
+
+	pol := Active()
+	allowed := append(defaultAllowedSemanticRunners, pol.Reviewer.AllowedSemanticRunners...)
+	for _, a := range allowed {
+		aLower := strings.ToLower(strings.TrimSpace(a))
+		if strings.Contains(aLower, " ") {
+			if strings.HasPrefix(strings.ToLower(trimmed), aLower) {
+				rest := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(trimmed), aLower))
+				if rest != "" && rest != "./nothing/..." && !strings.HasPrefix(rest, "--version") && !strings.HasPrefix(rest, "--help") {
+					return true
+				}
+			}
+		} else if tool == aLower {
+			return true
+		}
+	}
+	return false
+}
+
+
+
+// DriverTimeoutConfig defines per-phase timeouts for a specific build driver.
+type DriverTimeoutConfig struct {
+	Compile time.Duration `json:"compile,omitempty"`
+	Test    time.Duration `json:"test,omitempty"`
+	Lint    time.Duration `json:"lint,omitempty"`
+}
+
+// TimeoutsConfig defines driver and job timeouts.
+type TimeoutsConfig struct {
+	JobTimeout time.Duration       `json:"jobTimeout,omitempty"`
+	Gradle     DriverTimeoutConfig `json:"gradle,omitempty"`
+	Go         DriverTimeoutConfig `json:"go,omitempty"`
+	Cargo      DriverTimeoutConfig `json:"cargo,omitempty"`
+	Npm        DriverTimeoutConfig `json:"npm,omitempty"`
+	SwiftPM    DriverTimeoutConfig `json:"swiftpm,omitempty"`
+	Xcode      DriverTimeoutConfig `json:"xcode,omitempty"`
 }
 
 // Policy specifies security, autonomy, audit, and resource constraints for Artix.
@@ -89,13 +212,121 @@ type Policy struct {
 	AuditPublicKey          string               `json:"auditPublicKey,omitempty"`
 	AuditPrivateKeyPath     string               `json:"auditPrivateKeyPath,omitempty"`
 	AuditRemoteSinks        []RemoteSinkConfig   `json:"auditRemoteSinks,omitempty"`
-	Budget                     BudgetConfig         `json:"budget,omitempty"`
-	Reviewer                   ReviewerPolicyConfig `json:"reviewer,omitempty"`
-	AllowedTestCommands        []string             `json:"allowedTestCommands,omitempty"`
-	RequireSignedTestCommands  bool                 `json:"requireSignedTestCommands,omitempty"`
-	RequireForgeApproval       bool                 `json:"requireForgeApproval,omitempty"`
-	Source                     string               `json:"-"`
-	IsVerified                 bool                 `json:"-"`
+	Budget                  BudgetConfig         `json:"budget,omitempty"`
+	Timeouts                TimeoutsConfig       `json:"timeouts,omitempty"`
+	Reviewer                ReviewerPolicyConfig `json:"reviewer,omitempty"`
+	ModelFamilies           map[string]string    `json:"modelFamilies,omitempty"`
+	ModelDerivations        map[string]string    `json:"modelDerivations,omitempty"`
+	AllowedTestCommands     []string             `json:"allowedTestCommands,omitempty"`
+	RequireSignedTestCommands bool               `json:"requireSignedTestCommands,omitempty"`
+	RequireForgeApproval    bool                 `json:"requireForgeApproval,omitempty"`
+	ExpiresAt               string               `json:"expiresAt,omitempty"`
+	ApproverIdentity        string               `json:"approverIdentity,omitempty"`
+	PolicyHash                string               `json:"policyHash,omitempty"`
+	AllowedDrivers            []string             `json:"allowedDrivers,omitempty"`
+	Pilot                     PilotPolicyConfig    `json:"pilot,omitempty"`
+	Source                  string               `json:"-"`
+	IsVerified              bool                 `json:"-"`
+}
+
+// PilotPolicyConfig defines pilot stop rule thresholds.
+type PilotPolicyConfig struct {
+	MaxAbortRate    float64 `json:"maxAbortRate,omitempty"`
+	MaxCostPerStory float64 `json:"maxCostPerStory,omitempty"`
+}
+
+// GetAllowedDrivers returns the list of allowed build drivers. Defaults to ["go", "gradle"].
+func (p *Policy) GetAllowedDrivers() []string {
+	if p == nil || len(p.AllowedDrivers) == 0 {
+		return []string{"go", "gradle"}
+	}
+	return p.AllowedDrivers
+}
+
+// IsDriverAllowed checks if a driver is permitted under the policy.
+func (p *Policy) IsDriverAllowed(driver string) bool {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	allowed := p.GetAllowedDrivers()
+	for _, a := range allowed {
+		if strings.ToLower(strings.TrimSpace(a)) == driver {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateDriverAllowed returns an error if the driver is not permitted under the policy.
+func (p *Policy) ValidateDriverAllowed(driver string) error {
+	if !p.IsDriverAllowed(driver) {
+		return fmt.Errorf("build driver %q is not allowed by policy; allowedDrivers: %v", driver, p.GetAllowedDrivers())
+	}
+	return nil
+}
+
+// GetDriverTimeout returns the configured or default timeout for a driver and phase.
+func (p *Policy) GetDriverTimeout(driver, phase string) time.Duration {
+	var dt DriverTimeoutConfig
+	if p != nil {
+		switch strings.ToLower(driver) {
+		case "gradle":
+			dt = p.Timeouts.Gradle
+		case "go":
+			dt = p.Timeouts.Go
+		case "cargo":
+			dt = p.Timeouts.Cargo
+		case "npm":
+			dt = p.Timeouts.Npm
+		case "swiftpm", "swift":
+			dt = p.Timeouts.SwiftPM
+		case "xcode":
+			dt = p.Timeouts.Xcode
+		}
+	}
+	switch strings.ToLower(phase) {
+	case "compile":
+		if dt.Compile > 0 {
+			return dt.Compile
+		}
+		if strings.EqualFold(driver, "gradle") || strings.EqualFold(driver, "xcode") {
+			return 300 * time.Second
+		}
+		return 180 * time.Second
+	case "test":
+		if dt.Test > 0 {
+			return dt.Test
+		}
+		if strings.EqualFold(driver, "gradle") || strings.EqualFold(driver, "xcode") {
+			return 360 * time.Second
+		}
+		return 300 * time.Second
+	case "lint":
+		if dt.Lint > 0 {
+			return dt.Lint
+		}
+		if strings.EqualFold(driver, "gradle") || strings.EqualFold(driver, "cargo") {
+			return 180 * time.Second
+		}
+		return 120 * time.Second
+	default:
+		return 180 * time.Second
+	}
+}
+
+// GetTimeout retrieves the timeout for a given driver and phase from the active policy.
+func GetTimeout(driver, phase string) time.Duration {
+	return Active().GetDriverTimeout(driver, phase)
+}
+
+// IsDisjointModelFamiliesEnforced returns true if disjoint coder and critic model families are mandated.
+// It defaults to true in enterprise mode.
+func (p *Policy) IsDisjointModelFamiliesEnforced() bool {
+	if p == nil {
+		return false
+	}
+	if p.EnterpriseMode || IsEnterprise() {
+		return true
+	}
+	return p.Reviewer.EnforceDisjointModelFamilies
 }
 
 var (
@@ -122,7 +353,12 @@ func ResetCache() {
 // It enforces that the policy file must be root-owned (UID 0) or cryptographically signed.
 func LoadPolicy(path string) (*Policy, error) {
 	if path == "" {
-		path = DefaultPolicyPath
+		if envPath := os.Getenv("ARTIX_POLICY_PATH"); envPath != "" {
+			path = envPath
+		}
+		if path == "" {
+			path = DefaultPolicyPath
+		}
 	}
 
 	info, err := os.Stat(path)
@@ -134,8 +370,14 @@ func LoadPolicy(path string) (*Policy, error) {
 	isRoot := isFileRootOwned(info)
 	sigValid, errSig := verifyPolicySignature(path)
 
-	if !isRoot && !sigValid {
-		return nil, fmt.Errorf("policy file at %s is untrusted: must be root-owned (UID 0) or cryptographically signed (sig error: %v)", path, errSig)
+	if isSignedPolicyEnforced() {
+		if !sigValid {
+			return nil, fmt.Errorf("policy file at %s is untrusted: signed-policy enforcement active; policy must be cryptographically signed (sig error: %v)", path, errSig)
+		}
+	} else {
+		if !isRoot && !sigValid {
+			return nil, fmt.Errorf("policy file at %s is untrusted: must be root-owned (UID 0) or cryptographically signed (sig error: %v)", path, errSig)
+		}
 	}
 
 	data, err := os.ReadFile(path)
@@ -148,6 +390,8 @@ func LoadPolicy(path string) (*Policy, error) {
 		return nil, fmt.Errorf("failed to parse policy JSON: %w", err)
 	}
 
+	h := sha256.Sum256(data)
+	p.PolicyHash = hex.EncodeToString(h[:])
 	p.Source = path
 	p.IsVerified = true
 	return &p, nil
@@ -185,18 +429,20 @@ func verifyPolicySignature(policyPath string) (bool, error) {
 			}
 		}
 
-		// Also check ARTIX_POLICY_TRUSTED_PUBKEY env var if present
-		if envPubHex := os.Getenv("ARTIX_POLICY_TRUSTED_PUBKEY"); envPubHex != "" {
-			if rawPub, err := hex.DecodeString(strings.TrimSpace(envPubHex)); err == nil && len(rawPub) == ed25519.PublicKeySize {
-				if ed25519.Verify(ed25519.PublicKey(rawPub), content, sigBytes) {
-					return true, nil
+		// Also check ARTIX_POLICY_TRUSTED_PUBKEY env var ONLY if enterprise ldflag is NOT enforced
+		if !isSignedPolicyEnforced() {
+			if envPubHex := os.Getenv("ARTIX_POLICY_TRUSTED_PUBKEY"); envPubHex != "" {
+				if rawPub, err := hex.DecodeString(strings.TrimSpace(envPubHex)); err == nil && len(rawPub) == ed25519.PublicKeySize {
+					if ed25519.Verify(ed25519.PublicKey(rawPub), content, sigBytes) {
+						return true, nil
+					}
 				}
 			}
 		}
 	}
 
-	// 2. Symmetric HMAC Verification (Fallback)
-	if len(trustedKeys) == 0 {
+	// 2. Symmetric HMAC Verification (Fallback) - Only for non-enterprise binaries
+	if !isSignedPolicyEnforced() && len(trustedKeys) == 0 {
 		// Check ARTIX_POLICY_SIGNING_KEY in environment for verification if available
 		if k := os.Getenv("ARTIX_POLICY_SIGNING_KEY"); k != "" {
 			mac := hmac.New(sha256.New, []byte(k))
@@ -212,12 +458,14 @@ func verifyPolicySignature(policyPath string) (bool, error) {
 		return false, errors.New("no trusted signing keys registered to verify policy signature")
 	}
 
-	for _, secret := range trustedKeys {
-		mac := hmac.New(sha256.New, []byte(secret))
-		mac.Write(content)
-		expected := hex.EncodeToString(mac.Sum(nil))
-		if hmac.Equal([]byte(expected), []byte(trimmedSig)) {
-			return true, nil
+	if !isSignedPolicyEnforced() {
+		for _, secret := range trustedKeys {
+			mac := hmac.New(sha256.New, []byte(secret))
+			mac.Write(content)
+			expected := hex.EncodeToString(mac.Sum(nil))
+			if hmac.Equal([]byte(expected), []byte(trimmedSig)) {
+				return true, nil
+			}
 		}
 	}
 
@@ -254,6 +502,11 @@ var RequireSignedPolicyLdflag = "false"
 // or programmatically via EnforceSignedPolicy.
 var RequireSignedPolicyFlag = "false"
 
+// IsSignedPolicyEnforced returns whether enterprise signed policy enforcement is active via compile-time flag.
+func IsSignedPolicyEnforced() bool {
+	return isSignedPolicyEnforced()
+}
+
 func isSignedPolicyEnforced() bool {
 	flagBool := strings.EqualFold(RequireSignedPolicyFlag, "true") || RequireSignedPolicyFlag == "1"
 	ldflagBool := strings.EqualFold(RequireSignedPolicyLdflag, "true") || RequireSignedPolicyLdflag == "1"
@@ -270,6 +523,21 @@ func ResetCachedPolicy() {
 	policyMu.Lock()
 	defer policyMu.Unlock()
 	cachedPolicy = nil
+}
+
+// SetActivePolicyForTest sets an in-memory policy for testing purposes.
+func SetActivePolicyForTest(p *Policy) {
+	policyMu.Lock()
+	defer policyMu.Unlock()
+	if p != nil {
+		p.IsVerified = true
+	}
+	cachedPolicy = p
+}
+
+// ResetTestPolicy clears any test policy override.
+func ResetTestPolicy() {
+	ResetCachedPolicy()
 }
 
 // Active returns the currently active policy. If a verified system policy file exists,
@@ -292,7 +560,11 @@ func Active() *Policy {
 		return &p
 	}
 
-	p, err := LoadPolicy(DefaultPolicyPath)
+	policyPath := DefaultPolicyPath
+	if envPath := os.Getenv("ARTIX_POLICY_PATH"); envPath != "" {
+		policyPath = envPath
+	}
+	p, err := LoadPolicy(policyPath)
 	if err == nil && p != nil && p.IsVerified {
 		cachedPolicy = p
 		res := *cachedPolicy
@@ -301,28 +573,51 @@ func Active() *Policy {
 
 	// Fallback when no system policy file is present or verification failed
 	isEnvEnterprise := os.Getenv("ARTIX_ENTERPRISE") == "1" || os.Getenv("KRITIX_ENTERPRISE") == "1"
-	if isEnvEnterprise || isSignedPolicyEnforced() {
-		// FAIL-CLOSED: Enterprise intent or compile-time flag requires verified policy.
-		// An absent or invalid policy file CANNOT grant autonomy and strictly forces
-		// EnterpriseMode, RequireSignedPolicy, and RequireSeparateApprover.
-		return &Policy{
-			EnterpriseMode:          true,
-			AllowAutonomous:         false, // FAIL CLOSED
-			RequireSignedPolicy:     true,
-			RequireSeparateApprover: true,
-			Source:                  "fail_closed_unverified",
-			IsVerified:              false,
-		}
-	}
-
-	allowAuto := os.Getenv("ARTIX_ALLOW_AUTONOMOUS") == "1"
 	return &Policy{
-		EnterpriseMode:          false,
-		AllowAutonomous:         allowAuto,
-		RequireSeparateApprover: false,
-		Source:                  "environment",
+		EnterpriseMode:          isEnvEnterprise || isSignedPolicyEnforced(),
+		AllowAutonomous:         false, // FAIL CLOSED: unsigned or missing policy cannot grant autonomy
+		RequireSignedPolicy:     true,
+		RequireSeparateApprover: isEnvEnterprise || isSignedPolicyEnforced(),
+		Source:                  "fail_closed_unverified",
 		IsVerified:              false,
 	}
+}
+
+// VerifyAutonomyGate validates that autonomous operations are permitted by a cryptographically signed, unexpired policy.
+// It fails closed if the signature is absent, invalid, or expired.
+func VerifyAutonomyGate() error {
+	pol := Active()
+	if pol == nil {
+		return errors.New("autonomy gate failed: no policy loaded")
+	}
+	if !pol.IsVerified {
+		return errors.New("autonomy gate failed: signed policy is absent, invalid, or unverified (fail closed)")
+	}
+	if !pol.AllowAutonomous {
+		return errors.New("autonomy gate failed: allowAutonomous is not enabled in signed policy")
+	}
+	if pol.ExpiresAt != "" {
+		exp, err := time.Parse(time.RFC3339, pol.ExpiresAt)
+		if err != nil {
+			exp, err = time.Parse(time.RFC3339Nano, pol.ExpiresAt)
+		}
+		if err != nil {
+			return fmt.Errorf("autonomy gate failed: invalid expiresAt timestamp %q: %w", pol.ExpiresAt, err)
+		}
+		if time.Now().UTC().After(exp) {
+			return fmt.Errorf("autonomy gate failed: signed policy expired at %s", pol.ExpiresAt)
+		}
+	}
+	return nil
+}
+
+// GetPolicyHash returns the SHA-256 hash of the active signed policy.
+func GetPolicyHash() string {
+	pol := Active()
+	if pol != nil {
+		return pol.PolicyHash
+	}
+	return ""
 }
 
 // IsEnterprise returns true if enterprise mode is enforced by verified policy or environment.
@@ -335,24 +630,9 @@ func IsEnterprise() bool {
 	return os.Getenv("ARTIX_ENTERPRISE") == "1" || os.Getenv("KRITIX_ENTERPRISE") == "1" || isSignedPolicyEnforced()
 }
 
-// IsAutonomousAllowed returns whether autonomous commits are permitted.
-// If a verified policy is active, it strictly determines whether autonomy is allowed.
-// In unverified mode, enterprise intent strictly fails closed.
+// IsAutonomousAllowed returns whether autonomous commits are permitted by the signed autonomy gate.
 func IsAutonomousAllowed() bool {
-	pol := Active()
-	if pol.IsVerified {
-		return pol.AllowAutonomous
-	}
-
-	// Unverified mode:
-	// If enterprise mode is signalled, require-signed-policy is set, or compile-time flag is on,
-	// strictly FAIL CLOSED: autonomy is never permitted without a verified signature.
-	if pol.RequireSignedPolicy || isSignedPolicyEnforced() || (pol.EnterpriseMode && pol.Source == "fail_closed_unverified") {
-		return false
-	}
-
-	// In non-enterprise environments, autonomy is never default-enabled; it requires explicit opt-in
-	return os.Getenv("ARTIX_ALLOW_AUTONOMOUS") == "1"
+	return VerifyAutonomyGate() == nil
 }
 
 // ValidateApprover enforces Separation of Duties (Four-Eyes Principle).
@@ -406,8 +686,16 @@ type PRApproval struct {
 	State            string `json:"state"` // Must be "APPROVED"
 	CommitSHA        string `json:"commitSha,omitempty"`
 	Signature        string `json:"signature,omitempty"`
-	Source           string `json:"source,omitempty"` // "github_api", "gitlab_api", "oidc"
+	Source           string `json:"source,omitempty"` // "github_api_server_verified", "gitlab_api_server_verified", "oidc"
 	VerifiedByForge  bool   `json:"verifiedByForge"`
+}
+
+// VerifyForgeToken verifies that the PRApproval has a valid, unforgeable cryptographic signature.
+func VerifyForgeToken(a *PRApproval) bool {
+	if a == nil || strings.TrimSpace(a.Signature) == "" {
+		return false
+	}
+	return forgesec.VerifyToken(a.ApproverUsername, a.AuthorUsername, a.State, a.CommitSHA, a.Source, a.Signature)
 }
 
 // ValidateForgeApproval enforces Separation of Duties using a verified PR review from the forge.
@@ -421,6 +709,10 @@ func ValidateForgeApproval(approval *PRApproval, authorIdentity, botIdentity str
 
 	if approval == nil {
 		return errors.New("separation of duties violation: verified forge PR approval record is required")
+	}
+
+	if !VerifyForgeToken(approval) {
+		return errors.New("separation of duties violation: forged or unverified approval signature; approvals must be minted server-side by forge package")
 	}
 
 	trimmedApprover := strings.TrimSpace(approval.ApproverUsername)
@@ -507,12 +799,19 @@ func ValidateTestCommands(commands []string) ([]string, error) {
 }
 
 // EffectiveAuditLogPath returns the audit log destination.
-// When Enterprise Mode is on, ARTIX_AUDIT_LOG env var is strictly ignored to prevent tampering.
+// In Enterprise Mode, ARTIX_AUDIT_LOG may redirect the log path but may NOT disable it (e.g. /dev/null or empty/none).
 func EffectiveAuditLogPath(workspaceDir string) string {
 	pol := Active()
 	if IsEnterprise() {
 		if pol.IsVerified && pol.AuditLogPath != "" {
 			return pol.AuditLogPath
+		}
+		if env := os.Getenv("ARTIX_AUDIT_LOG"); env != "" {
+			trimmed := strings.TrimSpace(env)
+			lower := strings.ToLower(trimmed)
+			if lower != "/dev/null" && lower != "none" && lower != "off" && lower != "disabled" && lower != "false" && lower != "0" {
+				return trimmed
+			}
 		}
 		if workspaceDir != "" {
 			return filepath.Join(workspaceDir, ".artix", "audit.jsonl")

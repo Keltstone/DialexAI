@@ -27,12 +27,35 @@ type CouncilMember struct {
 // Council assembles stakeholder roles to deliberate and produce a StorySpec.
 // It supports model-backed multi-round dialectic deliberation when a Deliberator or Runner is attached,
 // with a deterministic structured template fallback.
+// CouncilStreamEvent represents a real-time event during council deliberation.
+type CouncilStreamEvent struct {
+	Type        string         `json:"type"`
+	Timestamp   time.Time      `json:"timestamp"`
+	SpecID      string         `json:"specId,omitempty"`
+	Round       int            `json:"round,omitempty"`
+	TotalRounds int            `json:"totalRounds,omitempty"`
+	Role        string         `json:"role,omitempty"`
+	PersonaID   string         `json:"personaId,omitempty"`
+	Status      string         `json:"status,omitempty"`
+	Message     string         `json:"message,omitempty"`
+	Payload     map[string]any `json:"payload,omitempty"`
+}
+
+// CouncilStreamHandler is a callback for real-time council stream events.
+type CouncilStreamHandler func(event CouncilStreamEvent)
+
 type Council struct {
-	members     []CouncilMember
-	registry    *persona.Registry
-	deliberator Deliberator
-	runner      runner.AgentRunner
-	agent       model.Agent
+	members       []CouncilMember
+	registry      *persona.Registry
+	deliberator   Deliberator
+	runner        runner.AgentRunner
+	agent         model.Agent
+	streamHandler CouncilStreamHandler
+}
+
+// SetStreamHandler registers a stream handler callback for real-time council events.
+func (c *Council) SetStreamHandler(h CouncilStreamHandler) {
+	c.streamHandler = h
 }
 
 // NewCouncil initializes a Stakeholder Council with the standard stakeholder team.
@@ -218,6 +241,17 @@ func (c *Council) Plan(ctx context.Context, pCtx *PlanningContext) (*StorySpec, 
 	}
 
 	spec.RawMarkdown = FormatToMarkdown(spec)
+
+	if c.streamHandler != nil {
+		c.streamHandler(CouncilStreamEvent{
+			Type:        "council_done",
+			Timestamp:   time.Now().UTC(),
+			SpecID:      specID,
+			TotalRounds: 1,
+			Status:      "completed",
+			Message:     fmt.Sprintf("Council template generation completed for %s", specID),
+		})
+	}
 	return spec, nil
 }
 
@@ -226,6 +260,16 @@ func (c *Council) Plan(ctx context.Context, pCtx *PlanningContext) (*StorySpec, 
 // Round 2: Adversarial Critique & Conflict Resolution
 // Round 3: Synthesis into Canonical StorySpec
 func (c *Council) deliberate(ctx context.Context, pCtx *PlanningContext, specID, defaultTitle string) (*StorySpec, error) {
+	if c.streamHandler != nil {
+		c.streamHandler(CouncilStreamEvent{
+			Type:        "council_start",
+			Timestamp:   time.Now().UTC(),
+			SpecID:      specID,
+			TotalRounds: 3,
+			Message:     fmt.Sprintf("Starting 3-round Stakeholder Council deliberation for spec %s", specID),
+		})
+	}
+
 	type roleTurn struct {
 		Role    string
 		Persona string
@@ -235,6 +279,19 @@ func (c *Council) deliberate(ctx context.Context, pCtx *PlanningContext, specID,
 	// Round 1: Individual Proposals & Framing
 	round1Outputs := make([]roleTurn, 0, len(c.members))
 	for _, m := range c.members {
+		if c.streamHandler != nil {
+			c.streamHandler(CouncilStreamEvent{
+				Type:        "council_round",
+				Timestamp:   time.Now().UTC(),
+				SpecID:      specID,
+				Round:       1,
+				TotalRounds: 3,
+				Role:        m.Role,
+				PersonaID:   m.Persona.ID,
+				Status:      "in_progress",
+				Message:     fmt.Sprintf("Round 1: Deliberating with %s (%s)", m.Role, m.Persona.Name),
+			})
+		}
 		sysPrompt := fmt.Sprintf("You are %s (%s). Deliberate on the requested feature. Provide your role's specific requirements, constraints, architectural boundaries, edge cases, and acceptance criteria.", m.Role, m.Persona.Name)
 		userPrompt := fmt.Sprintf("FEATURE REQUEST: %s\nStyle Profile: %s\nProvide your analysis.", pCtx.StoryPrompt, pCtx.Style)
 
@@ -251,6 +308,20 @@ func (c *Council) deliberate(ctx context.Context, pCtx *PlanningContext, specID,
 		fmt.Fprintf(&round1Summary, "### %s (%s):\n%s\n\n", t.Role, t.Persona, t.Output)
 	}
 
+	if c.streamHandler != nil {
+		c.streamHandler(CouncilStreamEvent{
+			Type:        "council_round",
+			Timestamp:   time.Now().UTC(),
+			SpecID:      specID,
+			Round:       2,
+			TotalRounds: 3,
+			Role:        "Senior Architect & QA Lead",
+			PersonaID:   "senior_software_architect",
+			Status:      "in_progress",
+			Message:     "Round 2: Reconciling cross-role conflicts and defining Gherkin test boundaries",
+		})
+	}
+
 	critiqueSysPrompt := "You are the Senior Software Architect and QA Lead reconciling stakeholder positions. Identify conflicts, ensure layer isolation, and establish strict Gherkin criteria."
 	critiqueUserPrompt := fmt.Sprintf("Review stakeholder proposals for feature %q:\n\n%s\nReconcile conflicts and eliminate ambiguity.", pCtx.StoryPrompt, round1Summary.String())
 
@@ -264,6 +335,20 @@ func (c *Council) deliberate(ctx context.Context, pCtx *PlanningContext, specID,
 	}
 
 	// Round 3: Synthesis into Canonical JSON Draft by neutral synthesizer
+	if c.streamHandler != nil {
+		c.streamHandler(CouncilStreamEvent{
+			Type:        "council_round",
+			Timestamp:   time.Now().UTC(),
+			SpecID:      specID,
+			Round:       3,
+			TotalRounds: 3,
+			Role:        "Lead Council Synthesizer",
+			PersonaID:   "lead_council_synthesizer",
+			Status:      "in_progress",
+			Message:     "Round 3: Synthesizing canonical Story Spec JSON and ADR records",
+		})
+	}
+
 	synthSysPrompt := `You are the Lead Council Synthesizer. You must synthesize the final canonical Story Spec based on the council deliberation.
 Output MUST be valid JSON conforming to:
 {
@@ -284,6 +369,17 @@ Reply with ONLY the JSON object.`
 	finalRaw, err := c.deliberator(ctx, "Council Synthesizer", synthesizerPersona, synthSysPrompt, synthUserPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("final council synthesis failed: %w", err)
+	}
+
+	if c.streamHandler != nil {
+		c.streamHandler(CouncilStreamEvent{
+			Type:        "council_done",
+			Timestamp:   time.Now().UTC(),
+			SpecID:      specID,
+			TotalRounds: 3,
+			Status:      "completed",
+			Message:     fmt.Sprintf("Council deliberation completed for %s", specID),
+		})
 	}
 
 	delibRounds := []DeliberationRound{

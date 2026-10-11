@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "description": "Committed Git Tag and Target Commit Registry for Verified Immutability",
+  "tags": [
+    {
+      "tag": "v0.1.0-enterprise",
+      "tag_object": "d42da85a32b4905e62d4b980bb6d3320523efd7d",
+      "commit": "92fc42fa5a2f694c3d2f8f4a556d35a529bdc09b"
+    },
+    {
+      "tag": "v0.2.0-enterprise",
+      "tag_object": "51c215a385ded1e206fcf01d461549e97bcf76f6",
+      "commit": "7b4164992fd24a9e6154db382b2d8d87f68cab89"
+    },
+    {
+      "tag": "v0.3.0-enterprise",
+      "tag_object": "9384732de2a0ffae6aae71935e857ad7c842bed1",
+      "commit": "22a07738bbbcbd4b93398801292eb9f9c98299ee"
+    },
+    {
+      "tag": "v0.4.0-enterprise",
+      "tag_object": "aaaf821939ab414d593b763d806a509b7bdced85",
+      "commit": "3cb016d11557268d8d0050d461d62f342fc102c2"
+    },
+    {
+      "tag": "v0.5.0-enterprise",
+      "tag_object": "71fbb86f8c0547e749811da19a74fd80bcc6a0cb",
+      "commit": "ea197f8108a8824c64364a2c059a3e261475073f"
+    },
+    {
+      "tag": "v0.6.0-enterprise",
+      "tag_object": "30d4c0559ea1eacdeb051ab399de46fe10cf4604",
+      "commit": "e1803c1553c440353051385f304109b9551c992f"
+    },
+    {
+      "tag": "v0.7.0-enterprise",
+      "tag_object": "091bed22e42db575235a7b35c99dcc42b380b534",
+      "commit": "5d31de9c95c4980ed8ff019fb966449acfd085c6"
+    },
+    {
+      "tag": "v0.8.0-enterprise",
+      "tag_object": "a2ccd59289ed05104554a458c268171d3fe58919",
+      "commit": "c1aa48e44172283eb0977fc11841a0ddce2edab8"
+    },
+    {
+      "tag": "v0.9.0-enterprise",
+      "tag_object": "2d4ba1c4be4c32c8f6e0d8105cfbc4f73ba08d49",
+      "commit": "8a39e5ce06e36abc08f7380cd5e0ad2e11a09ae0"
+    },
+    {
+      "tag": "v0.10.0-enterprise",
+      "tag_object": "4e4cae598feaaa60f8430d6dbf03595296d0064f",
+      "commit": "4b7892495515bc779a9434be591da363b467315f"
+    },
+    {
+      "tag": "v0.11.0-enterprise",
+      "tag_object": "326e30912d35c319e44284d4a0c8e575954e9b30",
+      "commit": "054854a0259cf6e9d78f31a5ad8687b9debd927a"
+    }
+  ]
+}

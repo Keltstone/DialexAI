@@ -2,10 +2,9 @@ name: Artix AI Verification & Release Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
-    paths:
-      - 'artix-ai/**'
-      - '.github/workflows/artix.yml'
+    branches: [ main, develop, 'fix/**' ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main, develop ]
     paths:
@@ -24,10 +23,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Go 1.22
+      - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22.x"
+          go-version-file: 'artix-ai/go.mod'
 
       - name: Verify Go Modules
         working-directory: artix-ai
@@ -37,36 +36,115 @@ jobs:
 
       - name: Static Analysis (go vet)
         working-directory: artix-ai
-        run: go vet ./pkg/... ./cli/... ./cmd/...
+        run: go vet ./...
 
       - name: Install Bubblewrap (Linux OS Sandbox)
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap
+          sudo chmod u+s /usr/bin/bwrap || true
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Run Unit Tests with Race Detector & Coverage
         working-directory: artix-ai
-        run: go test -v -race -cover ./pkg/...
+        run: go test -v -race -cover ./...
 
-      - name: Build Native CLI Binaries
+      - name: Benign Corpus Evaluation (3-Source Check & Regression Gate)
         working-directory: artix-ai
+        run: go run ./cmd/artix-corpus/main.go --output /tmp/ci_corpus.csv --baseline docs/pilot/benign_corpus_results.csv
+
+      - name: Verify Tag Immutability Registry
+        run: ./scripts/verify-tag-registry.sh
+
+      - name: Verify Test Suite Retention Gate
+        run: ./scripts/check-test-retention.sh
+
+      - name: Build Enterprise CLI & Daemon Binaries
+        working-directory: artix-ai
+        env:
+          POLICY_PUBKEY: ${{ secrets.ARTIX_POLICY_COMPILED_PUBKEY }}
         run: |
+          if [ -z "$POLICY_PUBKEY" ]; then
+            echo "ERROR: ARTIX_POLICY_COMPILED_PUBKEY secret is required for enterprise build but is unset" >&2
+            exit 1
+          fi
           mkdir -p bin
-          CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/artix ./cli/main.go
-          CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/artixd ./cmd/artixd/main.go
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X artix/pkg/policy.RequireSignedPolicyFlag=true -X artix/pkg/policy.CompiledTrustedPublicKeyHex=${POLICY_PUBKEY}" -o bin/artix ./cli
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X artix/pkg/policy.RequireSignedPolicyFlag=true -X artix/pkg/policy.CompiledTrustedPublicKeyHex=${POLICY_PUBKEY}" -o bin/artixd ./cmd/artixd
+          (cd bin && sha256sum artix artixd > SHA256SUMS)
+          cat bin/SHA256SUMS
           ./bin/artix version
           ./bin/artix help
 
-      - name: Upload CLI Binaries
+      - name: Upload CLI Binaries and Checksums
         uses: actions/upload-artifact@v4
         with:
           name: artix-binaries-linux
           path: artix-ai/bin/
           retention-days: 7
 
+  vscode-plugin-build:
+    name: VS Code Extension Packaging (.vsix)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Package VS Code Extension
+        working-directory: artix-ai/plugins/vscode
+        run: |
+          npm install
+          npm run build
+          npx @vscode/vsce package --no-git-tag-version -o artix-ai.vsix
+
+      - name: Upload VS Code Extension (.vsix)
+        uses: actions/upload-artifact@v4
+        with:
+          name: artix-vscode-extension
+          path: artix-ai/plugins/vscode/artix-ai.vsix
+          retention-days: 7
+
+  intellij-plugin-build:
+    name: IntelliJ IDEA Plugin Packaging (.zip)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: Package IntelliJ Plugin
+        working-directory: artix-ai/plugins/intellij
+        run: |
+          chmod +x gradlew
+          ./gradlew buildPlugin --no-daemon --stacktrace
+
+      - name: Upload IntelliJ Plugin (.zip)
+        uses: actions/upload-artifact@v4
+        with:
+          name: artix-intellij-plugin
+          path: artix-ai/plugins/intellij/build/distributions/*.zip
+          retention-days: 7
+
   cockpit-kmp-build:
     name: Desktop Cockpit KMP Compilation
     runs-on: macos-latest
+    if: "!contains(github.ref, '-enterprise')"
+    continue-on-error: true
     steps:
       - name: Checkout DialexAI
         uses: actions/checkout@v4
@@ -106,14 +184,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Go 1.22
+      - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22.x"
+          go-version-file: 'artix-ai/go.mod'
 
       - name: Build Artix CLI
         working-directory: artix-ai
-        run: go build -o bin/artix ./cli/main.go
+        run: go build -o bin/artix ./cli
 
       - name: Run Adversarial Reviewer on PR Diff
         working-directory: artix-ai
@@ -125,3 +203,62 @@ jobs:
           else
             echo "Clean PR diff; review passed."
           fi
+
+  publish-artix-release:
+    name: Publish Artix GitHub Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '-enterprise')
+    needs: [go-verification, vscode-plugin-build, intellij-plugin-build]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'artix-ai/go.mod'
+
+      - name: Build Enterprise Release Binaries with Compiled Policy Public Key
+        working-directory: artix-ai
+        env:
+          POLICY_PUBKEY: ${{ secrets.ARTIX_POLICY_COMPILED_PUBKEY }}
+        run: |
+          if [ -z "$POLICY_PUBKEY" ]; then
+            echo "ERROR: ARTIX_POLICY_COMPILED_PUBKEY secret is required for enterprise release builds but is unset" >&2
+            exit 1
+          fi
+          mkdir -p bin
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X artix/pkg/policy.RequireSignedPolicyFlag=true -X artix/pkg/policy.CompiledTrustedPublicKeyHex=${POLICY_PUBKEY}" -o bin/artix ./cli
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X artix/pkg/policy.RequireSignedPolicyFlag=true -X artix/pkg/policy.CompiledTrustedPublicKeyHex=${POLICY_PUBKEY}" -o bin/artixd ./cmd/artixd
+          mkdir -p ../release-assets
+          cp bin/artix bin/artixd ../release-assets/
+
+      - name: Generate Unified SHA256SUMS and Sign
+        working-directory: release-assets
+        run: |
+          sha256sum artix artixd *.vsix *.zip > SHA256SUMS
+          cat SHA256SUMS
+          if [ -n "${{ secrets.ARTIX_RELEASE_SSH_SIGNING_KEY }}" ]; then
+            echo "${{ secrets.ARTIX_RELEASE_SSH_SIGNING_KEY }}" > release_key
+            chmod 600 release_key
+            ssh-keygen -Y sign -f release_key -n file SHA256SUMS
+            rm -f release_key
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Artix Enterprise ${{ github.ref_name }}
+          body_path: artix-ai/RELEASE_NOTES.md
+          files: |
+            release-assets/artix
+            release-assets/artixd
+            release-assets/SHA256SUMS
+            release-assets/SHA256SUMS.sig
+            release-assets/*.vsix
+            release-assets/*.zip
+          draft: false
+          prerelease: false

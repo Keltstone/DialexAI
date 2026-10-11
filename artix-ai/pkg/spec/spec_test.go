@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"artix/pkg/persona"
+	"artix/pkg/policy"
 	"artix/pkg/repo"
 )
 
@@ -134,5 +135,30 @@ func TestFormatAndParseRoundtrip(t *testing.T) {
 	}
 	if len(parsed.TestCommands) != 1 || parsed.TestCommands[0] != "go test -v ./pkg/auth/..." {
 		t.Errorf("test commands mismatch: %v", parsed.TestCommands)
+	}
+}
+
+func TestR13_6_StoryProvenance_EnterpriseMode_ViaPolicyIsEnterprise(t *testing.T) {
+	policy.EnforceSignedPolicy()
+	defer func() {
+		policy.RequireSignedPolicyFlag = "false"
+		policy.ResetCachedPolicy()
+	}()
+	policy.ResetCachedPolicy()
+
+	t.Setenv("ARTIX_ENTERPRISE", "")
+	t.Setenv("KRITIX_ENTERPRISE", "")
+
+	if !policy.IsEnterprise() {
+		t.Fatalf("policy.IsEnterprise() must be true when EnforceSignedPolicy() is active")
+	}
+
+	st := &StorySpec{
+		ID:    "STORY-ENT-01",
+		Title: "Enterprise Provenance Test",
+	}
+	prov := BuildStoryProvenance(st, nil, "", "", nil)
+	if !prov.EnterpriseMode {
+		t.Errorf("R13-6 VIOLATION: BuildStoryProvenance must set EnterpriseMode=true when policy.IsEnterprise() is true")
 	}
 }
