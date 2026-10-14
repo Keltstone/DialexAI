@@ -1,114 +1,68 @@
-// sentinixd: webhook server. One endpoint per configured git host: POST /webhook/<name>.
+// sentinixd: the Sentinix server. Webhooks, API, scheduler and dashboard in one process.
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
-	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"sentinix/pkg/auth"
 	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
 	"sentinix/pkg/packs"
-	"sentinix/pkg/policy"
-	"sentinix/pkg/report"
-	"sentinix/pkg/scheduler"
+	"sentinix/pkg/server"
+	"sentinix/pkg/store"
 )
 
 func main() {
 	cfgPath := flag.String("config", "sentinix.json", "JSON list of git hosts; values like \"$VAR\" are read from the environment")
 	addr := flag.String("addr", ":8080", "listen address")
-	workers := flag.Int("workers", 2, "concurrent reviews")
-	failOn := flag.String("fail-on", "high", "fail the status at or above this severity")
+	dsn := flag.String("db", "sqlite:sentinix.db", "postgres://… or sqlite:<path>")
+	workers := flag.Int("workers", 2, "concurrent scans")
+	failOn := flag.String("fail-on", "high", "fail PR status at or above this severity")
 	packDir := flag.String("packs", "", "directory of signed extra rule packs")
 	trust := flag.String("trust", "", "file of trusted pack public keys")
 	flag.Parse()
-	pe, err := packs.NewEngine(*packDir, *trust)
-	check(err)
 
 	min, err := engines.ParseSeverity(*failOn)
 	check(err)
-	hosts, err := load(*cfgPath)
+	hosts, err := loadHosts(*cfgPath)
 	check(err)
-	sem := make(chan struct{}, *workers)
+	pe, err := packs.NewEngine(*packDir, *trust)
+	check(err)
+	st, err := store.Open(*dsn)
+	check(err)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok") })
-	mux.HandleFunc("POST /webhook/{name}", func(w http.ResponseWriter, r *http.Request) {
-		h, ok := hosts[r.PathValue("name")]
-		if !ok {
-			http.NotFound(w, r)
-			return
+	key := os.Getenv("SENTINIX_SESSION_KEY")
+	if len(key) < 32 {
+		log.Fatal("SENTINIX_SESSION_KEY must be at least 32 characters")
+	}
+	app := &server.App{Store: st, Hosts: hosts, Packs: pe, FailOn: min, Workers: *workers,
+		Sess:       auth.Sessions{Key: []byte(key), Secure: os.Getenv("SENTINIX_INSECURE_COOKIES") == ""},
+		OwnerEmail: os.Getenv("SENTINIX_OWNER_EMAIL")}
+	if iss := os.Getenv("OIDC_ISSUER"); iss != "" {
+		app.OIDC, err = auth.NewOIDC(context.Background(), iss, os.Getenv("OIDC_CLIENT_ID"), os.Getenv("OIDC_CLIENT_SECRET"),
+			os.Getenv("OIDC_REDIRECT_URL"), app.Sess, app.Login)
+		check(err)
+	} else {
+		log.Print("OIDC_ISSUER not set: SSO login disabled")
+	}
+
+	go func() { // scheduled scans, checked once a minute
+		for t := range time.Tick(time.Minute) {
+			app.Tick(context.Background(), t)
 		}
-		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 25<<20))
-		if err != nil {
-			http.Error(w, "bad body", 400)
-			return
-		}
-		ev, err := h.Parse(r, body)
-		if err != nil {
-			http.Error(w, "unauthorized", 401)
-			return
-		}
-		if ev == nil {
-			w.WriteHeader(204)
-			return
-		}
-		w.WriteHeader(202)
-		go func() {
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-			defer cancel()
-			review(ctx, h, ev, min, pe)
-		}()
-	})
+	}()
 	log.Printf("listening on %s, %d host(s)", *addr, len(hosts))
-	check(http.ListenAndServe(*addr, mux))
+	check(http.ListenAndServe(*addr, app.Handler()))
 }
 
-func review(ctx context.Context, h githost.Host, ev *githost.Event, min engines.Severity, pe packs.Engine) {
-	log.Printf("%s: review %s#%s", h.Name(), ev.Repo, ev.PR)
-	h.Status(ctx, ev, githost.Pending, "scanning")
-	user, token := h.CloneAuth()
-	res, err := scheduler.Review(ev, user, token, pe)
-	if err != nil {
-		log.Printf("%s: %v", h.Name(), err)
-		h.Status(ctx, ev, githost.Failure, "scan error") // errors fail closed
-		return
-	}
-	shown := res.New
-	if len(shown) > 50 {
-		shown = shown[:50]
-	}
-	var buf bytes.Buffer
-	buf.WriteString("### Sentinix\n```\n")
-	report.Text(&buf, shown, res.Ran)
-	buf.WriteString("```\n")
-	if len(res.New) > 50 {
-		fmt.Fprintf(&buf, "%d more not shown.\n", len(res.New)-50)
-	}
-	// ponytail: posts a new comment per push; add find-and-update when it gets noisy.
-	if err := h.Comment(ctx, ev, buf.String()); err != nil {
-		log.Printf("%s: comment: %v", h.Name(), err)
-	}
-	state, desc := githost.Success, "no new findings at gate"
-	if policy.Fails(res.New, min) {
-		state, desc = githost.Failure, fmt.Sprintf("%d new finding(s)", len(res.New))
-	}
-	if err := h.Status(ctx, ev, state, desc); err != nil {
-		log.Printf("%s: status: %v", h.Name(), err)
-	}
-}
-
-func load(path string) (map[string]githost.Host, error) {
+func loadHosts(path string) (map[string]githost.Host, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

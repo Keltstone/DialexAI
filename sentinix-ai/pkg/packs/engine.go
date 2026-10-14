@@ -143,3 +143,12 @@ func NewEngine(dir, trustFile string) (Engine, error) {
 	extra, err := LoadDir(dir, keys)
 	return Engine{Packs: append(ps, extra...)}, err
 }
+
+// Versions lists "name@version" for the loaded packs, recorded with every scan.
+func (e Engine) Versions() string {
+	var v []string
+	for _, p := range e.Packs {
+		v = append(v, p.Name+"@"+p.Version)
+	}
+	return strings.Join(v, ",")
+}

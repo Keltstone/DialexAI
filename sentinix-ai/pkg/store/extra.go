@@ -112,7 +112,7 @@ func (s *Store) Posture(project string) (Posture, error) {
 	}
 	rows.Close()
 
-	wk := "select (started/604800)*604800, sum(new_count), sum(fixed_count) from scans where mode='full'"
+	wk := "select (started/604800)*604800, sum(new_count), sum(fixed_count) from scans where mode in ('full','ci')"
 	if project != "" {
 		wk += " and project_id=$1"
 	}
@@ -147,4 +147,22 @@ func (s *Store) Posture(project string) (Posture, error) {
 		p.Oldest = append(p.Oldest, f)
 	}
 	return p, rows.Err()
+}
+
+// NewSince lists findings first seen at or after ts (new in the scan that started then).
+func (s *Store) NewSince(project string, ts int64) ([]Finding, error) {
+	rows, err := s.db.Query("select "+findCols+" from findings where project_id=$1 and first_seen>=$2 and status='open' order by severity desc, id", project, ts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Finding
+	for rows.Next() {
+		f, err := scanFinding(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
