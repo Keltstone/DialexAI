@@ -34,6 +34,7 @@ type App struct {
 	Static       http.Handler // dashboard
 	Workers      int
 	AIModels     []ai.Model        // empty: AI add-on unavailable
+	TestRunner   ai.Runner         // sandboxed runner for model-written tests; nil disables test generation
 	Integrations *integrations.Set // nil: no chat, webhooks or tickets
 	Brand        report.Brand      // white-label name and accent for HTML reports
 	// OnScan is called after a recorded full scan or reviewed PR (integrations hook).
@@ -81,6 +82,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/findings/{id}/ticket", api("triage", a.ticket))
 	m.HandleFunc("POST /api/findings/{id}/ai/triage", api("triage", a.aiTriage))
 	m.HandleFunc("POST /api/findings/{id}/ai/patch", api("triage", a.aiPatch))
+	m.HandleFunc("POST /api/findings/{id}/ai/test", api("owner", a.aiTest))
 	m.HandleFunc("GET /api/approvals", api("read", a.approvals))
 	m.HandleFunc("POST /api/approvals", api("triage", a.propose))
 	m.HandleFunc("POST /api/approvals/{id}/decide", api("approve", a.decide))

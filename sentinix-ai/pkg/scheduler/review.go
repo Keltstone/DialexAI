@@ -191,3 +191,21 @@ func Snippet(cloneURL, branch, user, token, file string, line int) (string, erro
 	}
 	return strings.Join(ls[lo:hi], "\n"), nil
 }
+
+// WithTree checks out the tip of branch and calls fn with the directory; it is deleted afterwards.
+func WithTree(cloneURL, branch, user, token string, fn func(dir string) error) error {
+	r, err := newRepo(user, token)
+	if err != nil {
+		return err
+	}
+	defer r.close()
+	sha, err := r.fetch(cloneURL, branch, true)
+	if err != nil {
+		return err
+	}
+	wt, err := r.worktree("wt", sha)
+	if err != nil {
+		return err
+	}
+	return fn(wt)
+}

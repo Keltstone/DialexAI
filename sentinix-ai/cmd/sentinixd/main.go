@@ -19,6 +19,7 @@ import (
 	"sentinix/pkg/integrations"
 	"sentinix/pkg/packs"
 	"sentinix/pkg/report"
+	"sentinix/pkg/sandbox"
 	"sentinix/pkg/server"
 	"sentinix/pkg/store"
 	"sentinix/pkg/web"
@@ -36,6 +37,7 @@ func main() {
 	rescan := flag.Duration("advisory-interval", 6*time.Hour, "how often stored SBOMs are re-matched against OSV")
 	integ := flag.String("integrations", "", "JSON file with Slack, Teams, webhook, Jira and Linear settings")
 	aiCfg := flag.String("ai", "", "JSON list of OpenAI-compatible models for the optional AI add-on")
+	sbImage := flag.String("sandbox-image", "", "container image with scanners; when set, external engines and generated tests run in it with no network")
 	flag.Parse()
 
 	min, err := engines.ParseSeverity(*failOn)
@@ -67,6 +69,11 @@ func main() {
 	if *aiCfg != "" {
 		app.AIModels, err = loadModels(*aiCfg)
 		check(err)
+	}
+	if *sbImage != "" {
+		d := sandbox.Docker{Image: *sbImage, Bin: os.Getenv("SENTINIX_CONTAINER_BIN")}
+		engines.Sandbox = d.ScanCmd
+		app.TestRunner = d.Run
 	}
 	if iss := os.Getenv("OIDC_ISSUER"); iss != "" {
 		app.OIDC, err = auth.NewOIDC(context.Background(), iss, os.Getenv("OIDC_CLIENT_ID"), os.Getenv("OIDC_CLIENT_SECRET"),

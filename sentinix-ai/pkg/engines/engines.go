@@ -62,17 +62,26 @@ type Engine interface {
 // Missing binaries are skipped; the report's coverage line says what ran.
 func Bundled(extra ...Engine) []Engine {
 	es := append([]Engine{Secrets{}}, extra...)
+	semgrepCfg := os.Getenv("SENTINIX_SEMGREP_CONFIG") // "auto" needs network; inside a sandbox point at rules baked into the image
+	if semgrepCfg == "" {
+		semgrepCfg = "auto"
+	}
 	for _, e := range []External{
-		{"semgrep", []string{"scan", "--config", "auto", "--sarif", "--quiet"}},
+		{"semgrep", []string{"scan", "--config", semgrepCfg, "--sarif", "--quiet"}},
 		{"gitleaks", []string{"detect", "--no-git", "--report-format", "sarif", "--report-path", "/dev/stdout", "--no-banner", "-s"}},
 		{"osv-scanner", []string{"--format", "sarif", "-r"}},
 	} {
-		if _, err := exec.LookPath(e.Bin); err == nil {
+		// in a sandbox the binaries live in the image, not on the host
+		if _, err := exec.LookPath(e.Bin); err == nil || Sandbox != nil {
 			es = append(es, e)
 		}
 	}
 	return es
 }
+
+// Sandbox, when set, builds the command that runs an external engine inside a container (see package sandbox).
+// ponytail: package-level switch set once at startup; make it a per-engine option if scans ever differ.
+var Sandbox func(root, bin string, args []string) *exec.Cmd
 
 // External wraps a binary that emits SARIF on stdout. Root is appended last.
 type External struct {
@@ -83,8 +92,13 @@ type External struct {
 func (e External) Name() string { return e.Bin }
 
 func (e External) Scan(root string) ([]Finding, error) {
-	cmd := exec.Command(e.Bin, append(append([]string{}, e.Args...), root)...)
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")} // no server tokens in scan processes
+	var cmd *exec.Cmd
+	if Sandbox != nil {
+		cmd = Sandbox(root, e.Bin, e.Args)
+	} else {
+		cmd = exec.Command(e.Bin, append(append([]string{}, e.Args...), root)...)
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")} // no server tokens in scan processes
+	}
 	out, err := cmd.Output()
 	if len(out) == 0 && err != nil { // scanners exit non-zero when they find things
 		return nil, fmt.Errorf("%s: %w", e.Bin, err)
