@@ -48,6 +48,7 @@ Sentinix is designed around that failure mode:
 - **It remembers.** Findings are tracked across scans as new, fixed or reopened, with owners, tickets and an audit trail, so "did we fix that?" has an answer.
 - **It is honest about coverage.** Every report lists the engines and rule pack versions that ran and what was not covered, so a clean result is never mistaken for a guarantee.
 - **It does not let safeguards erode quietly.** Disabling a rule, loosening its severity or accepting a risk needs a second person, and is written to the audit log.
+- **You choose how hard it pushes.** Each project can *block* merge requests that introduce serious findings, or run as an *optional report* that comments but never stops a merge. Start in report mode, build trust, then switch to blocking when you are ready ([section 5](#choose-block-or-report-only)).
 
 ### Linters versus Sentinix
 
@@ -171,6 +172,8 @@ That last sentence matters. It is there so a short list is never mistaken for a 
 | `2` | Usage error or fatal problem |
 | `3` | An engine failed. A broken engine must never look like a clean scan |
 
+Prefer a report that never fails the build? Add `-report-only`: findings are printed (and uploaded, if you use `-server`) but the exit code stays `0` unless an engine failed.
+
 ### Adopting Sentinix on an existing codebase
 
 Run it on a mature project and you will get findings that have lived there for years. You do not want them to block anyone tomorrow, and you do not want to ignore them forever. A **baseline** solves both: record today's findings once, then fail only on new ones.
@@ -250,7 +253,8 @@ Tables are created on start. Open the address in a browser, sign in, and add you
 | `-addr` | `:8080` | Listen address |
 | `-db` | `sqlite:sentinix.db` | `postgres://…` or `sqlite:<path>` |
 | `-workers` | `2` | Scans that may run at the same time |
-| `-fail-on` | `high` | The PR status fails at or above this severity: `info`, `low`, `medium`, `high`, `critical` |
+| `-fail-on` | `high` | Default severity at which a blocking PR status fails: `info`, `low`, `medium`, `high`, `critical`. Projects can override |
+| `-enforcement` | `block` | Default for repos: `block` (a failing status can stop the merge) or `report` (comment only, never blocks). Projects can override |
 | `-packs`, `-trust` | none | Extra signed rule packs and the public keys you trust ([section 7](#7-rule-packs)) |
 | `-osv` | off | OSV API address for dependency advisories ([section 8](#8-dependencies-sbom-and-advisories)) |
 | `-advisory-interval` | `6h` | How often stored dependency lists are re-matched |
@@ -315,9 +319,22 @@ Give the token the least it needs: read access to code, and write access to comm
 
 Set the payload address to `https://<your-sentinix-host>/webhook/<name>`. Reviews run when a pull request is opened, updated with new commits, or reopened. The server must be reachable from the git host; behind a firewall, use a reverse proxy or a tunnel.
 
-### Make it a gate
+### Choose: block, or report only
 
-Mark the `sentinix` status as a **required check** in your branch protection rules (GitHub, GitLab) or as a required build (Bitbucket). From then on, a pull request that introduces a finding at or above your threshold cannot merge until it is fixed or the risk is formally accepted.
+Sentinix always posts a comment and a `sentinix` commit status on the pull request. What that status *does* is up to you, per project:
+
+| Mode | Status on new findings | Merge | Comment says |
+| --- | --- | --- | --- |
+| **Block** (default) | Fails when a new finding is at or above the threshold | Stopped, if the status is a required check | "Merge is blocked by new findings at **high** or above." |
+| **Report only** | Always passes, with a description such as "3 new finding(s), report only" | Never affected | "Report only: these findings do not block the merge." |
+
+Set it in the dashboard (**Settings**, then *Enforcement* and *Fail at*), through the API (`PATCH /api/projects/{id}` with `{"Enforcement":"report"}` and, optionally, `{"FailOn":"medium"}`), or set a server-wide default with `-enforcement` and `-fail-on`. A project's own settings win; a repository that is not registered as a project uses the server defaults. Changing enforcement is an Admin or Owner action and is written to the audit log.
+
+A sensible rollout is to run in **report only** for a couple of weeks so the team sees real findings and you can tune noisy rules, then switch the important projects to **block** at `high` and later at `medium`.
+
+### Make blocking real
+
+The status only stops a merge if the git host is told to require it. Mark the `sentinix` status as a **required check** in your branch protection rules (GitHub, GitLab) or as a required build (Bitbucket). In report-only mode, leave it optional (or do not require it) and the status can never hold up a merge, even by mistake.
 
 **Not supported by the server:** Bitbucket Server and Data Center, and Gitea. Use the command-line tool in CI for those.
 
@@ -331,6 +348,8 @@ Configure these under **Settings**, or with `PATCH /api/projects/{id}`.
 
 | Setting | Meaning |
 | --- | --- |
+| Enforcement | `block` (default) or `report`. See [section 5](#choose-block-or-report-only) |
+| Fail at | Severity at which a blocking status fails (`low`, `medium`, `high`, `critical`). Empty uses the server default |
 | Branch | Branch used for full scans (default `main`) |
 | Schedule | `nightly` (02:00), `weekly` (Sunday 03:00), or a five-field cron expression such as `30 1 * * 1-5`. Empty turns scheduling off |
 | Timezone | An IANA name such as `Europe/Berlin`. Empty means UTC |
@@ -672,7 +691,7 @@ A scan is **not** uploaded if an engine failed, so the server never marks findin
 | `sentinix packs verify <signed.json> <pubkeys>` | Check a signature and the pack's tests |
 | `sentinix bench <dir>` | Score the built-in packs on a labelled sample project |
 
-`scan` flags: `-baseline <file>`, `-update-baseline`, `-fail-on <severity>`, `-sarif <file>`, `-packs <dir>`, `-trust <file>`, `-osv <url>`, `-server <url>`, `-project <id>`, `-token-env <name>` (default `SENTINIX_TOKEN`).
+`scan` flags: `-baseline <file>`, `-update-baseline`, `-fail-on <severity>`, `-report-only`, `-sarif <file>`, `-packs <dir>`, `-trust <file>`, `-osv <url>`, `-server <url>`, `-project <id>`, `-token-env <name>` (default `SENTINIX_TOKEN`).
 
 ### HTTP API
 
@@ -686,7 +705,7 @@ Authenticate with a session cookie (the dashboard) or `Authorization: Bearer <pr
 | `GET /api/me` | read | The current user |
 | `GET /api/posture?project=` | read | Posture numbers |
 | `GET /api/projects`, `POST /api/projects` | read, manage | List, create |
-| `PATCH /api/projects/{id}` | manage | `Branch`, `Schedule`, `TZ`, `ModelPolicy`, `AI`, `PackPins` |
+| `PATCH /api/projects/{id}` | manage | `Enforcement` (`block`\|`report`), `FailOn`, `Branch`, `Schedule`, `TZ`, `ModelPolicy`, `AI`, `PackPins` |
 | `POST /api/projects/{id}/scan` | scan | Queue a full scan (`{"Branch": "x"}` optional) |
 | `GET /api/projects/{id}/scans`, `/surface`, `/sbom` | read | Run history, attack surface, components |
 | `POST /api/projects/{id}/tokens` | manage | Create a CI token (`{"Name": "ci"}`) |
@@ -750,6 +769,8 @@ It prints the planted bugs, the findings, precision and recall, and exits non-ze
 | Webhook delivery shows 404 | The path name does not match a `name` in `sentinix.json` |
 | Status ends as "scan error" | The server log. Usually the git fetch failed: check the token's scope and its access to the repository |
 | No PR comment or status appears | The token lacks Commit statuses or Pull requests write. Check the git host's webhook delivery log |
+| The status is green but the PR has findings | The project is in report-only mode ([section 5](#choose-block-or-report-only)), or the findings are below the project's *Fail at* threshold |
+| A PR can merge despite a failing status | The `sentinix` status is not marked as a required check on the git host |
 | A PR scan is missing from the dashboard | Register the project (host name and `owner/name`) under Settings |
 | Cannot sign in | `OIDC_ISSUER` is unset, the redirect address is wrong, or the identity provider returns an unverified email |
 | Login loops over HTTP | Set `SENTINIX_INSECURE_COOKIES=1`, for local trials only |
@@ -790,6 +811,9 @@ Mark it as a false positive. Over time the **Rule packs** screen shows which rul
 
 **Can I accept a risk I cannot fix right now?**
 Yes. Accepting a risk needs a written reason, an expiry date and a second person's approval. When the date passes, the finding reopens so the decision is revisited.
+
+**Can I run it without blocking anyone?**
+Yes. Set the project to **report only**, or use `-enforcement report` as the server default, or `-report-only` in the CLI. Sentinix then comments with the findings and the status always passes. You can switch a project to blocking later without changing anything else, and you can set a different threshold per project.
 
 **Can a developer disable a noisy rule to get a PR through?**
 Not alone. Disabling or loosening a rule goes through the approval queue and needs someone other than the proposer.

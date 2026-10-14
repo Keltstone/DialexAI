@@ -95,3 +95,26 @@ func TestTokensAndDemotion(t *testing.T) {
 		t.Fatalf("not demoted: %v", d)
 	}
 }
+
+func TestOpenUpgradesAnOldProjectsTable(t *testing.T) {
+	path := t.TempDir() + "/old.db"
+	s, err := Open("sqlite:" + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// simulate a database from before enforcement existed
+	s.db.Exec("alter table projects drop column enforcement")
+	s.db.Exec("alter table projects drop column fail_on")
+	s.Close()
+	s, err = Open("sqlite:" + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.CreateProject(Project{Name: "p", Host: "h", Repo: "r"})
+	if err != nil || p.Enforcement != "block" {
+		t.Fatalf("%+v %v", p, err)
+	}
+	if _, err := Open("sqlite:" + path); err != nil { // second open: columns already there
+		t.Fatal(err)
+	}
+}

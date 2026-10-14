@@ -50,6 +50,7 @@ func scan(args []string) {
 	fl := flag.NewFlagSet("scan", flag.ExitOnError)
 	baselinePath := fl.String("baseline", "", "baseline JSON; only findings not in it are reported")
 	update := fl.Bool("update-baseline", false, "write current findings to -baseline and exit 0")
+	reportOnly := fl.Bool("report-only", false, "print findings but never fail on them (exit 0 unless an engine failed)")
 	gate := fl.String("fail-on", "high", "fail at or above: info|low|medium|high|critical")
 	sarif := fl.String("sarif", "", "write SARIF to this file")
 	packDir := fl.String("packs", "", "directory of signed extra rule packs")
@@ -110,7 +111,7 @@ func scan(args []string) {
 		f.Close()
 	}
 	report.Text(os.Stdout, all, ran)
-	if code == 0 && policy.Fails(all, min) {
+	if code == 0 && !*reportOnly && policy.Fails(all, min) {
 		code = 1
 	}
 	os.Exit(code)

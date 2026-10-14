@@ -58,6 +58,15 @@ func Open(dsn string) (*Store, error) {
 			return nil, err
 		}
 	}
+	// columns added after the first release; an "already exists" error means the database is current
+	for _, q := range []string{
+		"alter table projects add column enforcement text not null default 'block'",
+		"alter table projects add column fail_on text not null default ''",
+	} {
+		if _, err := db.Exec(q); err != nil && !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
+			return nil, err
+		}
+	}
 	return &Store{db}, nil
 }
 
