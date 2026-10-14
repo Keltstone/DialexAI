@@ -20,6 +20,7 @@ import (
 	"sentinix/pkg/report"
 	"sentinix/pkg/server"
 	"sentinix/pkg/store"
+	"sentinix/pkg/web"
 )
 
 func main() {
@@ -48,7 +49,7 @@ func main() {
 	if len(key) < 32 {
 		log.Fatal("SENTINIX_SESSION_KEY must be at least 32 characters")
 	}
-	app := &server.App{Store: st, Hosts: hosts, Packs: pe, FailOn: min, Workers: *workers,
+	app := &server.App{Static: web.Handler(), Store: st, Hosts: hosts, Packs: pe, FailOn: min, Workers: *workers,
 		Sess:       auth.Sessions{Key: []byte(key), Secure: os.Getenv("SENTINIX_INSECURE_COOKIES") == ""},
 		OwnerEmail: os.Getenv("SENTINIX_OWNER_EMAIL"),
 		Brand:      report.Brand{Name: os.Getenv("SENTINIX_BRAND_NAME"), Accent: os.Getenv("SENTINIX_BRAND_ACCENT")}}
