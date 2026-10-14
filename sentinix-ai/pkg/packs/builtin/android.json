@@ -1,0 +1,227 @@
+{
+ "name": "android",
+ "version": "1.0.0",
+ "stacks": [
+  "android"
+ ],
+ "author": "Kolta Labs",
+ "rules": [
+  {
+   "id": "exported-component",
+   "severity": "medium",
+   "cwe": "CWE-926",
+   "message": "Exported component without a permission (launcher activities are exempt)",
+   "remediation": "Set android:exported=\"false\" or require android:permission.",
+   "files": [
+    "AndroidManifest.xml"
+   ],
+   "pattern": "<(activity|service|receiver|provider)\\b[^>]*android:exported=\"true\"[^>]*?(?:/>|>.*?</(?:activity|service|receiver|provider)>)",
+   "unless": "android:permission|android\\.intent\\.action\\.MAIN",
+   "multiline": true
+  },
+  {
+   "id": "allow-backup",
+   "severity": "low",
+   "cwe": "CWE-530",
+   "message": "Backups enabled",
+   "remediation": "Set android:allowBackup=\"false\" or restrict with backup rules.",
+   "files": [
+    "AndroidManifest.xml"
+   ],
+   "pattern": "android:allowBackup=\"true\""
+  },
+  {
+   "id": "cleartext-traffic",
+   "severity": "medium",
+   "cwe": "CWE-319",
+   "message": "Cleartext HTTP allowed",
+   "remediation": "Remove usesCleartextTraffic and use HTTPS.",
+   "files": [
+    "AndroidManifest.xml"
+   ],
+   "pattern": "android:usesCleartextTraffic=\"true\""
+  },
+  {
+   "id": "debuggable",
+   "severity": "high",
+   "cwe": "CWE-489",
+   "message": "App marked debuggable",
+   "remediation": "Remove android:debuggable from release builds.",
+   "files": [
+    "AndroidManifest.xml"
+   ],
+   "pattern": "android:debuggable=\"true\""
+  },
+  {
+   "id": "webview-js-interface",
+   "severity": "high",
+   "cwe": "CWE-749",
+   "message": "JavaScript bridge exposed to web content",
+   "remediation": "Avoid addJavascriptInterface or restrict to trusted origins.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "\\.addJavascriptInterface\\("
+  },
+  {
+   "id": "webview-file-access",
+   "severity": "high",
+   "cwe": "CWE-200",
+   "message": "WebView file access enabled",
+   "remediation": "Keep file access disabled.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "(allowUniversalAccessFromFileURLs|allowFileAccessFromFileURLs)\\s*=\\s*true|setAllow(Universal|File)Access\\w*\\(true\\)"
+  },
+  {
+   "id": "webview-ssl-proceed",
+   "severity": "high",
+   "cwe": "CWE-295",
+   "message": "WebView ignores TLS errors",
+   "remediation": "Cancel the request on SSL errors.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "handler\\??\\.proceed\\(\\)"
+  },
+  {
+   "id": "world-accessible-file",
+   "severity": "high",
+   "cwe": "CWE-276",
+   "message": "World readable/writable file mode",
+   "remediation": "Use MODE_PRIVATE.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "MODE_WORLD_(READABLE|WRITEABLE)"
+  },
+  {
+   "id": "prefs-secret",
+   "severity": "medium",
+   "cwe": "CWE-312",
+   "message": "Secret stored in plain SharedPreferences",
+   "remediation": "Use EncryptedSharedPreferences or the Keystore.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "putString\\(\\s*\"(password|passwd|token|secret|api_?key)\\w*\""
+  },
+  {
+   "id": "trust-all-certs",
+   "severity": "high",
+   "cwe": "CWE-295",
+   "message": "TrustManager accepts every certificate",
+   "remediation": "Delegate to the platform TrustManager.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "checkServerTrusted\\([^)]*\\)\\s*(:\\s*\\w+\\s*)?\\{\\s*\\}",
+   "multiline": true
+  },
+  {
+   "id": "weak-crypto",
+   "severity": "high",
+   "cwe": "CWE-327",
+   "message": "Weak cipher or hash",
+   "remediation": "Use AES-GCM and SHA-256 or better.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "getInstance\\(\\s*\"(AES/ECB[^\"]*|DES[^\"]*|MD5|SHA-?1)\""
+  },
+  {
+   "id": "sql-string-template",
+   "severity": "high",
+   "cwe": "CWE-89",
+   "message": "SQL built with string interpolation",
+   "remediation": "Use bound parameters.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "(execSQL|rawQuery)\\(\\s*\"[^\"]*\\$"
+  }
+ ],
+ "tests": [
+  {
+   "rule": "exported-component",
+   "file": "AndroidManifest.xml",
+   "bad": "<application><activity android:name=\".A\" android:exported=\"true\"></activity></application>",
+   "good": "<activity android:name=\".M\" android:exported=\"true\"><intent-filter><action android:name=\"android.intent.action.MAIN\"/></intent-filter></activity>"
+  },
+  {
+   "rule": "allow-backup",
+   "file": "AndroidManifest.xml",
+   "bad": "<application android:allowBackup=\"true\">",
+   "good": "<application android:allowBackup=\"false\">"
+  },
+  {
+   "rule": "cleartext-traffic",
+   "file": "AndroidManifest.xml",
+   "bad": "<application android:usesCleartextTraffic=\"true\">",
+   "good": "<application android:usesCleartextTraffic=\"false\">"
+  },
+  {
+   "rule": "debuggable",
+   "file": "AndroidManifest.xml",
+   "bad": "<application android:debuggable=\"true\">",
+   "good": "<application>"
+  },
+  {
+   "rule": "webview-js-interface",
+   "file": "A.kt",
+   "bad": "web.addJavascriptInterface(b, \"x\")",
+   "good": "web.loadUrl(u)"
+  },
+  {
+   "rule": "webview-file-access",
+   "file": "A.kt",
+   "bad": "settings.allowUniversalAccessFromFileURLs = true",
+   "good": "settings.allowUniversalAccessFromFileURLs = false"
+  },
+  {
+   "rule": "webview-ssl-proceed",
+   "file": "A.kt",
+   "bad": "handler.proceed()",
+   "good": "handler.cancel()"
+  },
+  {
+   "rule": "world-accessible-file",
+   "file": "A.kt",
+   "bad": "openFileOutput(\"f\", MODE_WORLD_READABLE)",
+   "good": "openFileOutput(\"f\", MODE_PRIVATE)"
+  },
+  {
+   "rule": "prefs-secret",
+   "file": "A.kt",
+   "bad": "e.putString(\"password\", p)",
+   "good": "e.putString(\"theme\", t)"
+  },
+  {
+   "rule": "trust-all-certs",
+   "file": "A.kt",
+   "bad": "override fun checkServerTrusted(c: Array<X509Certificate>, a: String) {}",
+   "good": "override fun checkServerTrusted(c: Array<X509Certificate>, a: String) { d.checkServerTrusted(c, a) }"
+  },
+  {
+   "rule": "weak-crypto",
+   "file": "A.kt",
+   "bad": "MessageDigest.getInstance(\"MD5\")",
+   "good": "MessageDigest.getInstance(\"SHA-256\")"
+  },
+  {
+   "rule": "sql-string-template",
+   "file": "A.kt",
+   "bad": "db.rawQuery(\"select * from t where n=$n\", null)",
+   "good": "db.rawQuery(\"select * from t where n=?\", arrayOf(n))"
+  }
+ ]
+}

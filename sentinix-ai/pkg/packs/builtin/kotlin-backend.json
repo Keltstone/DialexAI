@@ -1,0 +1,121 @@
+{
+ "name": "kotlin-backend",
+ "version": "1.0.0",
+ "stacks": [
+  "kotlin"
+ ],
+ "author": "Kolta Labs",
+ "rules": [
+  {
+   "id": "spring-csrf-disabled",
+   "severity": "medium",
+   "cwe": "CWE-352",
+   "message": "CSRF protection disabled",
+   "remediation": "Keep CSRF on for cookie-authenticated endpoints.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "csrf\\s*(\\(\\)\\s*\\.\\s*disable\\(\\)|\\{\\s*it\\.disable\\(\\)\\s*\\}|\\.disable\\(\\))"
+  },
+  {
+   "id": "spring-permit-all",
+   "severity": "high",
+   "cwe": "CWE-862",
+   "message": "All requests permitted",
+   "remediation": "Require authentication for anyRequest.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "anyRequest\\(\\)\\s*\\.\\s*permitAll\\(\\)"
+  },
+  {
+   "id": "cors-any-host",
+   "severity": "medium",
+   "cwe": "CWE-942",
+   "message": "CORS allows any origin",
+   "remediation": "List allowed origins explicitly.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "\\banyHost\\(\\)|allowedOrigins?\\s*(=|\\()\\s*\\[?\\s*\"\\*\""
+  },
+  {
+   "id": "actuator-exposed",
+   "severity": "medium",
+   "cwe": "CWE-200",
+   "message": "All actuator endpoints exposed",
+   "remediation": "Expose only health/info.",
+   "files": [
+    "*.properties",
+    "*.yml",
+    "*.yaml"
+   ],
+   "pattern": "management\\.endpoints\\.web\\.exposure\\.include\\s*[=:]\\s*[\"\\']?\\*"
+  },
+  {
+   "id": "sql-string-template",
+   "severity": "high",
+   "cwe": "CWE-89",
+   "message": "SQL built with string interpolation",
+   "remediation": "Use bound parameters.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "(prepareStatement|createStatement\\(\\)\\.execute\\w*|createNativeQuery)\\(\\s*\"[^\"]*\\$"
+  },
+  {
+   "id": "weak-crypto",
+   "severity": "high",
+   "cwe": "CWE-327",
+   "message": "Weak cipher or hash",
+   "remediation": "Use AES-GCM and SHA-256 or better.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "getInstance\\(\\s*\"(AES/ECB[^\"]*|DES[^\"]*|MD5|SHA-?1)\""
+  }
+ ],
+ "tests": [
+  {
+   "rule": "spring-csrf-disabled",
+   "file": "A.kt",
+   "bad": "http.csrf().disable()",
+   "good": "http.csrf { }"
+  },
+  {
+   "rule": "spring-permit-all",
+   "file": "A.kt",
+   "bad": ".anyRequest().permitAll()",
+   "good": ".anyRequest().authenticated()"
+  },
+  {
+   "rule": "cors-any-host",
+   "file": "A.kt",
+   "bad": "install(CORS) { anyHost() }",
+   "good": "install(CORS) { allowHost(\"a.example.com\") }"
+  },
+  {
+   "rule": "actuator-exposed",
+   "file": "application.properties",
+   "bad": "management.endpoints.web.exposure.include=*",
+   "good": "management.endpoints.web.exposure.include=health"
+  },
+  {
+   "rule": "sql-string-template",
+   "file": "A.kt",
+   "bad": "conn.prepareStatement(\"select * from t where n=$n\")",
+   "good": "conn.prepareStatement(\"select * from t where n=?\")"
+  },
+  {
+   "rule": "weak-crypto",
+   "file": "A.kt",
+   "bad": "MessageDigest.getInstance(\"SHA1\")",
+   "good": "MessageDigest.getInstance(\"SHA-256\")"
+  }
+ ]
+}

@@ -1,0 +1,82 @@
+[
+ {
+  "rule": "android/debuggable",
+  "file": "app/src/main/AndroidManifest.xml"
+ },
+ {
+  "rule": "android/allow-backup",
+  "file": "app/src/main/AndroidManifest.xml"
+ },
+ {
+  "rule": "android/cleartext-traffic",
+  "file": "app/src/main/AndroidManifest.xml"
+ },
+ {
+  "rule": "android/exported-component",
+  "file": "app/src/main/AndroidManifest.xml"
+ },
+ {
+  "rule": "android/webview-js-interface",
+  "file": "app/src/main/kotlin/Web.kt"
+ },
+ {
+  "rule": "android/webview-file-access",
+  "file": "app/src/main/kotlin/Web.kt"
+ },
+ {
+  "rule": "android/webview-ssl-proceed",
+  "file": "app/src/main/kotlin/Web.kt"
+ },
+ {
+  "rule": "android/world-accessible-file",
+  "file": "app/src/main/kotlin/Store.kt"
+ },
+ {
+  "rule": "android/prefs-secret",
+  "file": "app/src/main/kotlin/Store.kt"
+ },
+ {
+  "rule": "android/weak-crypto",
+  "file": "app/src/main/kotlin/Store.kt"
+ },
+ {
+  "rule": "android/sql-string-template",
+  "file": "app/src/main/kotlin/Store.kt"
+ },
+ {
+  "rule": "kmp/common-cleartext-url",
+  "file": "shared/src/commonMain/kotlin/Api.kt"
+ },
+ {
+  "rule": "kmp/common-log-secret",
+  "file": "shared/src/commonMain/kotlin/Api.kt"
+ },
+ {
+  "rule": "kmp/settings-plain-secret",
+  "file": "shared/src/commonMain/kotlin/Api.kt"
+ },
+ {
+  "rule": "kotlin-backend/cors-any-host",
+  "file": "server/src/main/kotlin/Server.kt"
+ },
+ {
+  "rule": "kotlin-backend/spring-csrf-disabled",
+  "file": "server/src/main/kotlin/Server.kt"
+ },
+ {
+  "rule": "kotlin-backend/spring-permit-all",
+  "file": "server/src/main/kotlin/Server.kt"
+ },
+ {
+  "rule": "kotlin-backend/sql-string-template",
+  "file": "server/src/main/kotlin/Server.kt"
+ },
+ {
+  "rule": "kotlin-backend/weak-crypto",
+  "file": "app/src/main/kotlin/Store.kt"
+ },
+ {
+  "rule": "android/prefs-secret",
+  "file": "shared/src/commonMain/kotlin/Api.kt"
+ }
+]

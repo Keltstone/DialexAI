@@ -1,0 +1,15 @@
+# Copy to .github/workflows/sentinix.yml in the repository you want scanned.
+name: sentinix
+on: [pull_request]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install sentinix
+        run: echo "install the sentinix binary built from this repo (see deploy/Dockerfile) onto PATH"
+      - name: Scan
+        run: sentinix scan -baseline .sentinix-baseline.json -fail-on high -sarif sentinix.sarif .
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with: { sarif_file: sentinix.sarif }
