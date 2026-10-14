@@ -2,15 +2,20 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"sentinix/pkg/advisories"
+	"sentinix/pkg/bench"
 	"sentinix/pkg/diffmap"
 	"sentinix/pkg/engines"
 	"sentinix/pkg/packs"
@@ -18,7 +23,7 @@ import (
 	"sentinix/pkg/report"
 )
 
-const usage = "usage: sentinix scan [flags] [path] | surface [base-ref] | packs keygen|sign|verify"
+const usage = "usage: sentinix scan [flags] [path] | surface [base-ref] | packs keygen|sign|verify | bench <dir>"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -33,6 +38,8 @@ func main() {
 		surface(args)
 	case "packs":
 		packCmd(args)
+	case "bench":
+		benchCmd(args)
 	default:
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
@@ -47,6 +54,9 @@ func scan(args []string) {
 	sarif := fl.String("sarif", "", "write SARIF to this file")
 	packDir := fl.String("packs", "", "directory of signed extra rule packs")
 	trust := fl.String("trust", "", "file of trusted pack public keys (needed with -packs)")
+	server := fl.String("server", "", "Sentinix server URL; upload findings for this project (CI)")
+	project := fl.String("project", "", "project id on the server (with -server)")
+	tokenEnv := fl.String("token-env", "SENTINIX_TOKEN", "environment variable holding the project API token")
 	osv := fl.String("osv", "", "OSV API URL for dependency advisories (empty: off, nothing leaves the machine)")
 	fl.Parse(args)
 	root := "."
@@ -76,6 +86,11 @@ func scan(args []string) {
 		all = append(all, fs...)
 	}
 
+	if *server != "" {
+		if code == 0 { // never upload a partial scan: the server would mark the missing engine's findings fixed
+			die(upload(*server, *project, os.Getenv(*tokenEnv), ran, all))
+		}
+	}
 	if *update {
 		if *baselinePath == "" {
 			die(fmt.Errorf("-update-baseline needs -baseline"))
@@ -161,5 +176,49 @@ func die(err error) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
+	}
+}
+
+func upload(server, project, token string, ran []string, fs []engines.Finding) error {
+	if project == "" || token == "" {
+		return fmt.Errorf("-server needs -project and the token environment variable")
+	}
+	commit, _ := exec.Command("git", "rev-parse", "HEAD").Output()
+	body, _ := json.Marshal(map[string]any{"commit": strings.TrimSpace(string(commit)), "ran": ran, "findings": fs})
+	req, err := http.NewRequest("POST", strings.TrimRight(server, "/")+"/api/projects/"+project+"/ingest", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("upload failed: %s", resp.Status)
+	}
+	return nil
+}
+
+// benchCmd scores the built-in packs on a labelled sample project against the spec targets.
+func benchCmd(a []string) {
+	if len(a) < 1 {
+		die(fmt.Errorf("usage: bench <dir>"))
+	}
+	ps, err := packs.Builtin()
+	die(err)
+	m, err := bench.Run(a[0], []engines.Engine{packs.Engine{Packs: ps}})
+	die(err)
+	fmt.Printf("planted %d, reported %d, precision %.0f%%, recall %.0f%%\n", m.Planted, m.Reported, m.Precision*100, m.Recall*100)
+	for _, x := range m.Missed {
+		fmt.Printf("missed: %s in %s\n", x.Rule, x.File)
+	}
+	for _, f := range m.FalsePositives {
+		fmt.Printf("false positive: %s %s:%d\n", f.Rule, f.File, f.Line)
+	}
+	if !m.Meets(0.80, 0.70) {
+		os.Exit(1)
 	}
 }
