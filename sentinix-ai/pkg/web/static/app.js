@@ -64,7 +64,7 @@ const views = {
         h('td', {}, `${f.file}:${f.line}`), h('td', {}, f.Owner), h('td', {}, f.Ticket)))));
   },
   async finding() {
-    const f = await api('/findings/' + location.hash.split('/')[2]);
+    const d = await api("/findings/" + location.hash.split("/")[2]); const f = d.finding, vd = d.verdict;
     const owner = h('input', { placeholder: 'owner', value: f.Owner, 'aria-label': 'Owner' });
     const reason = h('input', { placeholder: 'accept reason', 'aria-label': 'Reason' });
     const until = h('input', { type: 'date', 'aria-label': 'Accept until' });
@@ -75,6 +75,8 @@ const views = {
     return h('div', {}, h('h1', {}, f.rule), h('p', {}, sev(f.severity), ' ', f.message),
       h('div', { class: 'card' }, h('div', {}, `${f.file}:${f.line}`), h('pre', {}, f.evidence || ''),
         f.cwe ? h('div', { class: 'mute' }, f.cwe) : null, f.fix ? h('p', {}, 'Fix: ', f.fix) : null),
+      vd ? h('div', { class: 'card' }, h('strong', {}, 'AI verdict (advisory): '), (vd.real ? 'real' : 'likely false positive') + `, ${vd.severity}, confidence ${Number(vd.confidence).toFixed(2)}. `, vd.reasoning,
+        h('div', { class: 'mute' }, 'Models: ' + (vd.models || []).join(', ') + ((vd.dissent || []).length ? '. Disagreed: ' + vd.dissent.join(', ') : ''))) : null,
       h('p', { class: 'mute' }, `Status: ${f.Status}. First seen ${day(f.FirstSeen)}, last seen ${day(f.LastSeen)}. ${f.Ticket ? 'Ticket: ' + f.Ticket : ''}`),
       h('div', { class: 'row' }, owner, h('button', { class: 'plain', onclick: triage(f.Status) }, 'Assign'),
         h('button', { class: 'plain', onclick: triage('false_positive') }, 'False positive'),
@@ -83,6 +85,8 @@ const views = {
         const r = await api(`/findings/${f.ID}/triage`, { method: 'POST', body: { status: 'accepted', owner: owner.value, reason: reason.value, until: Math.floor(new Date(until.value).getTime() / 1000) } });
         if (r) toast('Sent for approval by a second reviewer.');
       }) }, 'Accept risk')),
+      h('div', { class: 'row' }, h('button', { class: 'plain', onclick: act(async () => { await api(`/findings/${f.ID}/ai/triage`, { method: 'POST' }); toast('AI triage done.'); }) }, 'AI triage'),
+        h('button', { class: 'plain', onclick: act(async () => { const r = await api(`/findings/${f.ID}/ai/patch`, { method: 'POST' }); $('main').append(h('pre', {}, r.patch)); }) }, 'Draft patch')),
       h('div', { class: 'row' }, ['jira', 'linear'].map((t) => h('button', { class: 'plain', onclick: act(async () => {
         const r = await api(`/findings/${f.ID}/ticket`, { method: 'POST', body: { tracker: t, due: '' } });
         toast('Ticket ' + r.ticket);

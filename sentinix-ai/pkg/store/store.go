@@ -37,6 +37,7 @@ create table if not exists surface(id text primary key, project_id text not null
   kind text not null, change text not null, file text not null, detail text not null, ts bigint not null);
 create table if not exists components(project_id text not null, ecosystem text not null, name text not null,
   version text not null, file text not null);
+create table if not exists verdicts(finding_id text primary key, body text not null, ts bigint not null);
 create table if not exists tokens(hash text primary key, project_id text not null, name text not null, created bigint not null)`
 
 // Open takes "postgres://…" or "sqlite:<path>" (":memory:" works for tests).

@@ -169,3 +169,25 @@ func rel(f engines.Finding, root string) engines.Finding {
 	f.File = strings.TrimPrefix(f.File, "/")
 	return f
 }
+
+// Snippet returns the lines around file:line from the tip of branch, for AI prompts. Only that snippet leaves the scan.
+func Snippet(cloneURL, branch, user, token, file string, line int) (string, error) {
+	r, err := newRepo(user, token)
+	if err != nil {
+		return "", err
+	}
+	defer r.close()
+	if _, err := r.fetch(cloneURL, branch, true); err != nil {
+		return "", err
+	}
+	src, err := r.git("show", "FETCH_HEAD:"+file)
+	if err != nil {
+		return "", err
+	}
+	ls := strings.Split(src, "\n")
+	lo, hi := max(line-16, 0), min(line+15, len(ls))
+	if lo >= hi {
+		return "", fmt.Errorf("line %d is outside %s", line, file)
+	}
+	return strings.Join(ls[lo:hi], "\n"), nil
+}

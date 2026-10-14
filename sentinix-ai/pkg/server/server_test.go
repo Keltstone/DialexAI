@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sentinix/pkg/advisories"
+	"sentinix/pkg/engines"
 	"strings"
 	"testing"
 	"time"
@@ -164,4 +165,14 @@ func TestReportFormats(t *testing.T) {
 		e.ok(e.call("aud@example.test", auth.Auditor, "GET", "/api/projects/"+p.ID+"/report/"+f, ""), 200)
 	}
 	e.ok(e.call("aud@example.test", auth.Auditor, "GET", "/api/projects/"+p.ID+"/report/exe", ""), 404)
+}
+
+func TestAIRefusedUnlessProjectOptedIn(t *testing.T) {
+	e := setup(t)
+	p, _ := e.st.CreateProject(store.Project{Name: "p", Host: "gh", Repo: "o/r"})
+	e.st.RecordScan(store.Scan{ProjectID: p.ID}, []string{"secrets"}, nil)
+	e.st.RecordScan(store.Scan{ProjectID: p.ID, Mode: "ci"}, []string{"secrets"}, []engines.Finding{{Rule: "r", Engine: "secrets", File: "a.kt", Line: 1, Severity: engines.High, Evidence: "x"}})
+	fs, _ := e.st.Findings(store.Filter{Project: p.ID})
+	w := e.call("rev@example.test", auth.Reviewer, "POST", "/api/findings/"+fs[0].ID+"/ai/triage", "")
+	e.ok(w, 409) // no models configured / project not opted in
 }

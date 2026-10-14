@@ -146,3 +146,11 @@ func mask(s string) string {
 	}
 	return s[:4] + "****"
 }
+
+// Redact masks anything the secret rules recognise, for text that may leave the network (model prompts).
+func Redact(s string) string {
+	for _, r := range secretRules {
+		s = r.re.ReplaceAllStringFunc(s, func(m string) string { return mask(m) })
+	}
+	return s
+}

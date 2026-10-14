@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"sentinix/pkg/advisories"
 	"sentinix/pkg/diffmap"
 	"sentinix/pkg/engines"
@@ -201,4 +202,20 @@ func (s *Store) Components(project string) ([]advisories.Component, error) {
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// SaveVerdict keeps the latest AI verdict for a finding as JSON. Verdicts are advisory.
+func (s *Store) SaveVerdict(findingID string, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec("insert into verdicts(finding_id,body,ts) values($1,$2,$3) on conflict(finding_id) do update set body=excluded.body, ts=excluded.ts", findingID, string(b), now())
+	return err
+}
+
+func (s *Store) Verdict(findingID string) (json.RawMessage, error) {
+	var b string
+	err := s.db.QueryRow("select body from verdicts where finding_id=$1", findingID).Scan(&b)
+	return json.RawMessage(b), err
 }

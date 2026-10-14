@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"sentinix/pkg/advisories"
+	"sentinix/pkg/ai"
 	"sentinix/pkg/auth"
 	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
@@ -34,6 +35,7 @@ func main() {
 	osv := flag.String("osv", "", "OSV API URL (https://api.osv.dev or a mirror); empty disables dependency advisories")
 	rescan := flag.Duration("advisory-interval", 6*time.Hour, "how often stored SBOMs are re-matched against OSV")
 	integ := flag.String("integrations", "", "JSON file with Slack, Teams, webhook, Jira and Linear settings")
+	aiCfg := flag.String("ai", "", "JSON list of OpenAI-compatible models for the optional AI add-on")
 	flag.Parse()
 
 	min, err := engines.ParseSeverity(*failOn)
@@ -61,6 +63,10 @@ func main() {
 				log.Printf("notify: %v", e)
 			}
 		}
+	}
+	if *aiCfg != "" {
+		app.AIModels, err = loadModels(*aiCfg)
+		check(err)
 	}
 	if iss := os.Getenv("OIDC_ISSUER"); iss != "" {
 		app.OIDC, err = auth.NewOIDC(context.Background(), iss, os.Getenv("OIDC_CLIENT_ID"), os.Getenv("OIDC_CLIENT_SECRET"),
@@ -114,6 +120,29 @@ func loadHosts(path string) (map[string]githost.Host, error) {
 		hosts[c.Name] = h
 	}
 	return hosts, nil
+}
+
+func loadModels(path string) ([]ai.Model, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cs []struct {
+		Name, URL, Key, Model string
+		Local                 bool
+	}
+	if err := json.Unmarshal(data, &cs); err != nil {
+		return nil, err
+	}
+	var ms []ai.Model
+	for _, c := range cs {
+		key := c.Key
+		if strings.HasPrefix(key, "$") {
+			key = os.Getenv(key[1:])
+		}
+		ms = append(ms, ai.Chat{Label: c.Name, URL: c.URL, Key: key, ModelID: c.Model, IsLocal: c.Local})
+	}
+	return ms, nil
 }
 
 func check(err error) {

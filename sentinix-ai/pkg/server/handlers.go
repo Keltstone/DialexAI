@@ -210,7 +210,11 @@ func (a *App) finding(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	writeJSON(w, f)
+	out := map[string]any{"finding": f}
+	if v, err := a.Store.Verdict(f.ID); err == nil {
+		out["verdict"] = v
+	}
+	writeJSON(w, out)
 }
 
 // triage: assigning, reopening and false-positive are immediate; accepting a risk needs a second person.
