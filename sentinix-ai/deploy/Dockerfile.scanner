@@ -1,0 +1,12 @@
+# Scanner image for -sandbox-image: external engines run here with no network.
+# Semgrep rules must be baked in (/rules) because the sandbox cannot download them;
+# set SENTINIX_SEMGREP_CONFIG=/rules on the server.
+FROM golang:1.27 AS tools
+ENV GOWORK=off CGO_ENABLED=0 GOBIN=/out
+RUN go install github.com/gitleaks/gitleaks/v8@latest && go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest
+
+FROM python:3.12-slim
+RUN pip install --no-cache-dir semgrep
+COPY --from=tools /out/ /usr/local/bin/
+COPY rules/ /rules/
+USER 65534:65534

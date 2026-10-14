@@ -1,0 +1,7 @@
+image: { repository: sentinix, tag: latest }
+replicas: 1                # scheduled scans run in-process; keep 1 until a job lock exists
+args: ["-config", "/etc/sentinix/sentinix.json"]
+# Secret holding SENTINIX_SESSION_KEY, git host tokens/secrets, OIDC_* and the database URL as SENTINIX_DB.
+existingSecret: sentinix-env
+hostsConfig: "[]"          # contents of sentinix.json (names of env vars only, never values)
+service: { port: 8080 }

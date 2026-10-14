@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: {{ .Release.Name }}-hosts }
+data:
+  sentinix.json: {{ .Values.hostsConfig | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: {{ .Release.Name }} }
+spec:
+  replicas: {{ .Values.replicas }}
+  selector: { matchLabels: { app: {{ .Release.Name }} } }
+  template:
+    metadata: { labels: { app: {{ .Release.Name }} } }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 10001 }
+      containers:
+        - name: sentinix
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args: ["-db", "$(SENTINIX_DB)"{{ range .Values.args }}, {{ . | quote }}{{ end }}]
+          envFrom: [{ secretRef: { name: {{ .Values.existingSecret }} } }]
+          ports: [{ containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /healthz, port: 8080 } }
+          livenessProbe: { httpGet: { path: /healthz, port: 8080 }, initialDelaySeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          volumeMounts:
+            - { name: hosts, mountPath: /etc/sentinix }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: hosts, configMap: { name: {{ .Release.Name }}-hosts } }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: {{ .Release.Name }} }
+spec:
+  selector: { app: {{ .Release.Name }} }
+  ports: [{ port: {{ .Values.service.port }}, targetPort: 8080 }]

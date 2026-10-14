@@ -1,0 +1,7 @@
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: sentinix
+          script:
+            - sentinix scan -baseline .sentinix-baseline.json -fail-on high .

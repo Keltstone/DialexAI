@@ -1,0 +1,8 @@
+# Include in .gitlab-ci.yml. Set SENTINIX_TOKEN and SENTINIX_URL as masked CI variables to also upload to the server.
+sentinix:
+  stage: test
+  script:
+    - sentinix scan -baseline .sentinix-baseline.json -fail-on high -sarif sentinix.sarif .
+  artifacts:
+    when: always
+    paths: [sentinix.sarif]
