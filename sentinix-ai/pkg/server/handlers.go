@@ -480,3 +480,43 @@ func (a *App) sbom(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, cs)
 }
+
+// ticket files a finding in Jira or Linear and records the key on the finding.
+func (a *App) ticket(w http.ResponseWriter, r *http.Request) {
+	if a.Integrations == nil {
+		http.Error(w, "no integrations configured", http.StatusConflict)
+		return
+	}
+	var in struct {
+		Tracker string
+		Due     string // YYYY-MM-DD, optional
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	f, err := a.Store.Finding(r.PathValue("id"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if f.Ticket != "" {
+		http.Error(w, "finding already has ticket "+f.Ticket, http.StatusConflict)
+		return
+	}
+	var due time.Time
+	if in.Due != "" {
+		if due, err = time.Parse("2006-01-02", in.Due); err != nil {
+			http.Error(w, "due must be YYYY-MM-DD", 400)
+			return
+		}
+	}
+	proj, _ := a.Store.Project(f.ProjectID)
+	key, err := a.Integrations.Ticket(r.Context(), in.Tracker, f, proj.Name, due)
+	if err != nil {
+		fail(w, err, http.StatusBadGateway)
+		return
+	}
+	a.Store.SetTicket(f.ID, in.Tracker+":"+key)
+	a.audit_(r, "ticket:"+in.Tracker, f.ID)
+	writeJSON(w, map[string]string{"ticket": in.Tracker + ":" + key})
+}

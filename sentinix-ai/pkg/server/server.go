@@ -15,23 +15,25 @@ import (
 	"sentinix/pkg/auth"
 	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
+	"sentinix/pkg/integrations"
 	"sentinix/pkg/packs"
 	"sentinix/pkg/report"
 	"sentinix/pkg/store"
 )
 
 type App struct {
-	Store      *store.Store
-	Hosts      map[string]githost.Host
-	Sess       auth.Sessions
-	OIDC       *auth.OIDC // nil: SSO not configured, only API tokens and existing sessions work
-	Packs      packs.Engine
-	OSV        *advisories.Client // nil: no dependency advisory lookups (default; nothing leaves the network)
-	FailOn     engines.Severity
-	OwnerEmail string       // this identity gets the Owner role on first login
-	Static     http.Handler // dashboard
-	Workers    int
-	Brand      report.Brand // white-label name and accent for HTML reports
+	Store        *store.Store
+	Hosts        map[string]githost.Host
+	Sess         auth.Sessions
+	OIDC         *auth.OIDC // nil: SSO not configured, only API tokens and existing sessions work
+	Packs        packs.Engine
+	OSV          *advisories.Client // nil: no dependency advisory lookups (default; nothing leaves the network)
+	FailOn       engines.Severity
+	OwnerEmail   string       // this identity gets the Owner role on first login
+	Static       http.Handler // dashboard
+	Workers      int
+	Integrations *integrations.Set // nil: no chat, webhooks or tickets
+	Brand        report.Brand      // white-label name and accent for HTML reports
 	// OnScan is called after a recorded full scan or reviewed PR (integrations hook).
 	OnScan func(ctx context.Context, p store.Project, sc store.Scan, newFindings []store.Finding)
 
@@ -74,6 +76,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/findings", api("read", a.findings))
 	m.HandleFunc("GET /api/findings/{id}", api("read", a.finding))
 	m.HandleFunc("POST /api/findings/{id}/triage", api("triage", a.triage))
+	m.HandleFunc("POST /api/findings/{id}/ticket", api("triage", a.ticket))
 	m.HandleFunc("GET /api/approvals", api("read", a.approvals))
 	m.HandleFunc("POST /api/approvals", api("triage", a.propose))
 	m.HandleFunc("POST /api/approvals/{id}/decide", api("approve", a.decide))

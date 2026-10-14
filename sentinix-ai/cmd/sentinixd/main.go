@@ -15,6 +15,7 @@ import (
 	"sentinix/pkg/auth"
 	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
+	"sentinix/pkg/integrations"
 	"sentinix/pkg/packs"
 	"sentinix/pkg/report"
 	"sentinix/pkg/server"
@@ -31,6 +32,7 @@ func main() {
 	trust := flag.String("trust", "", "file of trusted pack public keys")
 	osv := flag.String("osv", "", "OSV API URL (https://api.osv.dev or a mirror); empty disables dependency advisories")
 	rescan := flag.Duration("advisory-interval", 6*time.Hour, "how often stored SBOMs are re-matched against OSV")
+	integ := flag.String("integrations", "", "JSON file with Slack, Teams, webhook, Jira and Linear settings")
 	flag.Parse()
 
 	min, err := engines.ParseSeverity(*failOn)
@@ -50,6 +52,15 @@ func main() {
 		Sess:       auth.Sessions{Key: []byte(key), Secure: os.Getenv("SENTINIX_INSECURE_COOKIES") == ""},
 		OwnerEmail: os.Getenv("SENTINIX_OWNER_EMAIL"),
 		Brand:      report.Brand{Name: os.Getenv("SENTINIX_BRAND_NAME"), Accent: os.Getenv("SENTINIX_BRAND_ACCENT")}}
+	if *integ != "" {
+		app.Integrations, err = integrations.Load(*integ)
+		check(err)
+		app.OnScan = func(ctx context.Context, p store.Project, sc store.Scan, fs []store.Finding) {
+			for _, e := range app.Integrations.Notify(ctx, p, sc, fs) {
+				log.Printf("notify: %v", e)
+			}
+		}
+	}
 	if iss := os.Getenv("OIDC_ISSUER"); iss != "" {
 		app.OIDC, err = auth.NewOIDC(context.Background(), iss, os.Getenv("OIDC_CLIENT_ID"), os.Getenv("OIDC_CLIENT_SECRET"),
 			os.Getenv("OIDC_REDIRECT_URL"), app.Sess, app.Login)
