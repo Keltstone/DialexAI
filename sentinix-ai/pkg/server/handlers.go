@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -410,3 +411,22 @@ func (a *App) packList(w http.ResponseWriter, r *http.Request) {
 
 // report is added with the reporting formats.
 func (a *App) report(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }
+
+func (a *App) rescanAdvisories(w http.ResponseWriter, r *http.Request) {
+	if a.OSV == nil {
+		http.Error(w, "advisory lookups are not configured", http.StatusConflict)
+		return
+	}
+	a.audit_(r, "advisories:rescan", "all")
+	go a.RescanAdvisories(context.Background())
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (a *App) sbom(w http.ResponseWriter, r *http.Request) {
+	cs, err := a.Store.Components(r.PathValue("id"))
+	if err != nil {
+		fail(w, err, 500)
+		return
+	}
+	writeJSON(w, cs)
+}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"sentinix/pkg/advisories"
 	"sentinix/pkg/auth"
 	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
@@ -24,6 +25,7 @@ type App struct {
 	Sess       auth.Sessions
 	OIDC       *auth.OIDC // nil: SSO not configured, only API tokens and existing sessions work
 	Packs      packs.Engine
+	OSV        *advisories.Client // nil: no dependency advisory lookups (default; nothing leaves the network)
 	FailOn     engines.Severity
 	OwnerEmail string       // this identity gets the Owner role on first login
 	Static     http.Handler // dashboard
@@ -63,6 +65,8 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/projects/{id}/scan", api("scan", a.scanNow))
 	m.HandleFunc("GET /api/projects/{id}/scans", api("read", a.scans))
 	m.HandleFunc("GET /api/projects/{id}/surface", api("read", a.surface))
+	m.HandleFunc("POST /api/advisories/rescan", api("scan", a.rescanAdvisories))
+	m.HandleFunc("GET /api/projects/{id}/sbom", api("read", a.sbom))
 	m.HandleFunc("POST /api/projects/{id}/tokens", api("manage", a.createToken))
 	m.HandleFunc("POST /api/projects/{id}/ingest", a.ingest) // API token only
 	m.HandleFunc("GET /api/findings", api("read", a.findings))

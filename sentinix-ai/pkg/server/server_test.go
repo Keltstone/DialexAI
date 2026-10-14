@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sentinix/pkg/advisories"
 	"strings"
 	"testing"
 	"time"
@@ -123,3 +125,34 @@ func TestOnlyOwnerGrantsOwner(t *testing.T) {
 }
 
 func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }
+
+func TestAdvisoryRescanOpensThenFixes(t *testing.T) {
+	vulnerable := true
+	osv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/querybatch" {
+			if vulnerable {
+				w.Write([]byte(`{"results":[{"vulns":[{"id":"GHSA-9"}]}]}`))
+			} else {
+				w.Write([]byte(`{"results":[{}]}`))
+			}
+			return
+		}
+		w.Write([]byte(`{"id":"GHSA-9","summary":"s","database_specific":{"severity":"HIGH"}}`))
+	}))
+	defer osv.Close()
+	e := setup(t)
+	e.app.OSV = &advisories.Client{URL: osv.URL}
+	p, _ := e.st.CreateProject(store.Project{Name: "p", Host: "gh", Repo: "o/r"})
+	e.st.ReplaceComponents(p.ID, []advisories.Component{{Ecosystem: "PyPI", Name: "flask", Version: "2.0.0", File: "requirements.txt"}})
+	if err := e.app.RescanAdvisories(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fs, _ := e.st.Findings(store.Filter{Project: p.ID, Status: "open"}); len(fs) != 1 || fs[0].Rule != "advisory/GHSA-9" {
+		t.Fatalf("%+v", fs)
+	}
+	vulnerable = false
+	e.app.RescanAdvisories(context.Background())
+	if fs, _ := e.st.Findings(store.Filter{Project: p.ID, Status: "fixed"}); len(fs) != 1 {
+		t.Fatalf("not fixed: %+v", fs)
+	}
+}

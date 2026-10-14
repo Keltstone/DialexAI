@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"sentinix/pkg/advisories"
 	"sentinix/pkg/diffmap"
 	"sentinix/pkg/engines"
 	"sentinix/pkg/packs"
@@ -46,6 +47,7 @@ func scan(args []string) {
 	sarif := fl.String("sarif", "", "write SARIF to this file")
 	packDir := fl.String("packs", "", "directory of signed extra rule packs")
 	trust := fl.String("trust", "", "file of trusted pack public keys (needed with -packs)")
+	osv := fl.String("osv", "", "OSV API URL for dependency advisories (empty: off, nothing leaves the machine)")
 	fl.Parse(args)
 	root := "."
 	if fl.NArg() > 0 {
@@ -59,7 +61,11 @@ func scan(args []string) {
 	var all []engines.Finding
 	var ran []string
 	code := 0
-	for _, e := range engines.Bundled(pe) {
+	extra := []engines.Engine{pe}
+	if *osv != "" {
+		extra = append(extra, advisories.Engine{Client: advisories.Client{URL: *osv}})
+	}
+	for _, e := range engines.Bundled(extra...) {
 		fs, err := e.Scan(root)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "engine error:", err) // a broken engine must not look like a clean scan

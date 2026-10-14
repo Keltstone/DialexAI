@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"sentinix/pkg/advisories"
 	"sentinix/pkg/diffmap"
 	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
@@ -22,6 +23,8 @@ type Result struct {
 	Ran     []string
 	Surface []diffmap.Item
 	Commit  string
+	// Components is the SBOM of a full scan.
+	Components []advisories.Component
 }
 
 // repo is a throwaway git dir. The token is used only for fetches and never reaches a scan process.
@@ -158,7 +161,7 @@ func Full(cloneURL, branch, user, token string, extra ...engines.Engine) (*Resul
 	if err != nil {
 		return nil, 0, err
 	}
-	return &Result{New: fs, Ran: ran, Commit: sha}, time.Since(start), nil
+	return &Result{New: fs, Ran: ran, Commit: sha, Components: advisories.Components(wt)}, time.Since(start), nil
 }
 
 func rel(f engines.Finding, root string) engines.Finding {

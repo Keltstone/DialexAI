@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"sentinix/pkg/advisories"
 	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
 	"sentinix/pkg/policy"
@@ -19,8 +20,8 @@ import (
 
 var dueFn = scheduler.Due
 
-// engine is the pack engine with approved overrides and noisy-rule demotion applied.
-func (a *App) engine() (engines.Engine, error) {
+// engine returns the pack engine (approved overrides and noisy-rule demotion applied), plus the advisory engine when OSV is on.
+func (a *App) engine() ([]engines.Engine, error) {
 	pe := a.Packs
 	dis, sev, err := a.Store.RuleOverrides()
 	if err != nil {
@@ -36,7 +37,11 @@ func (a *App) engine() (engines.Engine, error) {
 		}
 	}
 	pe.Disabled, pe.Override = dis, sev
-	return pe, nil
+	out := []engines.Engine{pe}
+	if a.OSV != nil {
+		out = append(out, advisories.Engine{Client: *a.OSV})
+	}
+	return out, nil
 }
 
 func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +80,7 @@ func (a *App) review(ctx context.Context, h githost.Host, ev *githost.Event) {
 	if err == nil {
 		start := time.Now()
 		var res *scheduler.Result
-		if res, err = scheduler.Review(ev, user, token, eng); err == nil {
+		if res, err = scheduler.Review(ev, user, token, eng...); err == nil {
 			a.finishReview(ctx, h, ev, res, time.Since(start))
 			return
 		}
@@ -134,7 +139,7 @@ func (a *App) queueFull(ctx context.Context, p store.Project, branch string) {
 		log.Printf("project %s: %v", p.Name, err)
 		return
 	}
-	res, dur, err := scheduler.Full(h.RepoURL(p.Repo), branch, user, token, eng)
+	res, dur, err := scheduler.Full(h.RepoURL(p.Repo), branch, user, token, eng...)
 	if err != nil {
 		log.Printf("project %s: full scan: %v", p.Name, err)
 		return
@@ -149,6 +154,11 @@ func (a *App) record(ctx context.Context, p store.Project, mode string, res *sch
 		log.Printf("project %s: record: %v", p.Name, err)
 		return sc, err
 	}
+	if mode == "full" {
+		if err := a.Store.ReplaceComponents(p.ID, res.Components); err != nil {
+			log.Printf("project %s: sbom: %v", p.Name, err)
+		}
+	}
 	a.Store.AddAudit(store.Audit{Actor: "system", Action: "scan:" + mode, Target: p.Name, Commit: res.Commit})
 	if a.OnScan != nil {
 		nf, _ := a.Store.NewSince(p.ID, sc.Started)
@@ -158,3 +168,37 @@ func (a *App) record(ctx context.Context, p store.Project, mode string, res *sch
 }
 
 func packVersions(pe interface{ Versions() string }) string { return pe.Versions() }
+
+// RescanAdvisories re-matches every stored SBOM against OSV. No code is fetched or scanned.
+// Only advisory findings change: the store fixes advisories that disappeared and reopens returning ones.
+func (a *App) RescanAdvisories(ctx context.Context) error {
+	if a.OSV == nil {
+		return fmt.Errorf("advisory lookups are not configured")
+	}
+	ps, err := a.Store.Projects()
+	if err != nil {
+		return err
+	}
+	for _, p := range ps {
+		cs, err := a.Store.Components(p.ID)
+		if err != nil || len(cs) == 0 {
+			continue
+		}
+		start := time.Now()
+		fs, err := a.OSV.Match(ctx, cs)
+		if err != nil {
+			log.Printf("project %s: advisories: %v", p.Name, err)
+			continue
+		}
+		sc, err := a.Store.RecordScan(store.Scan{ProjectID: p.ID, Mode: "advisory", DurationMS: time.Since(start).Milliseconds()}, []string{"advisories"}, fs)
+		if err != nil {
+			log.Printf("project %s: advisories: %v", p.Name, err)
+			continue
+		}
+		if a.OnScan != nil && sc.New > 0 {
+			nf, _ := a.Store.NewSince(p.ID, sc.Started)
+			a.OnScan(ctx, p, sc, nf)
+		}
+	}
+	return nil
+}

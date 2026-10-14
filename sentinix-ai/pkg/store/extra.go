@@ -1,6 +1,7 @@
 package store
 
 import (
+	"sentinix/pkg/advisories"
 	"sentinix/pkg/diffmap"
 	"sentinix/pkg/engines"
 )
@@ -163,6 +164,41 @@ func (s *Store) NewSince(project string, ts int64) ([]Finding, error) {
 			return nil, err
 		}
 		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// ReplaceComponents stores the project's current SBOM from its latest full scan.
+func (s *Store) ReplaceComponents(project string, cs []advisories.Component) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("delete from components where project_id=$1", project); err != nil {
+		return err
+	}
+	for _, c := range cs {
+		if _, err := tx.Exec("insert into components(project_id,ecosystem,name,version,file) values($1,$2,$3,$4,$5)", project, c.Ecosystem, c.Name, c.Version, c.File); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) Components(project string) ([]advisories.Component, error) {
+	rows, err := s.db.Query("select ecosystem,name,version,file from components where project_id=$1 order by ecosystem,name,version", project)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []advisories.Component
+	for rows.Next() {
+		var c advisories.Component
+		if err := rows.Scan(&c.Ecosystem, &c.Name, &c.Version, &c.File); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }

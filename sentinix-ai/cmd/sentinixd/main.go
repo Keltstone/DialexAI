@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"sentinix/pkg/advisories"
 	"sentinix/pkg/auth"
 	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
@@ -27,6 +28,8 @@ func main() {
 	failOn := flag.String("fail-on", "high", "fail PR status at or above this severity")
 	packDir := flag.String("packs", "", "directory of signed extra rule packs")
 	trust := flag.String("trust", "", "file of trusted pack public keys")
+	osv := flag.String("osv", "", "OSV API URL (https://api.osv.dev or a mirror); empty disables dependency advisories")
+	rescan := flag.Duration("advisory-interval", 6*time.Hour, "how often stored SBOMs are re-matched against OSV")
 	flag.Parse()
 
 	min, err := engines.ParseSeverity(*failOn)
@@ -53,6 +56,16 @@ func main() {
 		log.Print("OIDC_ISSUER not set: SSO login disabled")
 	}
 
+	if *osv != "" {
+		app.OSV = &advisories.Client{URL: *osv}
+		go func() {
+			for range time.Tick(*rescan) {
+				if err := app.RescanAdvisories(context.Background()); err != nil {
+					log.Print(err)
+				}
+			}
+		}()
+	}
 	go func() { // scheduled scans, checked once a minute
 		for t := range time.Tick(time.Minute) {
 			app.Tick(context.Background(), t)
