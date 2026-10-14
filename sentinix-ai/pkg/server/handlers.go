@@ -62,9 +62,9 @@ func (a *App) updateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Branch, Schedule, TZ, ModelPolicy *string
-		AI                                *bool
-		PackPins                          map[string]string
+		Branch, Schedule, TZ, ModelPolicy, Enforcement, FailOn *string
+		AI                                                     *bool
+		PackPins                                               map[string]string
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -78,6 +78,8 @@ func (a *App) updateProject(w http.ResponseWriter, r *http.Request) {
 	set(&p.Schedule, in.Schedule)
 	set(&p.TZ, in.TZ)
 	set(&p.ModelPolicy, in.ModelPolicy)
+	set(&p.Enforcement, in.Enforcement)
+	set(&p.FailOn, in.FailOn)
 	if in.AI != nil {
 		p.AI = *in.AI
 	}
@@ -92,6 +94,14 @@ func (a *App) updateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.ModelPolicy != "local-only" && p.ModelPolicy != "cloud-redacted" && p.ModelPolicy != "cloud" {
 		http.Error(w, "bad model_policy", 400)
+		return
+	}
+	if p.Enforcement != "block" && p.Enforcement != "report" {
+		http.Error(w, "enforcement must be block or report", 400)
+		return
+	}
+	if _, err := engines.ParseSeverity(p.FailOn); p.FailOn != "" && err != nil {
+		http.Error(w, "bad fail_on", 400)
 		return
 	}
 	if err := a.Store.UpdateProject(p); err != nil {

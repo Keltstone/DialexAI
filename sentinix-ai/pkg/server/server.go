@@ -30,6 +30,7 @@ type App struct {
 	Packs        packs.Engine
 	OSV          *advisories.Client // nil: no dependency advisory lookups (default; nothing leaves the network)
 	FailOn       engines.Severity
+	Enforcement  string       // default for projects and unregistered repos: "block" or "report"
 	OwnerEmail   string       // this identity gets the Owner role on first login
 	Static       http.Handler // dashboard
 	Workers      int

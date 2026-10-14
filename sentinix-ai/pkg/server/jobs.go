@@ -89,13 +89,39 @@ func (a *App) review(ctx context.Context, h githost.Host, ev *githost.Event) {
 	h.Status(ctx, ev, githost.Failure, "scan error") // errors fail closed
 }
 
+// gate returns whether a failing status may block the merge, and the severity at which it fails.
+// A registered project's own settings win; anything else falls back to the server defaults.
+func (a *App) gate(p *store.Project) (blocking bool, threshold engines.Severity) {
+	blocking, threshold = a.Enforcement != "report", a.FailOn
+	if p == nil {
+		return
+	}
+	blocking = p.Enforcement != "report"
+	if s, err := engines.ParseSeverity(p.FailOn); err == nil && p.FailOn != "" {
+		threshold = s
+	}
+	return
+}
+
 func (a *App) finishReview(ctx context.Context, h githost.Host, ev *githost.Event, res *scheduler.Result, dur time.Duration) {
+	var proj *store.Project
+	if p, err := a.Store.ProjectByRepo(h.Name(), ev.RepoPath); err == nil {
+		proj = &p
+	}
+	blocking, threshold := a.gate(proj)
+
 	shown := res.New
 	if len(shown) > 50 {
 		shown = shown[:50]
 	}
 	var buf bytes.Buffer
-	buf.WriteString("### Sentinix\n```\n")
+	buf.WriteString("### Sentinix\n")
+	if blocking {
+		fmt.Fprintf(&buf, "Merge is blocked by new findings at **%s** or above.\n", threshold)
+	} else {
+		buf.WriteString("Report only: these findings do not block the merge.\n")
+	}
+	buf.WriteString("```\n")
 	report.Text(&buf, shown, res.Ran)
 	buf.WriteString("```\n")
 	if len(res.New) > 50 {
@@ -106,16 +132,19 @@ func (a *App) finishReview(ctx context.Context, h githost.Host, ev *githost.Even
 		log.Printf("%s: comment: %v", h.Name(), err)
 	}
 	state, desc := githost.Success, "no new findings at gate"
-	if policy.Fails(res.New, a.FailOn) {
+	switch {
+	case !blocking:
+		desc = fmt.Sprintf("%d new finding(s), report only", len(res.New))
+	case policy.Fails(res.New, threshold):
 		state, desc = githost.Failure, fmt.Sprintf("%d new finding(s)", len(res.New))
 	}
 	if err := h.Status(ctx, ev, state, desc); err != nil {
 		log.Printf("%s: status: %v", h.Name(), err)
 	}
-	if p, err := a.Store.ProjectByRepo(h.Name(), ev.RepoPath); err == nil {
-		sc := store.Scan{ProjectID: p.ID, Mode: "pr", Commit: res.Commit, PR: ev.PR, DurationMS: dur.Milliseconds(), New: len(res.New)}
+	if proj != nil {
+		sc := store.Scan{ProjectID: proj.ID, Mode: "pr", Commit: res.Commit, PR: ev.PR, DurationMS: dur.Milliseconds(), New: len(res.New)}
 		a.Store.RecordPRScan(sc)
-		a.Store.AddSurface(p.ID, res.Commit, ev.PR, res.Surface)
+		a.Store.AddSurface(proj.ID, res.Commit, ev.PR, res.Surface)
 	}
 }
 

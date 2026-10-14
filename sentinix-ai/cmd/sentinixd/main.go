@@ -38,7 +38,11 @@ func main() {
 	integ := flag.String("integrations", "", "JSON file with Slack, Teams, webhook, Jira and Linear settings")
 	aiCfg := flag.String("ai", "", "JSON list of OpenAI-compatible models for the optional AI add-on")
 	sbImage := flag.String("sandbox-image", "", "container image with scanners; when set, external engines and generated tests run in it with no network")
+	enforce := flag.String("enforcement", "block", "default for repos: block (failing status stops the merge) or report (comment only); projects can override")
 	flag.Parse()
+	if *enforce != "block" && *enforce != "report" {
+		log.Fatal("-enforcement must be block or report")
+	}
 
 	min, err := engines.ParseSeverity(*failOn)
 	check(err)
@@ -53,7 +57,7 @@ func main() {
 	if len(key) < 32 {
 		log.Fatal("SENTINIX_SESSION_KEY must be at least 32 characters")
 	}
-	app := &server.App{Static: web.Handler(), Store: st, Hosts: hosts, Packs: pe, FailOn: min, Workers: *workers,
+	app := &server.App{Static: web.Handler(), Store: st, Hosts: hosts, Packs: pe, FailOn: min, Enforcement: *enforce, Workers: *workers,
 		Sess:       auth.Sessions{Key: []byte(key), Secure: os.Getenv("SENTINIX_INSECURE_COOKIES") == ""},
 		OwnerEmail: os.Getenv("SENTINIX_OWNER_EMAIL"),
 		Brand:      report.Brand{Name: os.Getenv("SENTINIX_BRAND_NAME"), Accent: os.Getenv("SENTINIX_BRAND_ACCENT")}}

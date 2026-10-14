@@ -136,9 +136,11 @@ const views = {
       const p = projects.find((x) => x.ID === project) || {};
       const sched = h('input', { placeholder: 'nightly | weekly | cron', value: p.Schedule || '', 'aria-label': 'Schedule' });
       const policy = h('select', { 'aria-label': 'Model policy' }, ['local-only', 'cloud-redacted', 'cloud'].map((m) => h('option', { value: m, selected: m === p.ModelPolicy }, m)));
+      const enf = h('select', { 'aria-label': 'Enforcement' }, [['block', 'Block merges'], ['report', 'Report only']].map(([v, l]) => h('option', { value: v, selected: v === (p.Enforcement || 'block') }, l)));
+      const failOn = h('select', { 'aria-label': 'Fail at' }, ['', 'low', 'medium', 'high', 'critical'].map((v) => h('option', { value: v, selected: v === (p.FailOn || '') }, v || 'server default')));
       const ai = h('input', { type: 'checkbox', checked: p.AI ? 'checked' : false, 'aria-label': 'AI add-on' });
-      out.push(h('h2', {}, 'This project'), h('div', { class: 'row' }, sched, policy, h('label', {}, ai, ' AI add-on'),
-        h('button', { onclick: act(async () => { await api('/projects/' + project, { method: 'PATCH', body: { Schedule: sched.value, ModelPolicy: policy.value, AI: ai.checked } }); await loadProjects(); }) }, 'Save')),
+      out.push(h('h2', {}, 'This project'), h('div', { class: 'row' }, enf, failOn), h('div', { class: 'row' }, sched, policy, h('label', {}, ai, ' AI add-on'),
+        h('button', { onclick: act(async () => { await api('/projects/' + project, { method: 'PATCH', body: { Schedule: sched.value, ModelPolicy: policy.value, AI: ai.checked, Enforcement: enf.value, FailOn: failOn.value } }); await loadProjects(); }) }, 'Save')),
         h('div', { class: 'row' }, h('button', { class: 'plain', onclick: act(async () => { const t = await api(`/projects/${project}/tokens`, { method: 'POST', body: { Name: 'ci' } }); prompt('CI token (shown once)', t.token); }) }, 'Create CI token')));
     }
     try {

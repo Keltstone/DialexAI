@@ -14,16 +14,18 @@ type Project struct {
 	PackPins                     map[string]string // pack name -> pinned version
 	AI                           bool
 	ModelPolicy                  string // local-only | cloud-redacted | cloud
+	Enforcement                  string // block: a failing status stops the merge; report: comment only, never blocks
+	FailOn                       string // severity threshold for this project; "" uses the server default
 	Created                      int64
 }
 
-const projCols = "id,name,host,repo,branch,schedule,tz,pack_pins,ai,model_policy,created"
+const projCols = "id,name,host,repo,branch,schedule,tz,pack_pins,ai,model_policy,created,enforcement,fail_on"
 
 func scanProject(r interface{ Scan(...any) error }) (Project, error) {
 	var p Project
 	var pins string
 	var ai int
-	err := r.Scan(&p.ID, &p.Name, &p.Host, &p.Repo, &p.Branch, &p.Schedule, &p.TZ, &pins, &ai, &p.ModelPolicy, &p.Created)
+	err := r.Scan(&p.ID, &p.Name, &p.Host, &p.Repo, &p.Branch, &p.Schedule, &p.TZ, &pins, &ai, &p.ModelPolicy, &p.Created, &p.Enforcement, &p.FailOn)
 	p.AI = ai == 1
 	json.Unmarshal([]byte(pins), &p.PackPins)
 	return p, err
@@ -37,13 +39,16 @@ func (s *Store) CreateProject(p Project) (Project, error) {
 	if p.ModelPolicy == "" {
 		p.ModelPolicy = "local-only"
 	}
+	if p.Enforcement == "" {
+		p.Enforcement = "block"
+	}
 	pins, _ := json.Marshal(p.PackPins)
 	ai := 0
 	if p.AI {
 		ai = 1
 	}
-	_, err := s.db.Exec("insert into projects("+projCols+") values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
-		p.ID, p.Name, p.Host, p.Repo, p.Branch, p.Schedule, p.TZ, string(pins), ai, p.ModelPolicy, p.Created)
+	_, err := s.db.Exec("insert into projects("+projCols+") values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+		p.ID, p.Name, p.Host, p.Repo, p.Branch, p.Schedule, p.TZ, string(pins), ai, p.ModelPolicy, p.Created, p.Enforcement, p.FailOn)
 	return p, err
 }
 
@@ -78,8 +83,8 @@ func (s *Store) UpdateProject(p Project) error {
 	if p.AI {
 		ai = 1
 	}
-	_, err := s.db.Exec("update projects set name=$2,branch=$3,schedule=$4,tz=$5,pack_pins=$6,ai=$7,model_policy=$8 where id=$1",
-		p.ID, p.Name, p.Branch, p.Schedule, p.TZ, string(pins), ai, p.ModelPolicy)
+	_, err := s.db.Exec("update projects set name=$2,branch=$3,schedule=$4,tz=$5,pack_pins=$6,ai=$7,model_policy=$8,enforcement=$9,fail_on=$10 where id=$1",
+		p.ID, p.Name, p.Branch, p.Schedule, p.TZ, string(pins), ai, p.ModelPolicy, p.Enforcement, p.FailOn)
 	return err
 }
 
