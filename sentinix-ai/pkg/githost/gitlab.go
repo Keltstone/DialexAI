@@ -1,0 +1,64 @@
+package githost
+
+import (
+	"context"
+	"crypto/subtle"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+)
+
+type gitlab struct{ Config }
+
+func (g gitlab) Name() string                { return g.Config.Name }
+func (g gitlab) CloneAuth() (string, string) { return "oauth2", g.Token }
+func (g gitlab) hdr() map[string]string      { return map[string]string{"PRIVATE-TOKEN": g.Token} }
+
+func (g gitlab) Parse(r *http.Request, body []byte) (*Event, error) {
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Gitlab-Token")), []byte(g.Secret)) != 1 {
+		return nil, fmt.Errorf("bad token")
+	}
+	var p struct {
+		Kind string `json:"object_kind"`
+		A    struct {
+			Action       string
+			IID          int
+			SourceBranch string `json:"source_branch"`
+			TargetBranch string `json:"target_branch"`
+			SourceProj   int    `json:"source_project_id"`
+			TargetProj   int    `json:"target_project_id"`
+			OldRev       string
+			LastCommit   struct{ ID string } `json:"last_commit"`
+			Source       struct {
+				GitHTTPURL string `json:"git_http_url"`
+			} `json:"source"`
+			Target struct {
+				GitHTTPURL string `json:"git_http_url"`
+			} `json:"target"`
+		} `json:"object_attributes"`
+	}
+	if err := json.Unmarshal(body, &p); err != nil {
+		return nil, err
+	}
+	a := p.A
+	// "update" also fires on title edits; only a push carries oldrev.
+	if p.Kind != "merge_request" || !(a.Action == "open" || a.Action == "reopen" || a.Action == "update" && a.OldRev != "") {
+		return nil, nil
+	}
+	return &Event{Repo: strconv.Itoa(a.TargetProj), PR: strconv.Itoa(a.IID), HeadSHA: a.LastCommit.ID,
+		HeadRef: a.SourceBranch, BaseRef: a.TargetBranch, CloneURL: a.Source.GitHTTPURL,
+		BaseCloneURL: a.Target.GitHTTPURL, Fork: a.SourceProj != a.TargetProj}, nil
+}
+
+// ponytail: fork MRs have their commit in the source project, so the status call may 404; the comment still posts.
+func (g gitlab) Status(ctx context.Context, e *Event, s State, desc string) error {
+	st := [...]string{"pending", "success", "failed"}[s]
+	return g.post(ctx, fmt.Sprintf("%s/projects/%s/statuses/%s", g.API, e.Repo, e.HeadSHA), g.hdr(),
+		map[string]string{"state": st, "name": "sentinix", "description": desc})
+}
+
+func (g gitlab) Comment(ctx context.Context, e *Event, body string) error {
+	return g.post(ctx, fmt.Sprintf("%s/projects/%s/merge_requests/%s/notes", g.API, e.Repo, e.PR), g.hdr(),
+		map[string]string{"body": body})
+}
