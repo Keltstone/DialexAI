@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -41,13 +42,30 @@ func (Secrets) Scan(root string) ([]Finding, error) {
 				continue
 			}
 			for _, r := range secretRules {
-				if m := r.re.FindString(line); m != "" {
+				if m := r.re.FindString(line); m != "" && !(r.id == "secret.generic-assignment" && placeholder.MatchString(m)) {
+					sev := High
+					if isTestPath(rel) {
+						sev = Low // fixtures are usually fake; still reported so a real key is not hidden
+					}
 					out = append(out, Finding{Rule: r.id, Engine: "secrets", File: rel, Line: n,
-						Severity: High, Message: "possible hardcoded secret", Evidence: mask(m)})
+						Severity: sev, Message: "possible hardcoded secret", Evidence: mask(m)})
 				}
 			}
 		}
 		return nil
 	})
 	return out, err
+}
+
+// placeholder values are documentation and stubs, not credentials. Only the generic rule uses this:
+// a real AWS key or private key is never excused by a word in it.
+var placeholder = regexp.MustCompile(`(?i)(example|fake|dummy|mock|stub|demo|sample|secure-random|placeholder|changeme|your[-_]|x{6,}|<[^>]+>|\$\{)`)
+
+func isTestPath(p string) bool {
+	for _, m := range []string{"/test/", "commonTest", "androidTest", "iosTest", "jvmTest", "_test.go", "Test.kt", "Test.java", "fixtures", "testdata"} {
+		if strings.Contains(p, m) {
+			return true
+		}
+	}
+	return false
 }

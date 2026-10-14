@@ -8,3 +8,6 @@ fun safe(ctx: Context, db: SQLiteDatabase, name: String, settings: Settings) {
     handler.cancel()
     install(CORS) { allowHost("app.example.com") }
 }
+suspend fun login(username: String, password: String) {
+    val host = base.removePrefix("https://").removePrefix("http://").substringBefore('/')
+}

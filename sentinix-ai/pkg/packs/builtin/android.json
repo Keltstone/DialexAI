@@ -10,13 +10,13 @@
    "id": "exported-component",
    "severity": "medium",
    "cwe": "CWE-926",
-   "message": "Exported component without a permission",
+   "message": "Exported component without a permission (launcher activities are exempt)",
    "remediation": "Set android:exported=\"false\" or require android:permission.",
    "files": [
     "AndroidManifest.xml"
    ],
-   "pattern": "<(activity|service|receiver|provider)\\b[^>]*android:exported=\"true\"[^>]*>",
-   "unless": "android:permission",
+   "pattern": "<(activity|service|receiver|provider)\\b[^>]*android:exported=\"true\"[^>]*?(?:/>|>.*?</(?:activity|service|receiver|provider)>)",
+   "unless": "android:permission|android\\.intent\\.action\\.MAIN",
    "multiline": true
   },
   {
@@ -154,8 +154,8 @@
   {
    "rule": "exported-component",
    "file": "AndroidManifest.xml",
-   "bad": "<activity android:name=\".A\" android:exported=\"true\"/>",
-   "good": "<activity android:name=\".A\" android:exported=\"true\" android:permission=\"p.X\"/>"
+   "bad": "<application><activity android:name=\".A\" android:exported=\"true\"></activity></application>",
+   "good": "<activity android:name=\".M\" android:exported=\"true\"><intent-filter><action android:name=\"android.intent.action.MAIN\"/></intent-filter></activity>"
   },
   {
    "rule": "allow-backup",

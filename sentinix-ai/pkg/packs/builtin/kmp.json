@@ -16,7 +16,7 @@
     "*.kt"
    ],
    "pattern": "\"http://[^\"]*\"",
-   "unless": "localhost|127\\.0\\.0\\.1|10\\.0\\.2\\.2",
+   "unless": "localhost|127\\.0\\.0\\.1|10\\.0\\.2\\.2|removePrefix|removeSuffix|startsWith|endsWith|replace\\(|Regex",
    "path_contains": "commonMain"
   },
   {
@@ -28,7 +28,7 @@
    "files": [
     "*.kt"
    ],
-   "pattern": "(println|Napier\\.\\w|Logger\\.\\w+|log\\w*)\\(.*(password|token|secret|apiKey)",
+   "pattern": "\\b(println|print|Napier\\.\\w+|Logger\\.\\w+|logger\\.\\w+|Log\\.[dviwe]|co\\.touchlab\\.kermit\\.Logger\\.\\w+)\\(.*(password|token|secret|apiKey)",
    "path_contains": "commonMain"
   },
   {
@@ -49,13 +49,13 @@
    "rule": "common-cleartext-url",
    "file": "src/commonMain/A.kt",
    "bad": "val u = \"http://api.example.com/v1\"",
-   "good": "val u = \"http://localhost:8080\""
+   "good": "val h = u.removePrefix(\"http://\")"
   },
   {
    "rule": "common-log-secret",
    "file": "src/commonMain/A.kt",
    "bad": "println(\"token=$token\")",
-   "good": "println(\"loaded\")"
+   "good": "suspend fun login(username: String, password: String) { println(\"loaded\") }"
   },
   {
    "rule": "settings-plain-secret",
