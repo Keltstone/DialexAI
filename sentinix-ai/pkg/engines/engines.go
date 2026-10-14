@@ -43,6 +43,8 @@ type Finding struct {
 	Severity Severity `json:"severity"`
 	Message  string   `json:"message"`
 	Evidence string   `json:"evidence"` // masked, short
+	CWE      string   `json:"cwe,omitempty"`
+	Fix      string   `json:"fix,omitempty"` // remediation text
 }
 
 // Fingerprint ignores the line number so baselines survive unrelated edits.
@@ -58,8 +60,8 @@ type Engine interface {
 
 // Bundled returns the built-in engine plus external engines found on PATH.
 // Missing binaries are skipped; the report's coverage line says what ran.
-func Bundled() []Engine {
-	es := []Engine{Secrets{}}
+func Bundled(extra ...Engine) []Engine {
+	es := append([]Engine{Secrets{}}, extra...)
 	for _, e := range []External{
 		{"semgrep", []string{"scan", "--config", "auto", "--sarif", "--quiet"}},
 		{"gitleaks", []string{"detect", "--no-git", "--report-format", "sarif", "--report-path", "/dev/stdout", "--no-banner", "-s"}},

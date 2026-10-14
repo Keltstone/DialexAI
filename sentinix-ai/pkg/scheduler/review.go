@@ -21,7 +21,7 @@ type Result struct {
 
 // Review scans ev.HeadSHA and ev.BaseRef without ever handing the token to a scan process.
 // ponytail: engines run on the host, not in a per-scan container; add sandboxing before scanning untrusted repos with executable plugins.
-func Review(ev *githost.Event, user, token string) (*Result, error) {
+func Review(ev *githost.Event, user, token string, extra ...engines.Engine) (*Result, error) {
 	dir, err := os.MkdirTemp("", "sentinix-*")
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ func Review(ev *githost.Event, user, token string) (*Result, error) {
 
 	res := &Result{}
 	base := policy.Baseline{}
-	for _, e := range engines.Bundled() {
+	for _, e := range engines.Bundled(extra...) {
 		hf, err := e.Scan(wt["head"])
 		if err != nil {
 			return nil, err // a broken engine must not look like a clean scan

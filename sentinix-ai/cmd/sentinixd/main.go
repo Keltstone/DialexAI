@@ -16,6 +16,7 @@ import (
 
 	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
+	"sentinix/pkg/packs"
 	"sentinix/pkg/policy"
 	"sentinix/pkg/report"
 	"sentinix/pkg/scheduler"
@@ -26,7 +27,11 @@ func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	workers := flag.Int("workers", 2, "concurrent reviews")
 	failOn := flag.String("fail-on", "high", "fail the status at or above this severity")
+	packDir := flag.String("packs", "", "directory of signed extra rule packs")
+	trust := flag.String("trust", "", "file of trusted pack public keys")
 	flag.Parse()
+	pe, err := packs.NewEngine(*packDir, *trust)
+	check(err)
 
 	min, err := engines.ParseSeverity(*failOn)
 	check(err)
@@ -62,18 +67,18 @@ func main() {
 			defer func() { <-sem }()
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 			defer cancel()
-			review(ctx, h, ev, min)
+			review(ctx, h, ev, min, pe)
 		}()
 	})
 	log.Printf("listening on %s, %d host(s)", *addr, len(hosts))
 	check(http.ListenAndServe(*addr, mux))
 }
 
-func review(ctx context.Context, h githost.Host, ev *githost.Event, min engines.Severity) {
+func review(ctx context.Context, h githost.Host, ev *githost.Event, min engines.Severity, pe packs.Engine) {
 	log.Printf("%s: review %s#%s", h.Name(), ev.Repo, ev.PR)
 	h.Status(ctx, ev, githost.Pending, "scanning")
 	user, token := h.CloneAuth()
-	res, err := scheduler.Review(ev, user, token)
+	res, err := scheduler.Review(ev, user, token, pe)
 	if err != nil {
 		log.Printf("%s: %v", h.Name(), err)
 		h.Status(ctx, ev, githost.Failure, "scan error") // errors fail closed

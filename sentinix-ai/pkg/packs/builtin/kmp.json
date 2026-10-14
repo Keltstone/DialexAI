@@ -1,0 +1,67 @@
+{
+ "name": "kmp",
+ "version": "1.0.0",
+ "stacks": [
+  "kmp"
+ ],
+ "author": "Kolta Labs",
+ "rules": [
+  {
+   "id": "common-cleartext-url",
+   "severity": "medium",
+   "cwe": "CWE-319",
+   "message": "Cleartext http:// URL in shared code",
+   "remediation": "Use https.",
+   "files": [
+    "*.kt"
+   ],
+   "pattern": "\"http://[^\"]*\"",
+   "unless": "localhost|127\\.0\\.0\\.1|10\\.0\\.2\\.2",
+   "path_contains": "commonMain"
+  },
+  {
+   "id": "common-log-secret",
+   "severity": "medium",
+   "cwe": "CWE-532",
+   "message": "Secret-looking value printed from shared code",
+   "remediation": "Do not log credentials.",
+   "files": [
+    "*.kt"
+   ],
+   "pattern": "(println|Napier\\.\\w|Logger\\.\\w+|log\\w*)\\(.*(password|token|secret|apiKey)",
+   "path_contains": "commonMain"
+  },
+  {
+   "id": "settings-plain-secret",
+   "severity": "medium",
+   "cwe": "CWE-312",
+   "message": "Secret stored in plain multiplatform Settings",
+   "remediation": "Use platform secure storage (Keychain/Keystore).",
+   "files": [
+    "*.kt"
+   ],
+   "pattern": "settings\\.(putString|set\\w*)\\(\\s*\"(password|token|secret|api_?key)\\w*\"",
+   "path_contains": "commonMain"
+  }
+ ],
+ "tests": [
+  {
+   "rule": "common-cleartext-url",
+   "file": "src/commonMain/A.kt",
+   "bad": "val u = \"http://api.example.com/v1\"",
+   "good": "val u = \"http://localhost:8080\""
+  },
+  {
+   "rule": "common-log-secret",
+   "file": "src/commonMain/A.kt",
+   "bad": "println(\"token=$token\")",
+   "good": "println(\"loaded\")"
+  },
+  {
+   "rule": "settings-plain-secret",
+   "file": "src/commonMain/A.kt",
+   "bad": "settings.putString(\"token\", t)",
+   "good": "settings.putString(\"theme\", t)"
+  }
+ ]
+}
