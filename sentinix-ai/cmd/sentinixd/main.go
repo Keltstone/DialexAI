@@ -16,6 +16,7 @@ import (
 	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
 	"sentinix/pkg/packs"
+	"sentinix/pkg/report"
 	"sentinix/pkg/server"
 	"sentinix/pkg/store"
 )
@@ -47,7 +48,8 @@ func main() {
 	}
 	app := &server.App{Store: st, Hosts: hosts, Packs: pe, FailOn: min, Workers: *workers,
 		Sess:       auth.Sessions{Key: []byte(key), Secure: os.Getenv("SENTINIX_INSECURE_COOKIES") == ""},
-		OwnerEmail: os.Getenv("SENTINIX_OWNER_EMAIL")}
+		OwnerEmail: os.Getenv("SENTINIX_OWNER_EMAIL"),
+		Brand:      report.Brand{Name: os.Getenv("SENTINIX_BRAND_NAME"), Accent: os.Getenv("SENTINIX_BRAND_ACCENT")}}
 	if iss := os.Getenv("OIDC_ISSUER"); iss != "" {
 		app.OIDC, err = auth.NewOIDC(context.Background(), iss, os.Getenv("OIDC_CLIENT_ID"), os.Getenv("OIDC_CLIENT_SECRET"),
 			os.Getenv("OIDC_REDIRECT_URL"), app.Sess, app.Login)

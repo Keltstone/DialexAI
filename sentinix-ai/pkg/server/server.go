@@ -16,6 +16,7 @@ import (
 	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
 	"sentinix/pkg/packs"
+	"sentinix/pkg/report"
 	"sentinix/pkg/store"
 )
 
@@ -30,6 +31,7 @@ type App struct {
 	OwnerEmail string       // this identity gets the Owner role on first login
 	Static     http.Handler // dashboard
 	Workers    int
+	Brand      report.Brand // white-label name and accent for HTML reports
 	// OnScan is called after a recorded full scan or reviewed PR (integrations hook).
 	OnScan func(ctx context.Context, p store.Project, sc store.Scan, newFindings []store.Finding)
 

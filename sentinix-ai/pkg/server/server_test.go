@@ -156,3 +156,12 @@ func TestAdvisoryRescanOpensThenFixes(t *testing.T) {
 		t.Fatalf("not fixed: %+v", fs)
 	}
 }
+
+func TestReportFormats(t *testing.T) {
+	e := setup(t)
+	p, _ := e.st.CreateProject(store.Project{Name: "p", Host: "gh", Repo: "o/r"})
+	for _, f := range []string{"csv", "json", "sarif", "sbom", "html"} {
+		e.ok(e.call("aud@example.test", auth.Auditor, "GET", "/api/projects/"+p.ID+"/report/"+f, ""), 200)
+	}
+	e.ok(e.call("aud@example.test", auth.Auditor, "GET", "/api/projects/"+p.ID+"/report/exe", ""), 404)
+}

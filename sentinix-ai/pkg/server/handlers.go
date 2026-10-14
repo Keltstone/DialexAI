@@ -10,6 +10,7 @@ import (
 
 	"sentinix/pkg/auth"
 	"sentinix/pkg/engines"
+	"sentinix/pkg/report"
 	"sentinix/pkg/store"
 )
 
@@ -409,8 +410,57 @@ func (a *App) packList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"packs": ps, "rule_stats": stats, "disabled": dis})
 }
 
-// report is added with the reporting formats.
-func (a *App) report(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }
+// report renders csv, sarif, json, sbom (CycloneDX) or html (print to PDF) for one project.
+func (a *App) report(w http.ResponseWriter, r *http.Request) {
+	p, err := a.Store.Project(r.PathValue("id"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = "open"
+	}
+	fs, err := a.Store.Findings(store.Filter{Project: p.ID, Status: status, Limit: 10000})
+	if err != nil {
+		fail(w, err, 500)
+		return
+	}
+	switch r.PathValue("fmt") {
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", `attachment; filename="findings.csv"`)
+		report.CSV(w, fs)
+	case "json":
+		writeJSON(w, fs)
+	case "sarif":
+		w.Header().Set("Content-Type", "application/sarif+json")
+		plain := make([]engines.Finding, len(fs))
+		for i, f := range fs {
+			plain[i] = f.Finding
+		}
+		report.SARIF(w, plain)
+	case "sbom":
+		cs, err := a.Store.Components(p.ID)
+		if err != nil {
+			fail(w, err, 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/vnd.cyclonedx+json")
+		report.SBOM(w, p.Name, cs, fs)
+	case "html":
+		post, _ := a.Store.Posture(p.ID)
+		var last *store.Scan
+		if ss, _ := a.Store.Scans(p.ID, 1); len(ss) > 0 {
+			last = &ss[0]
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+		report.HTML(w, report.Data{Brand: a.Brand, Project: p, Scan: last, Findings: fs, Posture: post})
+	default:
+		http.NotFound(w, r)
+	}
+}
 
 func (a *App) rescanAdvisories(w http.ResponseWriter, r *http.Request) {
 	if a.OSV == nil {
