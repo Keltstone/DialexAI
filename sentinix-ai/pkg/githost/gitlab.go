@@ -20,6 +20,9 @@ func (g gitlab) Parse(r *http.Request, body []byte) (*Event, error) {
 		return nil, fmt.Errorf("bad token")
 	}
 	var p struct {
+		Project struct {
+			Path string `json:"path_with_namespace"`
+		}
 		Kind string `json:"object_kind"`
 		A    struct {
 			Action       string
@@ -46,7 +49,7 @@ func (g gitlab) Parse(r *http.Request, body []byte) (*Event, error) {
 	if p.Kind != "merge_request" || !(a.Action == "open" || a.Action == "reopen" || a.Action == "update" && a.OldRev != "") {
 		return nil, nil
 	}
-	return &Event{Repo: strconv.Itoa(a.TargetProj), PR: strconv.Itoa(a.IID), HeadSHA: a.LastCommit.ID,
+	return &Event{RepoPath: p.Project.Path, Repo: strconv.Itoa(a.TargetProj), PR: strconv.Itoa(a.IID), HeadSHA: a.LastCommit.ID,
 		HeadRef: a.SourceBranch, BaseRef: a.TargetBranch, CloneURL: a.Source.GitHTTPURL,
 		BaseCloneURL: a.Target.GitHTTPURL, Fork: a.SourceProj != a.TargetProj}, nil
 }

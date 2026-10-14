@@ -26,6 +26,7 @@ const (
 
 // Event is the provider-neutral view of a PR/MR that needs scanning.
 type Event struct {
+	RepoPath     string // human path "owner/name", matches Project.Repo
 	Repo         string // API identifier of the target repo (full name, or project id for GitLab)
 	PR           string
 	HeadSHA      string // may be short (Bitbucket); HeadRef is the fallback for fetching
@@ -44,6 +45,8 @@ type Host interface {
 	Comment(ctx context.Context, e *Event, body string) error
 	// CloneAuth is the user/token pair for HTTPS clones.
 	CloneAuth() (user, token string)
+	// RepoURL is the HTTPS clone URL for a repo path.
+	RepoURL(path string) string
 }
 
 type Config struct {
@@ -53,7 +56,24 @@ type Config struct {
 	Secret    string `json:"secret"`
 	Token     string `json:"token"`
 	PublicURL string `json:"public_url"` // linked from Bitbucket build statuses
+	WebURL    string `json:"web_url"`    // git host web root; derived from api when empty
 }
+
+// web returns the host's web root used to build clone URLs.
+func (c Config) web() string {
+	if c.WebURL != "" {
+		return strings.TrimRight(c.WebURL, "/")
+	}
+	for _, suf := range []string{"/api/v3", "/api/v4", "/2.0"} {
+		if strings.HasSuffix(c.API, suf) {
+			w := strings.TrimSuffix(c.API, suf)
+			return strings.Replace(w, "://api.", "://", 1)
+		}
+	}
+	return strings.Replace(c.API, "://api.", "://", 1)
+}
+
+func (c Config) RepoURL(path string) string { return c.web() + "/" + path + ".git" }
 
 func New(c Config) (Host, error) {
 	if c.Secret == "" || c.Token == "" {

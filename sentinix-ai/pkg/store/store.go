@@ -32,6 +32,9 @@ create table if not exists audit(id text primary key, ts bigint not null, actor 
 create table if not exists approvals(id text primary key, kind text not null, payload text not null, proposer text not null,
   status text not null, approver text not null, ts bigint not null);
 create table if not exists users(id text primary key, email text not null unique, name text not null, role text not null, created bigint not null);
+create table if not exists rule_overrides(rule text primary key, disabled bigint not null, severity bigint not null);
+create table if not exists surface(id text primary key, project_id text not null, commit_sha text not null, pr text not null,
+  kind text not null, change text not null, file text not null, detail text not null, ts bigint not null);
 create table if not exists tokens(hash text primary key, project_id text not null, name text not null, created bigint not null)`
 
 // Open takes "postgres://…" or "sqlite:<path>" (":memory:" works for tests).

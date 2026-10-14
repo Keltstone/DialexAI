@@ -45,7 +45,7 @@ func (b bitbucket) Parse(r *http.Request, body []byte) (*Event, error) {
 		return nil, err
 	}
 	s, d := p.PR.Src, p.PR.Dst
-	return &Event{Repo: d.Repo.FullName, PR: strconv.Itoa(p.PR.ID), HeadSHA: s.Commit.Hash, HeadRef: s.Branch.Name,
+	return &Event{RepoPath: d.Repo.FullName, Repo: d.Repo.FullName, PR: strconv.Itoa(p.PR.ID), HeadSHA: s.Commit.Hash, HeadRef: s.Branch.Name,
 		BaseRef: d.Branch.Name, CloneURL: s.Repo.Links.HTML.Href + ".git", BaseCloneURL: d.Repo.Links.HTML.Href + ".git",
 		Fork: s.Repo.FullName != d.Repo.FullName}, nil
 }

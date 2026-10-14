@@ -51,7 +51,7 @@ func (g github) Parse(r *http.Request, body []byte) (*Event, error) {
 		return nil, nil
 	}
 	h, b := p.PR.Head, p.PR.Base
-	return &Event{Repo: b.Repo.FullName, PR: strconv.Itoa(p.Number), HeadSHA: h.SHA, HeadRef: h.Ref,
+	return &Event{RepoPath: b.Repo.FullName, Repo: b.Repo.FullName, PR: strconv.Itoa(p.Number), HeadSHA: h.SHA, HeadRef: h.Ref,
 		BaseRef: b.Ref, CloneURL: h.Repo.CloneURL, BaseCloneURL: b.Repo.CloneURL,
 		Fork: h.Repo.FullName != b.Repo.FullName}, nil
 }
