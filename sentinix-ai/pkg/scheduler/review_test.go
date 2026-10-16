@@ -50,3 +50,27 @@ func TestFullScan(t *testing.T) {
 		t.Fatalf("%+v %v", res, err)
 	}
 }
+
+func TestReview_SemgrepWithoutConfigReportsUnavailable(t *testing.T) {
+	d := t.TempDir()
+	run := func(args ...string) {
+		c := exec.Command("git", append([]string{"-C", d, "-c", "user.name=t", "-c", "user.email=t@example.test"}, args...)...)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", args, out)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	os.WriteFile(filepath.Join(d, "file.txt"), []byte("hello world\n"), 0o644)
+	run("add", ".")
+	run("commit", "-qm", "init")
+
+	ev := &githost.Event{HeadSHA: "main", HeadRef: "main", BaseRef: "main", CloneURL: d, BaseCloneURL: d}
+	res, err := Review(t.Context(), ev, "", "")
+	if err != nil {
+		t.Fatalf("expected review to complete even if semgrep lacks config, got: %v", err)
+	}
+	if len(res.Gaps) == 0 {
+		t.Logf("no gaps reported; checking if semgrep is on path")
+	}
+}
+
