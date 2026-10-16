@@ -41,6 +41,7 @@ func main() {
 	integ := flag.String("integrations", "", "JSON file with Slack, Teams, webhook, Jira and Linear settings")
 	aiCfg := flag.String("ai", "", "JSON list of OpenAI-compatible models for the optional AI add-on")
 	sbImage := flag.String("sandbox-image", "", "container image with scanners; when set, external engines and generated tests run in it with no network")
+	enterprise := flag.Bool("enterprise", false, "enterprise mode: requires sandbox for external engines")
 	enforce := flag.String("enforcement", "block", "default for repos: block (failing status stops the merge) or report (comment only); projects can override")
 	maxFetchBytes := flag.Int64("max-fetch-bytes", 500<<20, "maximum fetch and working-tree size in bytes")
 	reqEngines := flag.String("required-engines", "secrets,packs,semgrep,gitleaks,osv-scanner", "comma-separated engines required to run on every scan; missing engines fail the PR")
@@ -49,6 +50,9 @@ func main() {
 	if *showVersion {
 		log.Printf("Sentinix AI Daemon (sentinixd) version %s\n", version)
 		return
+	}
+	if *enterprise && *sbImage == "" {
+		log.Fatal("enterprise mode requires -sandbox-image for external engines")
 	}
 	if *enforce != "block" && *enforce != "report" {
 		log.Fatal("-enforcement must be block or report")
