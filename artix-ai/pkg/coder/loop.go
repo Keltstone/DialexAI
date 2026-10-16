@@ -74,6 +74,7 @@ type LoopOptions struct {
 	KnowledgeFilter                    func(ki knowledge.KnowledgeItem) bool `json:"-"`
 	StreamEmitter                      *StreamEmitter                        `json:"-"`
 	TaskID                             string                                `json:"taskId,omitempty"`
+	AuditEval                          bool                                  `json:"auditEval,omitempty"`
 }
 
 // LoopResult represents the final convergence outcome.
@@ -1298,6 +1299,11 @@ func (c *ConvergenceCoordinator) Run(
 							subOpts.TriggerABEval = false
 							subOpts.ABEvalInterval = 0
 							subOpts.ABEvalRunner = nil
+							subOpts.Autonomy = AutonomySupervised
+							subOpts.ForgeApproval = nil
+							subOpts.ForgeVerifier = nil
+							subOpts.ForgePusher = nil
+							subOpts.AuditEval = true
 
 							if item == nil {
 								// Baseline run: exclude target KI from KnowledgeItems

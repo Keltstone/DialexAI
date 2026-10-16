@@ -42,7 +42,7 @@ case "${ARCH_NAME}" in
 esac
 
 # Options
-INSTALL_TARGET="all"       # all, artix, dialex, kritix, engine
+INSTALL_TARGET="all"       # all, artix, dialex, kritix, sentinix, engine
 INSTALL_MODE="both"         # both, cli, desktop
 ENGINE_CHOICE="prompt"      # prompt, with, without
 EXPRESS_ENGINE_ACTION=""    # update, skip, or empty (prompt)
@@ -64,10 +64,11 @@ Usage:
   curl -fsSL https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/scripts/install.sh | bash -s -- [OPTIONS]
 
 Options:
-  --all                 Install all products: Artix AI, Dialex AI, and Kritix AI (default)
+  --all                 Install all products: Artix AI, Dialex AI, Kritix AI, and Sentinix AI (default)
   --artix               Install Artix AI only (Autonomous Coding Cockpit & CLI)
   --dialex              Install Dialex AI only (Deliberation Platform & Studio)
   --kritix              Install Kritix AI only (Autonomous QA & Testing Studio)
+  --sentinix            Install Sentinix AI only (Continuous Security Review & PR Gate)
   --engine-only         Install Socratix Deliberation Engine only
 
 Component Modes:
@@ -108,6 +109,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --kritix)
             INSTALL_TARGET="kritix"
+            shift
+            ;;
+        --sentinix)
+            INSTALL_TARGET="sentinix"
+            INSTALL_MODE="cli"
             shift
             ;;
         --engine-only|--engine)
@@ -237,22 +243,24 @@ echo ""
 # ------------------------------------------------------------------------------
 if [[ "${NON_INTERACTIVE}" != "true" && -t 0 ]]; then
     echo -e "${BOLD}Select components to install:${RESET}"
-    echo "  1) All Products (Artix AI, Dialex AI, Kritix AI)"
+    echo "  1) All Products (Artix AI, Dialex AI, Kritix AI, Sentinix AI)"
     echo "  2) Artix AI (Autonomous Coding Cockpit & CLI)"
     echo "  3) Dialex AI (Deliberation Desktop App & Studio)"
     echo "  4) Kritix AI (Autonomous QA & Testing Studio)"
-    echo "  5) Socratix Deliberation Engine Only"
-    ans=$(prompt_user "Enter choice [1-5, default 1]: " "1")
+    echo "  5) Sentinix AI (Continuous Security Review & PR Gate)"
+    echo "  6) Socratix Deliberation Engine Only"
+    ans=$(prompt_user "Enter choice [1-6, default 1]: " "1")
     case "$ans" in
         1) INSTALL_TARGET="all" ;;
         2) INSTALL_TARGET="artix" ;;
         3) INSTALL_TARGET="dialex" ;;
         4) INSTALL_TARGET="kritix" ;;
-        5) INSTALL_TARGET="engine" ;;
+        5) INSTALL_TARGET="sentinix"; INSTALL_MODE="cli" ;;
+        6) INSTALL_TARGET="engine" ;;
         *) INSTALL_TARGET="all" ;;
     esac
 
-    if [[ "${INSTALL_TARGET}" != "engine" ]]; then
+    if [[ "${INSTALL_TARGET}" != "engine" && "${INSTALL_TARGET}" != "sentinix" ]]; then
         echo ""
         echo -e "${BOLD}Select format:${RESET}"
         echo "  1) Both CLI Binaries and Desktop GUI Apps"
@@ -389,6 +397,12 @@ acquire_binary() {
             kritix)
                 (cd "${REPO_ROOT}" && CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${VERSION}" -o "${REPO_ROOT}/dist/bin/kritix" ./kritix-ai/cmd/kritix)
                 ;;
+            sentinix)
+                (cd "${REPO_ROOT}" && CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION}" -o "${REPO_ROOT}/dist/bin/sentinix" ./sentinix-ai/cmd/sentinix)
+                ;;
+            sentinixd)
+                (cd "${REPO_ROOT}" && CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION}" -o "${REPO_ROOT}/dist/bin/sentinixd" ./sentinix-ai/cmd/sentinixd)
+                ;;
         esac
         src_file="${REPO_ROOT}/dist/bin/${bin_name}"
     fi
@@ -480,6 +494,25 @@ install_kritix_cli() {
         echo -e "  ${GREEN}✓ Kritix AI CLI successfully installed!${RESET}"
     else
         echo -e "  ${YELLOW}⚠️  Kritix binary not found.${RESET}"
+    fi
+}
+
+# 4. Install Sentinix AI CLI & Daemon
+install_sentinix_cli() {
+    echo -e "${BOLD}▶ Installing Sentinix AI CLI & Daemon...${RESET}"
+    local src_sentinix
+    src_sentinix=$(acquire_binary "sentinix")
+    local src_sentinixd
+    src_sentinixd=$(acquire_binary "sentinixd")
+
+    if [[ -n "${src_sentinix}" && -f "${src_sentinix}" ]]; then
+        install_binary_file "${src_sentinix}" "sentinix"
+        if [[ -n "${src_sentinixd}" && -f "${src_sentinixd}" ]]; then
+            install_binary_file "${src_sentinixd}" "sentinixd"
+        fi
+        echo -e "  ${GREEN}✓ Sentinix AI CLI & Daemon successfully installed!${RESET}"
+    else
+        echo -e "  ${YELLOW}⚠️  Sentinix binary not found.${RESET}"
     fi
 }
 

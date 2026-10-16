@@ -218,7 +218,7 @@ func (s *Store) Decide(approvalID, approver string, approve bool) (Approval, err
 		Approver: approver,
 		Before:   beforeStatus,
 		After:    newStatus,
-	}); err != nil {
+	}, s.auditKey); err != nil {
 		return a, err
 	}
 

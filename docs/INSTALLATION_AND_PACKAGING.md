@@ -11,6 +11,7 @@ Comprehensive guide for building and installing **Artix AI**, **Dialex AI**, and
 | **Dialex AI** | Compose Desktop / Mobile App | Sovereign Multi-Agent Deliberation Platform & Persona Studio | Supports embedded Socratix or remote engine (port 7890) |
 | **Artix AI** | CLI / Daemon + Desktop Cockpit | Autonomous Software Engineering & Spec-to-Patch Deliberation | Standalone CLI + optional Socratic Council integration |
 | **Kritix AI** | CLI / Server + Desktop Studio | Autonomous QA Testing, Vision Driver & OWASP DAST Auditing | Headless studio (port 9090) + optional Socratic synthesis |
+| **Sentinix AI** | CLI / Daemon + Web Dashboard | Continuous Security Review, PR Gate & Vulnerability Posture Engine | Standalone scanner + optional server / AI Council |
 | **Socratix Engine** | Standalone Go Daemon & CLI | Multi-Agent Deliberation, Consensus Detection & SSE API | Core engine binary (`socratix`, `socratixbench`) |
 
 ---
@@ -19,14 +20,34 @@ Comprehensive guide for building and installing **Artix AI**, **Dialex AI**, and
 
 ### Channel A: Homebrew Tap (macOS & Linux)
 
-Add the official Kolta Labs Homebrew tap:
+Install directly via the shorthand tap (Homebrew automatically taps on install):
+
+```bash
+# Install Sentinix Security Review CLI & Daemon
+brew install kolta-labs/tap/sentinix
+
+# Install Artix AI CLI
+brew install kolta-labs/tap/artix
+
+# Install Kritix AI CLI
+brew install kolta-labs/tap/kritix
+
+# Install Socratix Deliberation Engine
+brew install kolta-labs/tap/socratix
+```
+
+Alternatively, tap the repository manually:
 
 ```bash
 brew tap koltalabs/dialexai https://github.com/Kolta-Labs/DialexAI
+brew install sentinix
 ```
 
 #### 1. CLI Binaries & Engine Formulas
 ```bash
+# Install Sentinix AI Security Review CLI & Server
+brew install sentinix
+
 # Install the Socratix Deliberation Engine
 brew install socratix
 
@@ -79,7 +100,8 @@ curl -fsSL https://raw.githubusercontent.com/Kolta-Labs/DialexAI/main/scripts/in
 #### Script Options & Flags
 | Flag | Description |
 |---|---|
-| `--all` | Install Artix, Dialex, and Kritix (default) |
+| `--all` | Install Artix, Dialex, Kritix, and Sentinix (default) |
+| `--sentinix` | Install Sentinix AI only (Security Review CLI & Server) |
 | `--artix` | Install Artix AI only |
 | `--dialex` | Install Dialex AI only |
 | `--kritix` | Install Kritix AI only |

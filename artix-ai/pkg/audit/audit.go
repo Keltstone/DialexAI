@@ -105,6 +105,7 @@ type AuditEvent struct {
 	SandboxExitCode int            `json:"sandboxExitCode,omitempty"`
 	Approver        string         `json:"approver,omitempty"`
 	PolicyHash      string         `json:"policyHash,omitempty"`
+	Eval            bool           `json:"eval,omitempty"`
 	Details         map[string]any `json:"details,omitempty"`
 	PrevHash        string         `json:"prevHash"`
 	RecordHash      string         `json:"recordHash"`

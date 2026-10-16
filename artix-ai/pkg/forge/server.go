@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -32,6 +33,8 @@ type WebhookServerConfig struct {
 	GitLabToken         string
 	RequireWebhookAuth  bool
 	AllowedCloneHosts   []string
+	AllowedRepoIDs      map[string]string
+	AllowedRoots        []string
 	JobsAuthToken       string
 	TriggerLabel        string
 	AllowedUsers        []string
@@ -988,13 +991,25 @@ func (s *WebhookServer) handleTasks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		maxBodyLen := s.cfg.MaxBodyLength
+		if maxBodyLen <= 0 {
+			maxBodyLen = 65536
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, int64(maxBodyLen))
+
 		var sub struct {
 			Prompt   string `json:"prompt"`
 			Domain   string `json:"domain,omitempty"`
 			RootDir  string `json:"rootDir,omitempty"`
+			RepoID   string `json:"repoId,omitempty"`
 			Tenant   string `json:"tenant,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) || strings.Contains(strings.ToLower(err.Error()), "too large") {
+				http.Error(w, "request entity too large", http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "invalid json payload", http.StatusBadRequest)
 			return
 		}
@@ -1004,20 +1019,73 @@ func (s *WebhookServer) handleTasks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Bind tenant to authenticated identity; ignore body tenant field
+		tenant := r.Header.Get("X-Artix-Tenant")
+		if tenant == "" {
+			tenant = r.URL.Query().Get("tenant")
+		}
+		if tenant == "" {
+			if s.cfg.JobsAuthToken != "" || policy.IsEnterprise() {
+				http.Error(w, "tenant parameter or X-Artix-Tenant header is required", http.StatusBadRequest)
+				return
+			}
+			tenant = "local"
+		}
+
+		// Validate rootDir and resolve clone target from server allowlist of repo IDs
+		if sub.RootDir != "" {
+			trimmedRoot := strings.TrimSpace(sub.RootDir)
+			if strings.HasPrefix(strings.ToLower(trimmedRoot), "file:") {
+				http.Error(w, "invalid rootDir: file:// scheme prohibited", http.StatusBadRequest)
+				return
+			}
+			cleanRoot := filepath.Clean(trimmedRoot)
+			if cleanRoot == "/etc" || strings.HasPrefix(cleanRoot, "/etc/") || cleanRoot == "/" || strings.HasPrefix(cleanRoot, "/sys") || strings.HasPrefix(cleanRoot, "/proc") || strings.HasPrefix(cleanRoot, "/dev") {
+				http.Error(w, "prohibited rootDir", http.StatusBadRequest)
+				return
+			}
+		}
+
+		cloneTarget := sub.RootDir
+		if sub.RepoID != "" {
+			if s.cfg.AllowedRepoIDs != nil {
+				target, ok := s.cfg.AllowedRepoIDs[sub.RepoID]
+				if !ok {
+					http.Error(w, fmt.Sprintf("repo ID %q not in allowed repo list", sub.RepoID), http.StatusBadRequest)
+					return
+				}
+				cloneTarget = target
+			} else {
+				http.Error(w, "server-side repo allowlist not configured", http.StatusBadRequest)
+				return
+			}
+		}
+
+		if len(s.cfg.AllowedRoots) > 0 && cloneTarget != "" && !strings.HasPrefix(cloneTarget, "https://") && !strings.HasPrefix(cloneTarget, "http://") {
+			allowed := false
+			cleanTarget := filepath.Clean(cloneTarget)
+			for _, allowedRoot := range s.cfg.AllowedRoots {
+				cleanAllowed := filepath.Clean(allowedRoot)
+				if cleanTarget == cleanAllowed || strings.HasPrefix(cleanTarget, cleanAllowed+string(filepath.Separator)) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				http.Error(w, "target directory not within server allowed roots", http.StatusBadRequest)
+				return
+			}
+		}
+
 		domain := sub.Domain
 		if domain == "" {
 			domain = s.cfg.DefaultDomain
 		}
 
-		tenant := sub.Tenant
-		if tenant == "" {
-			tenant = "local"
-		}
-
 		taskID := fmt.Sprintf("task-%d", time.Now().UnixNano())
 		task := &RemoteWorkerTask{
 			Target: RemoteRepoTarget{
-				CloneURL: sub.RootDir,
+				CloneURL: cloneTarget,
 				Branch:   "HEAD",
 				Owner:    tenant,
 				Repo:     "workspace",
@@ -1048,7 +1116,7 @@ func (s *WebhookServer) handleTasks(w http.ResponseWriter, r *http.Request) {
 		if stopCfg.MaxAbortRate > 0 || stopCfg.MaxCostPerStory > 0 {
 			wsDir := s.cfg.WorkspaceDir
 			if wsDir == "" {
-				wsDir = sub.RootDir
+				wsDir = cloneTarget
 			}
 			if wsDir == "" {
 				wsDir = "."

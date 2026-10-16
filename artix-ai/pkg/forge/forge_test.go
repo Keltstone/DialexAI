@@ -1651,3 +1651,79 @@ func TestWebhookServer_PilotStopRule_RefusesJob(t *testing.T) {
 	}
 }
 
+func TestT2_TasksEndpoint_SecurityControls(t *testing.T) {
+	tmpDir := t.TempDir()
+	allowedRepoDir := filepath.Join(tmpDir, "allowed-repo")
+	_ = os.MkdirAll(allowedRepoDir, 0755)
+
+	cfg := WebhookServerConfig{
+		DefaultDomain: "backend_engineer",
+		JobsAuthToken: "secret-token",
+		MaxBodyLength: 256,
+		AllowedRepoIDs: map[string]string{
+			"repo-alpha": allowedRepoDir,
+		},
+		AllowedRoots: []string{tmpDir},
+	}
+	server := NewWebhookServer(cfg)
+	handler := server.Handler()
+
+	authPost := func(payload string, tenantHeader string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(payload))
+		req.Header.Set("Authorization", "Bearer secret-token")
+		req.Header.Set("Content-Type", "application/json")
+		if tenantHeader != "" {
+			req.Header.Set("X-Artix-Tenant", tenantHeader)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// 1. POST /tasks with rootDir=/etc is rejected
+	recEtc := authPost(`{"prompt":"test","rootDir":"/etc"}`, "tenant-1")
+	if recEtc.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for rootDir=/etc, got %d (%s)", recEtc.Code, recEtc.Body.String())
+	}
+
+	// 2. POST /tasks with rootDir=file:/// is rejected
+	recFile := authPost(`{"prompt":"test","rootDir":"file:///root/secret"}`, "tenant-1")
+	if recFile.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for rootDir=file://, got %d (%s)", recFile.Code, recFile.Body.String())
+	}
+
+	// 3. Body tenant cannot change the job's tenant (binds to authenticated identity)
+	recTenant := authPost(`{"prompt":"test","repoId":"repo-alpha","tenant":"attacker-tenant"}`, "legit-tenant")
+	if recTenant.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted, got %d (%s)", recTenant.Code, recTenant.Body.String())
+	}
+	var res map[string]any
+	if err := json.Unmarshal(recTenant.Body.Bytes(), &res); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	taskID := res["taskId"].(string)
+	server.jobsMu.RLock()
+	job := server.jobs[taskID]
+	server.jobsMu.RUnlock()
+	if job == nil {
+		t.Fatalf("expected job %s to be tracked", taskID)
+	}
+	if job.Tenant != "legit-tenant" {
+		t.Fatalf("SECURITY VIOLATION: body tenant changed job tenant! Expected 'legit-tenant', got %q", job.Tenant)
+	}
+
+	// 4. Oversize body returns 413
+	largePrompt := strings.Repeat("A", 1000)
+	recOversize := authPost(fmt.Sprintf(`{"prompt":"%s"}`, largePrompt), "legit-tenant")
+	if recOversize.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 StatusRequestEntityTooLarge for oversize body, got %d (%s)", recOversize.Code, recOversize.Body.String())
+	}
+
+	// 5. Unallowed repo ID is rejected
+	recUnknownRepo := authPost(`{"prompt":"test","repoId":"unknown-repo"}`, "legit-tenant")
+	if recUnknownRepo.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for unallowed repo ID, got %d (%s)", recUnknownRepo.Code, recUnknownRepo.Body.String())
+	}
+}
+
+

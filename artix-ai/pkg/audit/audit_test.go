@@ -138,6 +138,24 @@ func TestAuditLogCannotBeDisabledInEnterpriseMode(t *testing.T) {
 	}
 }
 
+func TestAuditLogIgnoresEnvOverrideInEnterpriseMode(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("ARTIX_ENTERPRISE", "1")
+	policy.ResetCache()
+	defer policy.ResetCache()
+
+	// In enterprise mode, disabling or attempting to route audit log to /dev/null, none, or disabled via env must be ignored
+	for _, dis := range []string{"/dev/null", "none", "off", "disabled", "false", "0"} {
+		t.Setenv("ARTIX_AUDIT_LOG", dis)
+		logger := NewLogger(tempDir)
+		expected := filepath.Join(tempDir, ".artix", "audit.jsonl")
+		if logger.LogPath() != expected {
+			t.Fatalf("expected audit log path to ignore env override %q in enterprise mode; expected %s, got %s", dis, expected, logger.LogPath())
+		}
+	}
+}
+
+
 func TestRemoteHTTPSink(t *testing.T) {
 	received := make(chan AuditEvent, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
