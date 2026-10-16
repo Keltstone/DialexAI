@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -230,3 +232,85 @@ func TestAIRefusedUnlessProjectOptedIn(t *testing.T) {
 	w := e.call("rev@example.test", auth.Reviewer, "POST", "/api/findings/"+fs[0].ID+"/ai/triage", "")
 	e.ok(w, 409) // no models configured / project not opted in
 }
+
+func TestIngestTrust_UnsignedCappedAndRefusesReopen(t *testing.T) {
+	e := setup(t)
+	p, _ := e.st.CreateProject(store.Project{Name: "p", Host: "gh", Repo: "o/r"})
+	tok, _ := e.st.CreateToken(p.ID, "ci")
+
+	// 1. Unsigned ingest with Critical severity
+	unsignedBody := `{"commit":"c1","findings":[{"rule":"vuln","engine":"secrets","file":"main.go","line":10,"severity":4,"message":"crit","evidence":"token"}]}`
+	req := httptest.NewRequest("POST", "/api/projects/"+p.ID+"/ingest", strings.NewReader(unsignedBody))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	w := httptest.NewRecorder()
+	e.h.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("ingest failed: status=%d body=%s", w.Code, w.Body)
+	}
+
+	fs, _ := e.st.Findings(store.Filter{Project: p.ID})
+	if len(fs) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(fs))
+	}
+	f := fs[0]
+	if f.Severity != engines.Medium {
+		t.Errorf("expected unsigned finding severity to be capped at Medium (2), got %v", f.Severity)
+	}
+	if f.Source != "ci-unattested" {
+		t.Errorf("expected source to be ci-unattested, got %q", f.Source)
+	}
+
+	// 2. Mark finding as fixed
+	if err := e.st.Triage(f.ID, "fixed", "dev@example.test", "", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Post unsigned ingest again - must refuse to reopen fixed finding
+	req = httptest.NewRequest("POST", "/api/projects/"+p.ID+"/ingest", strings.NewReader(unsignedBody))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	w = httptest.NewRecorder()
+	e.h.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("ingest failed: status=%d body=%s", w.Code, w.Body)
+	}
+
+	fsAfter, _ := e.st.Findings(store.Filter{Project: p.ID})
+	if len(fsAfter) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(fsAfter))
+	}
+	if fsAfter[0].Status != "fixed" {
+		t.Errorf("expected unattested finding to remain fixed, but got status %q", fsAfter[0].Status)
+	}
+
+	// 4. Correctly signed ingest with ed25519 signature keeps Critical severity and reopens
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.app.TrustedKeys = []ed25519.PublicKey{pub}
+
+	signedBody := `{"commit":"c2","findings":[{"rule":"vuln","engine":"secrets","file":"main.go","line":10,"severity":4,"message":"crit","evidence":"token"}]}`
+	sig := ed25519.Sign(priv, []byte(signedBody))
+	sigHeader := base64.StdEncoding.EncodeToString(sig)
+
+	req = httptest.NewRequest("POST", "/api/projects/"+p.ID+"/ingest", strings.NewReader(signedBody))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("X-Signature", sigHeader)
+	w = httptest.NewRecorder()
+	e.h.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("signed ingest failed: status=%d body=%s", w.Code, w.Body)
+	}
+
+	fsSigned, _ := e.st.Findings(store.Filter{Project: p.ID})
+	if len(fsSigned) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(fsSigned))
+	}
+	if fsSigned[0].Severity != engines.Critical {
+		t.Errorf("expected signed finding to retain Critical severity, got %v", fsSigned[0].Severity)
+	}
+	if fsSigned[0].Status != "open" {
+		t.Errorf("expected signed finding to reopen, got status %q", fsSigned[0].Status)
+	}
+}
+
