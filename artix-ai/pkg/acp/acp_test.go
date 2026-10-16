@@ -193,6 +193,16 @@ func TestT4_ACP_RootDirValidation(t *testing.T) {
 	if strings.Contains(res4, "-32602") || !strings.Contains(res4, "ready") {
 		t.Errorf("expected success for valid allowed rootDir, got: %s", res4)
 	}
+
+	// 5. A symlink inside an allowed root that points outside it is rejected
+	outsideDir := t.TempDir()
+	symlinkPath := filepath.Join(tmpDir, "symlink_to_outside")
+	if err := os.Symlink(outsideDir, symlinkPath); err == nil {
+		res5 := sendReq(5, symlinkPath)
+		if !strings.Contains(res5, "-32602") || !strings.Contains(res5, "outside allowed roots") {
+			t.Errorf("expected error -32602 for symlink pointing outside allowed root, got: %s", res5)
+		}
+	}
 }
 
 func TestT4_ACP_PlanAndReview_BudgetAndAuditEmitters(t *testing.T) {

@@ -1255,83 +1255,86 @@ func (c *ConvergenceCoordinator) Run(
 			}
 
 			// Post-convergence Knowledge A/B evaluation: measure active KIs to auto-demote regressing items
-			for i := range activeKIs {
-				ki := &activeKIs[i]
-				newCount, err := kStore.IncrementSessionCount(ki.ID)
-				if err == nil && newCount > 0 {
-					ki.SessionCount = newCount
-				} else {
-					ki.SessionCount++
-				}
-				shouldEval := opts != nil && (opts.TriggerABEval || (opts.ABEvalInterval > 0 && ki.SessionCount%opts.ABEvalInterval == 0))
-				if shouldEval {
-					var evalRunner knowledge.ABEvalRunner
-					if opts != nil && opts.ABEvalRunner != nil {
-						evalRunner = opts.ABEvalRunner
+			// Skip IncrementSessionCount when opts.AuditEval is set (A/B sub-runs do not change SessionCount)
+			if opts == nil || !opts.AuditEval {
+				for i := range activeKIs {
+					ki := &activeKIs[i]
+					newCount, err := kStore.IncrementSessionCount(ki.ID)
+					if err == nil && newCount > 0 {
+						ki.SessionCount = newCount
 					} else {
-						// Real harness: rerun the same story twice against a worktree snapshot,
-						// once with the KI excluded from PromptContext.KnowledgeItems and once with it included.
-						targetKI := *ki
-						evalRunner = func(evalCtx context.Context, item any) (int, bool, error) {
-							wtDir, wtErr := os.MkdirTemp("", "artix-ab-eval-*")
-							if wtErr != nil {
-								return 0, false, fmt.Errorf("failed to create temp worktree dir: %w", wtErr)
-							}
-							defer os.RemoveAll(wtDir)
-
-							addCmd := exec.Command("git", "-C", repoCtx.RootDir, "worktree", "add", "--detach", wtDir, "HEAD")
-							if out, err := addCmd.CombinedOutput(); err != nil {
-								return 0, false, fmt.Errorf("git worktree add failed: %w (%s)", err, string(out))
-							}
-							defer func() {
-								_ = exec.Command("git", "-C", repoCtx.RootDir, "worktree", "remove", "--force", wtDir).Run()
-							}()
-
-							srcKnowledge := filepath.Join(repoCtx.RootDir, ".artix", "knowledge")
-							if _, statErr := os.Stat(srcKnowledge); statErr == nil {
-								dstArtix := filepath.Join(wtDir, ".artix")
-								_ = os.MkdirAll(dstArtix, 0755)
-								_ = os.Symlink(srcKnowledge, filepath.Join(dstArtix, "knowledge"))
-							}
-
-							subDriver := git.NewDriver(wtDir)
-							subBox := sandbox.NewSandbox(wtDir)
-							subRepoCtx := &repo.RepositoryContext{RootDir: wtDir}
-							subCoord := NewCoordinator(c.coder, c.reviewer, subDriver, subBox)
-
-							subOpts := *opts
-							subOpts.TriggerABEval = false
-							subOpts.ABEvalInterval = 0
-							subOpts.ABEvalRunner = nil
-							subOpts.Autonomy = AutonomySupervised
-							subOpts.ForgeApproval = nil
-							subOpts.ForgeVerifier = nil
-							subOpts.ForgePusher = nil
-							subOpts.AuditEval = true
-							subOpts.TestCommandsConfirmed = true
-
-							if item == nil {
-								// Baseline run: exclude target KI from KnowledgeItems
-								subOpts.KnowledgeFilter = func(k knowledge.KnowledgeItem) bool {
-									return k.ID != targetKI.ID
+						ki.SessionCount++
+					}
+					shouldEval := opts != nil && (opts.TriggerABEval || (opts.ABEvalInterval > 0 && ki.SessionCount%opts.ABEvalInterval == 0))
+					if shouldEval {
+						var evalRunner knowledge.ABEvalRunner
+						if opts != nil && opts.ABEvalRunner != nil {
+							evalRunner = opts.ABEvalRunner
+						} else {
+							// Real harness: rerun the same story twice against a worktree snapshot,
+							// once with the KI excluded from PromptContext.KnowledgeItems and once with it included.
+							targetKI := *ki
+							evalRunner = func(evalCtx context.Context, item any) (int, bool, error) {
+								wtDir, wtErr := os.MkdirTemp("", "artix-ab-eval-*")
+								if wtErr != nil {
+									return 0, false, fmt.Errorf("failed to create temp worktree dir: %w", wtErr)
 								}
-							} else {
-								// Test run: include target KI in KnowledgeItems
-								subOpts.KnowledgeFilter = nil
-							}
+								defer os.RemoveAll(wtDir)
 
-							subRes := subCoord.Run(evalCtx, s, subRepoCtx, coderSteering, revSteering, &subOpts)
-							return subRes.RoundsRun, subRes.Success, nil
+								addCmd := exec.Command("git", "-C", repoCtx.RootDir, "worktree", "add", "--detach", wtDir, "HEAD")
+								if out, err := addCmd.CombinedOutput(); err != nil {
+									return 0, false, fmt.Errorf("git worktree add failed: %w (%s)", err, string(out))
+								}
+								defer func() {
+									_ = exec.Command("git", "-C", repoCtx.RootDir, "worktree", "remove", "--force", wtDir).Run()
+								}()
+
+								srcKnowledge := filepath.Join(repoCtx.RootDir, ".artix", "knowledge")
+								if _, statErr := os.Stat(srcKnowledge); statErr == nil {
+									dstArtix := filepath.Join(wtDir, ".artix")
+									_ = os.MkdirAll(dstArtix, 0755)
+									_ = os.Symlink(srcKnowledge, filepath.Join(dstArtix, "knowledge"))
+								}
+
+								subDriver := git.NewDriver(wtDir)
+								subBox := sandbox.NewSandbox(wtDir)
+								subRepoCtx := &repo.RepositoryContext{RootDir: wtDir}
+								subCoord := NewCoordinator(c.coder, c.reviewer, subDriver, subBox)
+
+								subOpts := *opts
+								subOpts.TriggerABEval = false
+								subOpts.ABEvalInterval = 0
+								subOpts.ABEvalRunner = nil
+								subOpts.Autonomy = AutonomySupervised
+								subOpts.ForgeApproval = nil
+								subOpts.ForgeVerifier = nil
+								subOpts.ForgePusher = nil
+								subOpts.AuditEval = true
+								subOpts.TestCommandsConfirmed = true
+
+								if item == nil {
+									// Baseline run: exclude target KI from KnowledgeItems
+									subOpts.KnowledgeFilter = func(k knowledge.KnowledgeItem) bool {
+										return k.ID != targetKI.ID
+									}
+								} else {
+									// Test run: include target KI in KnowledgeItems
+									subOpts.KnowledgeFilter = nil
+								}
+
+								subRes := subCoord.Run(evalCtx, s, subRepoCtx, coderSteering, revSteering, &subOpts)
+								return subRes.RoundsRun, subRes.Success, nil
+							}
+						}
+						now := time.Now()
+						ki.LastEvaluatedAt = &now
+						resAB, errAB := knowledge.RunABEval(ctx, ki, evalRunner)
+						if errAB == nil && resAB != nil {
+							ki.LastEvalResult = resAB
 						}
 					}
-					now := time.Now()
-					ki.LastEvaluatedAt = &now
-					resAB, errAB := knowledge.RunABEval(ctx, ki, evalRunner)
-					if errAB == nil && resAB != nil {
-						ki.LastEvalResult = resAB
-					}
+					_ = kStore.Save(ki)
 				}
-				_ = kStore.Save(ki)
 			}
 
 			return res

@@ -158,7 +158,13 @@ func RunCLIWithIO(cwd string, reg *persona.Registry, rawArgs []string, stdin io.
 		return 0
 
 	case "acp":
+		repoCtx, _ := repo.DetectContext(cwd)
+		repoRoot := cwd
+		if repoCtx != nil && repoCtx.RootDir != "" {
+			repoRoot = repoCtx.RootDir
+		}
 		server := acp.NewServer(cwd, reg, stdin, stdout)
+		server.SetAllowedRoots([]string{repoRoot})
 		if err := server.Serve(); err != nil {
 			if isJSON {
 				sendJSON(map[string]any{"ok": false, "status": "error", "error": err.Error()})
@@ -258,7 +264,13 @@ func main() {
 	}
 
 	if os.Args[1] == "acp" {
+		repoCtx, _ := repo.DetectContext(cwd)
+		repoRoot := cwd
+		if repoCtx != nil && repoCtx.RootDir != "" {
+			repoRoot = repoCtx.RootDir
+		}
 		server := acp.NewServer(cwd, registry, os.Stdin, os.Stdout)
+		server.SetAllowedRoots([]string{repoRoot})
 		if err := server.Serve(); err != nil {
 			fmt.Fprintf(os.Stderr, "ACP server error: %v\n", err)
 			os.Exit(1)

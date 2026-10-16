@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -965,7 +966,102 @@ func (s *WebhookServer) handleJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(filtered)
+}
+
+func isLinkLocalOrMetadataHost(host string) bool {
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		h = host
+	}
+	h = strings.Trim(strings.ToLower(h), "[]")
+	if h == "169.254.169.254" || h == "metadata.google.internal" || h == "metadata" || h == "100.100.100.200" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	if ip != nil {
+		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsLoopback() {
+			return true
+		}
+		_, linkLocalNet, _ := net.ParseCIDR("169.254.0.0/16")
+		if linkLocalNet != nil && linkLocalNet.Contains(ip) {
+			return true
+		}
+		_, ipv6LinkLocal, _ := net.ParseCIDR("fe80::/10")
+		if ipv6LinkLocal != nil && ipv6LinkLocal.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *WebhookServer) validateTaskCloneTarget(target string) (string, error) {
+	trimmed := strings.TrimSpace(target)
+	if trimmed == "" {
+		return "", errors.New("empty clone target")
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "ssh://") || strings.HasPrefix(lower, "ext::") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "file:") {
+		return "", fmt.Errorf("prohibited clone target scheme in %q", trimmed)
+	}
+
+	if strings.HasPrefix(lower, "https://") {
+		u, err := url.Parse(trimmed)
+		if err != nil || u.Hostname() == "" {
+			return "", fmt.Errorf("invalid clone target URL %q", trimmed)
+		}
+		host := strings.ToLower(u.Hostname())
+		if isLinkLocalOrMetadataHost(host) {
+			return "", fmt.Errorf("prohibited clone target: link-local or metadata host %q", host)
+		}
+		if len(s.cfg.AllowedCloneHosts) == 0 {
+			return "", fmt.Errorf("no allowed clone hosts configured on server")
+		}
+		allowed := false
+		for _, h := range s.cfg.AllowedCloneHosts {
+			cleanH := strings.ToLower(strings.TrimSpace(h))
+			if host == cleanH || strings.HasSuffix(host, "."+cleanH) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return "", fmt.Errorf("clone host %q not in allowed clone hosts", host)
+		}
+		return trimmed, nil
+	}
+
+	// Reject any other remote URL scheme
+	if strings.Contains(trimmed, "://") || strings.Contains(trimmed, "::") {
+		return "", fmt.Errorf("prohibited clone target scheme in %q: only https:// is allowed", trimmed)
+	}
+
+	// Local path validation: EvalSymlinks first, then check inside AllowedRoots
+	evalPath, err := filepath.EvalSymlinks(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("invalid local target path %q: %w", trimmed, err)
+	}
+	cleanTarget := filepath.Clean(evalPath)
+	if len(s.cfg.AllowedRoots) == 0 {
+		return "", fmt.Errorf("no allowed roots configured for local paths")
+	}
+	allowed := false
+	for _, root := range s.cfg.AllowedRoots {
+		evalRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			evalRoot = filepath.Clean(root)
+		} else {
+			evalRoot = filepath.Clean(evalRoot)
+		}
+		rel, err := filepath.Rel(evalRoot, cleanTarget)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return "", fmt.Errorf("target directory %q not within server allowed roots", cleanTarget)
+	}
+	return cleanTarget, nil
 }
 
 func (s *WebhookServer) handleTasks(w http.ResponseWriter, r *http.Request) {
@@ -998,11 +1094,10 @@ func (s *WebhookServer) handleTasks(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, int64(maxBodyLen))
 
 		var sub struct {
-			Prompt   string `json:"prompt"`
-			Domain   string `json:"domain,omitempty"`
-			RootDir  string `json:"rootDir,omitempty"`
-			RepoID   string `json:"repoId,omitempty"`
-			Tenant   string `json:"tenant,omitempty"`
+			Prompt string `json:"prompt"`
+			Domain string `json:"domain,omitempty"`
+			RepoID string `json:"repoId"`
+			Tenant string `json:"tenant,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
 			var maxBytesErr *http.MaxBytesError
@@ -1019,6 +1114,29 @@ func (s *WebhookServer) handleTasks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if strings.TrimSpace(sub.RepoID) == "" {
+			http.Error(w, "repoId is required", http.StatusBadRequest)
+			return
+		}
+
+		// Refuse to start the route if the allowlist is empty
+		if len(s.cfg.AllowedRepoIDs) == 0 {
+			http.Error(w, "server-side repo allowlist is empty", http.StatusBadRequest)
+			return
+		}
+
+		rawTarget, ok := s.cfg.AllowedRepoIDs[sub.RepoID]
+		if !ok {
+			http.Error(w, fmt.Sprintf("repo ID %q not in allowed repo list", sub.RepoID), http.StatusBadRequest)
+			return
+		}
+
+		cloneTarget, err := s.validateTaskCloneTarget(rawTarget)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid clone target for repo ID %q: %v", sub.RepoID, err), http.StatusBadRequest)
+			return
+		}
+
 		// Bind tenant to authenticated identity; ignore body tenant field
 		tenant := r.Header.Get("X-Artix-Tenant")
 		if tenant == "" {
@@ -1030,51 +1148,6 @@ func (s *WebhookServer) handleTasks(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			tenant = "local"
-		}
-
-		// Validate rootDir and resolve clone target from server allowlist of repo IDs
-		if sub.RootDir != "" {
-			trimmedRoot := strings.TrimSpace(sub.RootDir)
-			if strings.HasPrefix(strings.ToLower(trimmedRoot), "file:") {
-				http.Error(w, "invalid rootDir: file:// scheme prohibited", http.StatusBadRequest)
-				return
-			}
-			cleanRoot := filepath.Clean(trimmedRoot)
-			if cleanRoot == "/etc" || strings.HasPrefix(cleanRoot, "/etc/") || cleanRoot == "/" || strings.HasPrefix(cleanRoot, "/sys") || strings.HasPrefix(cleanRoot, "/proc") || strings.HasPrefix(cleanRoot, "/dev") {
-				http.Error(w, "prohibited rootDir", http.StatusBadRequest)
-				return
-			}
-		}
-
-		cloneTarget := sub.RootDir
-		if sub.RepoID != "" {
-			if s.cfg.AllowedRepoIDs != nil {
-				target, ok := s.cfg.AllowedRepoIDs[sub.RepoID]
-				if !ok {
-					http.Error(w, fmt.Sprintf("repo ID %q not in allowed repo list", sub.RepoID), http.StatusBadRequest)
-					return
-				}
-				cloneTarget = target
-			} else {
-				http.Error(w, "server-side repo allowlist not configured", http.StatusBadRequest)
-				return
-			}
-		}
-
-		if len(s.cfg.AllowedRoots) > 0 && cloneTarget != "" && !strings.HasPrefix(cloneTarget, "https://") && !strings.HasPrefix(cloneTarget, "http://") {
-			allowed := false
-			cleanTarget := filepath.Clean(cloneTarget)
-			for _, allowedRoot := range s.cfg.AllowedRoots {
-				cleanAllowed := filepath.Clean(allowedRoot)
-				if cleanTarget == cleanAllowed || strings.HasPrefix(cleanTarget, cleanAllowed+string(filepath.Separator)) {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				http.Error(w, "target directory not within server allowed roots", http.StatusBadRequest)
-				return
-			}
 		}
 
 		domain := sub.Domain

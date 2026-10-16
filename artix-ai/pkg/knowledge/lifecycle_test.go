@@ -2,6 +2,8 @@ package knowledge
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"strings"
 	"testing"
 	"time"
@@ -296,4 +298,70 @@ func TestT3_SimulatedABEval_SamplesPerArm_DemotionThreshold(t *testing.T) {
 		t.Fatalf("demoted KI must not be active")
 	}
 }
+
+func TestT3_ABEval_Simulation_IdenticalDistributionsAndClearRegression(t *testing.T) {
+	// A simulation with identical baseline and KI round distributions demotes in less than the documented rate
+	// (for example ≤5% over 10,000 trials), and a clear regression is demoted ≥95% of the time.
+	const trials = 10000
+	r := rand.New(rand.NewSource(42))
+
+	falseDemotions := 0
+	for i := 0; i < trials; i++ {
+		ki := &KnowledgeItem{
+			ID:     fmt.Sprintf("ki-sim-null-%d", i),
+			Status: "active",
+		}
+		// Identical round distribution: discrete uniform 1..4
+		runner := func(ctx context.Context, item any) (int, bool, error) {
+			rounds := r.Intn(4) + 1
+			return rounds, true, nil
+		}
+		res, err := RunABEval(t.Context(), ki, runner, ABEvalOptions{SamplesPerArm: 3, Threshold: 1.0, Alpha: DefaultAlpha})
+		if err != nil {
+			t.Fatalf("RunABEval trial %d failed: %v", i, err)
+		}
+		if res.Regression {
+			falseDemotions++
+		}
+	}
+
+	falseDemotionRate := float64(falseDemotions) / float64(trials)
+	t.Logf("Simulation null trials: %d, false demotions: %d, false-demotion rate: %.4f (documented alpha: %.2f)",
+		trials, falseDemotions, falseDemotionRate, DefaultAlpha)
+	if falseDemotionRate > DefaultAlpha {
+		t.Fatalf("false-demotion rate %.4f exceeds documented alpha %.2f", falseDemotionRate, DefaultAlpha)
+	}
+
+	// Clear regression simulation: baseline rounds 1..2, KI rounds 5..8
+	// Must be demoted >= 95% of the time across trials.
+	const regressionTrials = 1000
+	regressionDemotions := 0
+	for i := 0; i < regressionTrials; i++ {
+		ki := &KnowledgeItem{
+			ID:     fmt.Sprintf("ki-sim-regress-%d", i),
+			Status: "active",
+		}
+		runner := func(ctx context.Context, item any) (int, bool, error) {
+			if item == nil {
+				return r.Intn(2) + 1, true, nil
+			}
+			return r.Intn(4) + 5, true, nil
+		}
+		res, err := RunABEval(t.Context(), ki, runner, ABEvalOptions{SamplesPerArm: 3, Threshold: 1.0, Alpha: DefaultAlpha})
+		if err != nil {
+			t.Fatalf("RunABEval regression trial %d failed: %v", i, err)
+		}
+		if res.Regression {
+			regressionDemotions++
+		}
+	}
+
+	regressionRate := float64(regressionDemotions) / float64(regressionTrials)
+	t.Logf("Simulation regression trials: %d, demotions: %d, demotion rate: %.4f",
+		regressionTrials, regressionDemotions, regressionRate)
+	if regressionRate < 0.95 {
+		t.Fatalf("clear regression demotion rate %.4f is less than required 0.95", regressionRate)
+	}
+}
+
 

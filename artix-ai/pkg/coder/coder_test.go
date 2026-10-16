@@ -2319,6 +2319,67 @@ func TestLoop_RealABEvalHarness_AutoDemotesHarmfulKI_WithoutSuppliedRunner(t *te
 	}
 }
 
+func TestT3_ABEval_SubRun_DoesNotChangeSessionCount(t *testing.T) {
+	tempDir, driver := setupTestRepo(t)
+	defer os.RemoveAll(tempDir)
+
+	repoCtx := &repo.RepositoryContext{RootDir: tempDir}
+	kStore := knowledge.NewStore(tempDir)
+
+	initialSessionCount := 7
+	testKI := &knowledge.KnowledgeItem{
+		ID:           "ki-audit-subrun-01",
+		Title:        "Audit SubRun Knowledge Item",
+		Category:     knowledge.CategoryArchitecture,
+		Breakthrough: "Test pattern",
+		Status:       "active",
+		ApprovedBy:   "alice-codeowner",
+		SessionCount: initialSessionCount,
+	}
+	if err := kStore.Save(testKI); err != nil {
+		t.Fatalf("failed to save test KI: %v", err)
+	}
+
+	reg := persona.NewRegistry("")
+	coderObj, _ := NewDomainCoder("backend_engineer", reg)
+	rev := newTestReviewer(reg)
+	rev.SetCritic(func(ctx context.Context, prompt string) (string, error) {
+		return `{"approved":true,"blocking":[],"warnings":[]}`, nil
+	})
+	box := sandbox.NewSandbox(tempDir)
+	coord := NewCoordinator(coderObj, rev, driver, box)
+
+	storySpec := &spec.StorySpec{
+		ID:           "SPEC-AUDIT-SUBRUN-01",
+		Title:        "Audit SubRun Test",
+		TestCommands: []string{"grep 'CONVERGED' counter.txt"},
+	}
+
+	opts := &LoopOptions{
+		MaxRounds: 1,
+		AuditEval: true, // A/B sub-run flag set
+		PatchGenerator: func(ctx context.Context, req PatchRequest) (string, error) {
+			return "diff --git a/counter.txt b/counter.txt\n--- a/counter.txt\n+++ b/counter.txt\n@@ -1 +1 @@\n-0\n+CONVERGED\n", nil
+		},
+	}
+
+	res := coord.Run(context.Background(), storySpec, repoCtx, nil, nil, opts)
+	if !res.Success {
+		t.Fatalf("expected loop to succeed: %+v", res)
+	}
+
+	// Verify SessionCount did NOT change during an A/B sub-run
+	updatedKI, err := kStore.Get("ki-audit-subrun-01")
+	if err != nil {
+		t.Fatalf("failed to retrieve KI: %v", err)
+	}
+	if updatedKI.SessionCount != initialSessionCount {
+		t.Fatalf("SECURITY/ACCURACY VIOLATION: A/B sub-run changed SessionCount from %d to %d",
+			initialSessionCount, updatedKI.SessionCount)
+	}
+}
+
+
 func TestLoop_ConcurrentRunsOnSameRepo_CorrectSessionCount(t *testing.T) {
 	tempDir, driver := setupTestRepo(t)
 	defer os.RemoveAll(tempDir)
