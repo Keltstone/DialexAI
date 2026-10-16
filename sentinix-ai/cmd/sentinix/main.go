@@ -3,8 +3,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -21,9 +24,13 @@ import (
 	"sentinix/pkg/packs"
 	"sentinix/pkg/policy"
 	"sentinix/pkg/report"
+	"sentinix/pkg/scheduler"
+	"sentinix/pkg/store"
 )
 
-const usage = "usage: sentinix scan [flags] [path] | surface [base-ref] | packs keygen|sign|verify | bench <dir>"
+var version = "1.0.0"
+
+const usage = "usage: sentinix scan [flags] [path] | surface [base-ref] | packs keygen|sign|verify | bench <dir> | audit verify [-db <dsn>] | version"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -32,6 +39,8 @@ func main() {
 	}
 	args := os.Args[2:]
 	switch os.Args[1] {
+	case "version", "--version", "-v":
+		fmt.Printf("Sentinix AI version %s\n", version)
 	case "scan":
 		scan(args)
 	case "surface":
@@ -40,6 +49,8 @@ func main() {
 		packCmd(args)
 	case "bench":
 		benchCmd(args)
+	case "audit":
+		auditCmd(args)
 	default:
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
@@ -59,7 +70,9 @@ func scan(args []string) {
 	project := fl.String("project", "", "project id on the server (with -server)")
 	tokenEnv := fl.String("token-env", "SENTINIX_TOKEN", "environment variable holding the project API token")
 	osv := fl.String("osv", "", "OSV API URL for dependency advisories (empty: off, nothing leaves the machine)")
+	maxFetchBytes := fl.Int64("max-fetch-bytes", 500<<20, "maximum fetch and working-tree size in bytes")
 	fl.Parse(args)
+	scheduler.MaxFetchBytes = *maxFetchBytes
 	root := "."
 	if fl.NArg() > 0 {
 		root = fl.Arg(0)
@@ -77,7 +90,7 @@ func scan(args []string) {
 		extra = append(extra, advisories.Engine{Client: advisories.Client{URL: *osv}})
 	}
 	for _, e := range engines.Bundled(extra...) {
-		fs, err := e.Scan(root)
+		fs, err := e.Scan(context.Background(), root)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "engine error:", err) // a broken engine must not look like a clean scan
 			code = 3
@@ -185,7 +198,15 @@ func upload(server, project, token string, ran []string, fs []engines.Finding) e
 		return fmt.Errorf("-server needs -project and the token environment variable")
 	}
 	commit, _ := exec.Command("git", "rev-parse", "HEAD").Output()
-	body, _ := json.Marshal(map[string]any{"commit": strings.TrimSpace(string(commit)), "ran": ran, "findings": fs})
+	wireFs := make([]engines.Finding, len(fs))
+	for i, f := range fs {
+		wireFs[i] = f
+		if f.Match != "" {
+			h := sha256.Sum256([]byte(f.Match))
+			wireFs[i].Match = hex.EncodeToString(h[:])
+		}
+	}
+	body, _ := json.Marshal(map[string]any{"commit": strings.TrimSpace(string(commit)), "findings": wireFs})
 	req, err := http.NewRequest("POST", strings.TrimRight(server, "/")+"/api/projects/"+project+"/ingest", bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -223,3 +244,25 @@ func benchCmd(a []string) {
 		os.Exit(1)
 	}
 }
+
+func auditCmd(args []string) {
+	if len(args) < 1 || args[0] != "verify" {
+		fmt.Fprintln(os.Stderr, "usage: sentinix audit verify [-db <dsn>]")
+		os.Exit(2)
+	}
+	fl := flag.NewFlagSet("audit verify", flag.ExitOnError)
+	dsn := fl.String("db", "sqlite:sentinix.db", "database DSN (sqlite:<path> or postgres://…)")
+	fl.Parse(args[1:])
+
+	st, err := store.Open(*dsn)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening store: %v\n", err)
+		os.Exit(1)
+	}
+	if err := st.VerifyAuditChain(); err != nil {
+		fmt.Fprintf(os.Stderr, "AUDIT CHAIN VERIFICATION FAILED: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("AUDIT CHAIN VERIFIED: all rows valid, hash chain intact.")
+}
+

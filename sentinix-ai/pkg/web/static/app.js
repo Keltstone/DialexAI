@@ -149,6 +149,15 @@ const views = {
         h('select', { 'aria-label': 'Role for ' + u.Email, onchange: act((e) => api('/users/role', { method: 'PUT', body: { Email: u.Email, Role: e.target.value } })) },
           ['owner', 'admin', 'reviewer', 'developer', 'auditor'].map((r) => h('option', { value: r, selected: r === u.Role }, r))))))));
     } catch { /* not allowed to manage users */ }
+    try {
+      const ms = await api('/models');
+      if (ms && ms.length) {
+        out.push(h('h2', {}, 'Configured AI Models'), table(['Model Name', 'Environment'], ms.map((m) => h('tr', {},
+          h('td', {}, m.name),
+          h('td', {}, m.local ? 'Local (On-Premises / Air-Gapped)' : 'Cloud AI Provider')
+        ))));
+      }
+    } catch { /* models not available */ }
     return h('div', {}, out);
   },
 };

@@ -23,11 +23,12 @@ func ProposeTest(ctx context.Context, m Model, policy string, f engines.Finding,
 	if !Allowed(policy, m) {
 		return nil, fmt.Errorf("model %s is not allowed by the project's model policy", m.Name())
 	}
-	if policy != "local-only" {
+	if policy == "cloud-redacted" {
 		snippet = engines.Redact(snippet)
 	}
-	user := fmt.Sprintf("Write one %s test proving the issue %s (%s) in %s: it must FAIL while the issue exists and PASS once fixed.\n"+
-		`Reply {"path":"relative/path/to/test","content":"full test file"}.`+"\n%s", framework, f.Rule, f.Message, f.File, untrusted(snippet))
+	untrustedData := fmt.Sprintf("Rule: %s (%s)\nFile: %s\nSnippet:\n%s", f.Rule, f.Message, f.File, snippet)
+	user := fmt.Sprintf("Write one %s test proving the issue in the untrusted data below: it must FAIL while the issue exists and PASS once fixed.\n"+
+		`Reply {"path":"relative/path/to/test","content":"full test file"}.`+"\n%s", framework, untrusted(untrustedData))
 	out, err := m.Complete(ctx, sysRules, user)
 	if err != nil {
 		return nil, err
@@ -84,11 +85,38 @@ func Verify(ctx context.Context, run Runner, tree string, t Test, patch string, 
 				return d, fmt.Errorf("patch does not apply: %s", out)
 			}
 		}
-		p := filepath.Join(d, t.Path)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+
+		root, err := os.OpenRoot(d)
+		if err != nil {
 			return d, err
 		}
-		return d, os.WriteFile(p, []byte(t.Content), 0o644)
+		defer root.Close()
+
+		// Refuse to write through symlinks
+		cleanPath := filepath.Clean(filepath.ToSlash(t.Path))
+		parts := strings.Split(cleanPath, "/")
+		current := ""
+		for i, part := range parts {
+			if current == "" {
+				current = part
+			} else {
+				current = current + "/" + part
+			}
+			if fi, err := root.Lstat(current); err == nil {
+				if fi.Mode()&os.ModeSymlink != 0 {
+					return d, fmt.Errorf("refusing to write through symlink %q", current)
+				}
+			}
+			if i < len(parts)-1 {
+				if err := root.MkdirAll(current, 0o755); err != nil {
+					return d, err
+				}
+			}
+		}
+		if err := root.WriteFile(cleanPath, []byte(t.Content), 0o644); err != nil {
+			return d, err
+		}
+		return d, nil
 	}
 	bad, err := work(false)
 	defer os.RemoveAll(bad)

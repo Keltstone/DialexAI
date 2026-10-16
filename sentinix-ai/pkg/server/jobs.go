@@ -3,41 +3,107 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"sentinix/pkg/advisories"
 	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
+	"sentinix/pkg/packs"
 	"sentinix/pkg/policy"
 	"sentinix/pkg/report"
 	"sentinix/pkg/scheduler"
 	"sentinix/pkg/store"
 )
 
-var dueFn = scheduler.Due
+var (
+	dueFn          = scheduler.Due
+	seenDeliveries sync.Map
+)
 
-// engine returns the pack engine (approved overrides and noisy-rule demotion applied), plus the advisory engine when OSV is on.
-func (a *App) engine() ([]engines.Engine, error) {
+func deliveryID(r *http.Request) string {
+	for _, h := range []string{"X-GitHub-Delivery", "X-Gitlab-Event-UUID", "X-Request-UUID", "X-Delivery-ID", "X-Delivery-Id"} {
+		if id := r.Header.Get(h); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+func (a *App) engine(project ...string) ([]engines.Engine, error) {
 	pe := a.Packs
-	dis, sev, err := a.Store.RuleOverrides()
+	proj := ""
+	if len(project) > 0 {
+		proj = project[0]
+	}
+	if proj != "" && a.Store != nil {
+		if p, pErr := a.Store.Project(proj); pErr == nil && len(p.PackPins) > 0 {
+			var filteredPacks []*packs.Pack
+			for _, pk := range pe.Packs {
+				if pinnedVer, ok := p.PackPins[pk.Name]; ok {
+					if pk.Version == pinnedVer {
+						filteredPacks = append(filteredPacks, pk)
+					}
+				} else {
+					filteredPacks = append(filteredPacks, pk)
+				}
+			}
+			pe.Packs = filteredPacks
+		}
+	}
+	dis, sev, err := a.Store.RuleOverridesFor(proj)
 	if err != nil {
 		return nil, err
 	}
-	demoted, err := a.Store.Demoted(0.5, 10)
-	if err != nil {
-		return nil, err
-	}
-	for r, s := range demoted {
-		if _, ok := sev[r]; !ok {
-			sev[r] = s
+	approvedIgnores := map[string]int64{}
+	nowUnix := time.Now().Unix()
+	if apps, err := a.Store.Approvals("approved"); err == nil {
+		for _, ap := range apps {
+			if ap.Kind == "demote_rule" || ap.Kind == "rule_demotion" {
+				var p struct{ Rule string }
+				if json.Unmarshal(ap.Payload, &p) == nil && p.Rule != "" {
+					if _, ok := sev[p.Rule]; !ok {
+						sev[p.Rule] = engines.Info
+					}
+				}
+			}
+			if ap.Kind == "ignore" || ap.Kind == "sentinix:ignore" {
+				var ign struct {
+					Project     string `json:"project"`
+					File        string `json:"file"`
+					Line        int    `json:"line"`
+					Rule        string `json:"rule"`
+					Fingerprint string `json:"fingerprint"`
+					Until       int64  `json:"until"`
+				}
+				if json.Unmarshal(ap.Payload, &ign) == nil {
+					if proj != "" && ign.Project != "" && ign.Project != proj && ign.Project != "*" {
+						continue
+					}
+					if ign.File != "" && ign.Line > 0 && ign.Until > nowUnix && ign.Fingerprint != "" {
+						rule := ign.Rule
+						if rule == "" {
+							rule = "*"
+						}
+						key := filepath.ToSlash(ign.File) + ":" + strconv.Itoa(ign.Line) + ":" + rule + ":" + ign.Fingerprint
+						approvedIgnores[key] = ign.Until
+						approvedIgnores[filepath.ToSlash(ign.File)+":"+strconv.Itoa(ign.Line)+":*:"+ign.Fingerprint] = ign.Until
+					}
+				}
+			}
 		}
 	}
 	pe.Disabled, pe.Override = dis, sev
-	out := []engines.Engine{pe}
+	sec := engines.Secrets{ApprovedIgnores: approvedIgnores}
+	out := []engines.Engine{pe, sec}
 	if a.OSV != nil {
 		out = append(out, advisories.Engine{Client: *a.OSV})
 	}
@@ -50,11 +116,24 @@ func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 25<<20))
 	if err != nil {
 		http.Error(w, "bad body", 400)
 		return
 	}
+
+	// Semaphore limits concurrent parsing if configured, and is released immediately after parsing
+	if a.webhookSem != nil {
+		select {
+		case a.webhookSem <- struct{}{}:
+			defer func() { <-a.webhookSem }()
+		default:
+			// If semaphore is saturated, do not return 429; proceed to durable queue
+		}
+	}
+
+	// Verify signature before touching dedupe table or semaphore
 	ev, err := h.Parse(r, body)
 	if err != nil {
 		http.Error(w, "unauthorized", 401)
@@ -64,8 +143,26 @@ func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 		return
 	}
-	w.WriteHeader(202)
-	go a.review(context.Background(), h, ev)
+
+	// Dedupe check: verify signature before touching dedupe table; bound and persist dedupe set
+	if id := deliveryID(r); id != "" {
+		seen, _ := a.Store.CheckAndRecordDelivery(id, 24*3600, 10000)
+		if seen {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+	}
+
+	b, err := json.Marshal(ev)
+	if err != nil {
+		http.Error(w, "bad event", http.StatusBadRequest)
+		return
+	}
+	if _, err := a.Store.EnqueueJob(h.Name(), string(b)); err != nil {
+		http.Error(w, "queue error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func (a *App) review(ctx context.Context, h githost.Host, ev *githost.Event) {
@@ -76,17 +173,30 @@ func (a *App) review(ctx context.Context, h githost.Host, ev *githost.Event) {
 	log.Printf("%s: review %s#%s", h.Name(), ev.Repo, ev.PR)
 	h.Status(ctx, ev, githost.Pending, "scanning")
 	user, token := h.CloneAuth()
-	eng, err := a.engine()
+	projID := ""
+	if p, pErr := a.Store.ProjectByRepo(h.Name(), ev.RepoPath); pErr == nil {
+		projID = p.ID
+	}
+	eng, err := a.engine(projID)
 	if err == nil {
 		start := time.Now()
 		var res *scheduler.Result
-		if res, err = scheduler.Review(ev, user, token, eng...); err == nil {
+		if res, err = scheduler.Review(ctx, ev, user, token, eng...); err == nil {
 			a.finishReview(ctx, h, ev, res, time.Since(start))
 			return
 		}
 	}
 	log.Printf("%s: %v", h.Name(), err)
-	h.Status(ctx, ev, githost.Failure, "scan error") // errors fail closed
+	var proj *store.Project
+	if p, pErr := a.Store.ProjectByRepo(h.Name(), ev.RepoPath); pErr == nil {
+		proj = &p
+	}
+	blocking, _ := a.gate(proj)
+	if blocking {
+		h.Status(ctx, ev, githost.Failure, "scan error") // errors fail closed
+	} else {
+		h.Status(ctx, ev, githost.Neutral, "scan error (report only)")
+	}
 }
 
 // gate returns whether a failing status may block the merge, and the severity at which it fails.
@@ -122,7 +232,7 @@ func (a *App) finishReview(ctx context.Context, h githost.Host, ev *githost.Even
 		buf.WriteString("Report only: these findings do not block the merge.\n")
 	}
 	buf.WriteString("```\n")
-	report.Text(&buf, shown, res.Ran)
+	report.Text(&buf, shown, res.Ran, res.Skipped)
 	buf.WriteString("```\n")
 	if len(res.New) > 50 {
 		fmt.Fprintf(&buf, "%d more not shown.\n", len(res.New)-50)
@@ -132,17 +242,87 @@ func (a *App) finishReview(ctx context.Context, h githost.Host, ev *githost.Even
 		log.Printf("%s: comment: %v", h.Name(), err)
 	}
 	state, desc := githost.Success, "no new findings at gate"
+	reason := desc
 	switch {
 	case !blocking:
 		desc = fmt.Sprintf("%d new finding(s), report only", len(res.New))
+		reason = desc
 	case policy.Fails(res.New, threshold):
 		state, desc = githost.Failure, fmt.Sprintf("%d new finding(s)", len(res.New))
+		reason = desc
+	case len(res.Skipped) > 0:
+		state, desc = githost.Failure, fmt.Sprintf("skipped changed file(s): %s", strings.Join(res.Skipped, ", "))
+		reason = desc
+	default:
+		for _, reqName := range a.RequiredEngines {
+			found := false
+			for _, ran := range res.Ran {
+				if ran == reqName {
+					found = true
+					break
+				}
+			}
+			if !found {
+				state, desc = githost.Failure, fmt.Sprintf("missing required engine: %s", reqName)
+				reason = desc
+				break
+			}
+		}
 	}
 	if err := h.Status(ctx, ev, state, desc); err != nil {
 		log.Printf("%s: status: %v", h.Name(), err)
 	}
+	modeStr := "report"
+	if blocking {
+		modeStr = "block"
+	}
+	outcome := "success"
+	if state == githost.Failure {
+		outcome = "failure"
+	}
+	projID := ""
 	if proj != nil {
-		sc := store.Scan{ProjectID: proj.ID, Mode: "pr", Commit: res.Commit, PR: ev.PR, DurationMS: dur.Milliseconds(), New: len(res.New)}
+		projID = proj.ID
+	}
+	if a.Store != nil {
+		auditPayload, _ := json.Marshal(map[string]any{
+			"commit":        res.Commit,
+			"engines":       strings.Join(res.Ran, ","),
+			"pack_versions": packVersions(a.Packs),
+			"skipped_files": res.Skipped,
+			"mode":          modeStr,
+			"outcome":       outcome,
+			"reason":        reason,
+		})
+		a.Store.AddAudit(store.Audit{
+			Actor:        "sentinix",
+			Action:       "pr_scan_gate",
+			Target:       projID,
+			Commit:       res.Commit,
+			Source:       modeStr,
+			After:        string(auditPayload),
+			Engines:      strings.Join(res.Ran, ","),
+			PackVersions: packVersions(a.Packs),
+			SkippedFiles: strings.Join(res.Skipped, ", "),
+			Mode:         modeStr,
+			Outcome:      outcome,
+			Reason:       reason,
+		})
+	}
+	if proj != nil {
+		sc := store.Scan{
+			ProjectID:    proj.ID,
+			Mode:         "pr",
+			Commit:       res.Commit,
+			PR:           ev.PR,
+			DurationMS:   dur.Milliseconds(),
+			New:          len(res.New),
+			Packs:        packVersions(a.Packs),
+			Engines:      strings.Join(res.Ran, ","),
+			GateDecision: state.String(),
+			Reason:       reason,
+			Skipped:      strings.Join(res.Skipped, ", "),
+		}
 		a.Store.RecordPRScan(sc)
 		a.Store.AddSurface(proj.ID, res.Commit, ev.PR, res.Surface)
 	}
@@ -163,12 +343,12 @@ func (a *App) queueFull(ctx context.Context, p store.Project, branch string) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 	user, token := h.CloneAuth()
-	eng, err := a.engine()
+	eng, err := a.engine(p.ID)
 	if err != nil {
 		log.Printf("project %s: %v", p.Name, err)
 		return
 	}
-	res, dur, err := scheduler.Full(h.RepoURL(p.Repo), branch, user, token, eng...)
+	res, dur, err := scheduler.Full(ctx, h.RepoURL(p.Repo), branch, user, token, h.ConfiguredHost(), eng...)
 	if err != nil {
 		log.Printf("project %s: full scan: %v", p.Name, err)
 		return

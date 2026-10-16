@@ -328,13 +328,13 @@ Sentinix always posts a comment and a `sentinix` commit status on the pull reque
 | **Block** (default) | Fails when a new finding is at or above the threshold | Stopped, if the status is a required check | "Merge is blocked by new findings at **high** or above." |
 | **Report only** | Always passes, with a description such as "3 new finding(s), report only" | Never affected | "Report only: these findings do not block the merge." |
 
-Set it in the dashboard (**Settings**, then *Enforcement* and *Fail at*), through the API (`PATCH /api/projects/{id}` with `{"Enforcement":"report"}` and, optionally, `{"FailOn":"medium"}`), or set a server-wide default with `-enforcement` and `-fail-on`. A project's own settings win; a repository that is not registered as a project uses the server defaults. Changing enforcement is an Admin or Owner action and is written to the audit log.
+Set it in the dashboard (**Settings**, then *Enforcement* and *Fail at*), through the API (`PATCH /api/projects/{id}` with `{"enforcement":"report"}` and, optionally, `{"fail_on":"medium"}`), or set a server-wide default with `-enforcement` and `-fail-on`. A project's own settings win; a repository that is not registered as a project uses the server defaults. Changing enforcement creates an approval and requires a second person to decide.
 
 A sensible rollout is to run in **report only** for a couple of weeks so the team sees real findings and you can tune noisy rules, then switch the important projects to **block** at `high` and later at `medium`.
 
 ### Make blocking real
 
-The status only stops a merge if the git host is told to require it. Mark the `sentinix` status as a **required check** in your branch protection rules (GitHub, GitLab) or as a required build (Bitbucket). In report-only mode, leave it optional (or do not require it) and the status can never hold up a merge, even by mistake.
+The status only stops a merge if the git host is told to require it. Mark the `sentinix` status as a **required check** in your branch protection rules (GitHub, GitLab) or as a required build (Bitbucket). Note that required checks should treat Sentinix as blocking only in block mode. For report-only projects, scanner errors post a non-red status across git hosts (GitHub: neutral check-run; GitLab: success with "scanner unavailable"; Bitbucket: STOPPED) so that merges are never blocked on report-only projects when scanners are unavailable.
 
 **Not supported by the server:** Bitbucket Server and Data Center, and Gitea. Use the command-line tool in CI for those.
 

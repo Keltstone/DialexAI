@@ -1,23 +1,84 @@
 package store
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"sentinix/pkg/engines"
 )
 
 type Audit struct {
 	ID, Actor, Action, Target, Commit, Approver string
+	Source, Before, After                       string
+	Engines, PackVersions, SkippedFiles         string
+	Mode, Outcome, Reason                       string
+	PrevHash, Hash                              string
 	TS                                          int64
+	Seq                                         int64
 }
 
-func (s *Store) AddAudit(a Audit) error {
-	_, err := s.db.Exec("insert into audit(id,ts,actor,action,target,commit_sha,approver) values($1,$2,$3,$4,$5,$6,$7)",
-		id(), now(), a.Actor, a.Action, a.Target, a.Commit, a.Approver)
+func computeAuditHash(prevHash string, a Audit, key []byte) string {
+	payload := fmt.Sprintf("%d|%s|%s|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+		a.Seq, prevHash, a.ID, a.TS, a.Actor, a.Action, a.Target, a.Commit, a.Approver,
+		a.Source, a.Before, a.After, a.Engines, a.PackVersions, a.SkippedFiles,
+		a.Mode, a.Outcome, a.Reason)
+	if len(key) > 0 {
+		mac := hmac.New(sha256.New, key)
+		mac.Write([]byte(payload))
+		return hex.EncodeToString(mac.Sum(nil))
+	}
+	h := sha256.Sum256([]byte(payload))
+	return hex.EncodeToString(h[:])
+}
+
+func addAuditTx(tx *sql.Tx, a Audit, key []byte) error {
+	if a.ID == "" {
+		a.ID = id()
+	}
+	if a.TS == 0 {
+		a.TS = now()
+	}
+	var maxSeq int64
+	var prevHash string
+	row := tx.QueryRow("select seq, hash from audit order by seq desc limit 1")
+	err := row.Scan(&maxSeq, &prevHash)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read previous audit hash: %w", err)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		maxSeq = 0
+		prevHash = "0000000000000000000000000000000000000000000000000000000000000000"
+	}
+	a.Seq = maxSeq + 1
+	a.PrevHash = prevHash
+	a.Hash = computeAuditHash(prevHash, a, key)
+	_, err = tx.Exec("insert into audit(id,seq,ts,actor,action,target,commit_sha,approver,source,before_val,after_val,engines,pack_versions,skipped_files,mode,outcome,reason,prev_hash,hash) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)",
+		a.ID, a.Seq, a.TS, a.Actor, a.Action, a.Target, a.Commit, a.Approver, a.Source, a.Before, a.After, a.Engines, a.PackVersions, a.SkippedFiles, a.Mode, a.Outcome, a.Reason, a.PrevHash, a.Hash)
 	return err
 }
 
+func (s *Store) AddAudit(a Audit) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := addAuditTx(tx, a, s.auditKey); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) AuditLog(limit int) ([]Audit, error) {
-	rows, err := s.db.Query("select id,ts,actor,action,target,commit_sha,approver from audit order by ts desc, id limit $1", limit)
+	rows, err := s.db.Query("select id,seq,ts,actor,action,target,commit_sha,approver,source,before_val,after_val,engines,pack_versions,skipped_files,mode,outcome,reason,prev_hash,hash from audit order by seq desc limit $1", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -25,13 +86,39 @@ func (s *Store) AuditLog(limit int) ([]Audit, error) {
 	var out []Audit
 	for rows.Next() {
 		var a Audit
-		if err := rows.Scan(&a.ID, &a.TS, &a.Actor, &a.Action, &a.Target, &a.Commit, &a.Approver); err != nil {
+		if err := rows.Scan(&a.ID, &a.Seq, &a.TS, &a.Actor, &a.Action, &a.Target, &a.Commit, &a.Approver, &a.Source, &a.Before, &a.After, &a.Engines, &a.PackVersions, &a.SkippedFiles, &a.Mode, &a.Outcome, &a.Reason, &a.PrevHash, &a.Hash); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
 	}
 	return out, rows.Err()
 }
+
+func (s *Store) VerifyAuditChain() error {
+	rows, err := s.db.Query("select id,seq,ts,actor,action,target,commit_sha,approver,source,before_val,after_val,engines,pack_versions,skipped_files,mode,outcome,reason,prev_hash,hash from audit order by seq asc")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	expectedPrev := "0000000000000000000000000000000000000000000000000000000000000000"
+	for rows.Next() {
+		var a Audit
+		if err := rows.Scan(&a.ID, &a.Seq, &a.TS, &a.Actor, &a.Action, &a.Target, &a.Commit, &a.Approver, &a.Source, &a.Before, &a.After, &a.Engines, &a.PackVersions, &a.SkippedFiles, &a.Mode, &a.Outcome, &a.Reason, &a.PrevHash, &a.Hash); err != nil {
+			return err
+		}
+		if a.PrevHash != expectedPrev {
+			return fmt.Errorf("audit chain verification failed at row %s: prev_hash %q != expected %q", a.ID, a.PrevHash, expectedPrev)
+		}
+		expectedHash := computeAuditHash(a.PrevHash, a, s.auditKey)
+		if a.Hash != expectedHash {
+			return fmt.Errorf("audit chain verification failed at row %s: hash %q != expected %q (tampered)", a.ID, a.Hash, expectedHash)
+		}
+		expectedPrev = a.Hash
+	}
+	return rows.Err()
+}
+
 
 // Approvals: anything that loosens a rule, removes a test or accepts a risk waits here for a second person.
 type Approval struct {
@@ -53,27 +140,196 @@ func (s *Store) Propose(kind string, payload any, proposer string) (string, erro
 	return i, err
 }
 
+func canonicalEmail(e string) string {
+	e = strings.TrimSpace(strings.ToLower(e))
+	user, domain, ok := strings.Cut(e, "@")
+	if !ok {
+		return e
+	}
+	if idx := strings.Index(user, "+"); idx != -1 {
+		user = user[:idx]
+	}
+	user = strings.ReplaceAll(user, ".", "")
+	return user + "@" + domain
+}
+
+func isSameActorOrAlias(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ca, cb := canonicalEmail(a), canonicalEmail(b)
+	return ca != "" && ca == cb
+}
+
 // Decide enforces separation of duties: the proposer cannot decide their own proposal.
+// apply runs in the same transaction as Decide.
 func (s *Store) Decide(approvalID, approver string, approve bool) (Approval, error) {
-	a, err := s.Approval(approvalID)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Approval{}, err
+	}
+	defer tx.Rollback()
+
+	var a Approval
+	var p string
+	err = tx.QueryRow("select id,kind,payload,proposer,status,approver,ts from approvals where id=$1", approvalID).Scan(&a.ID, &a.Kind, &p, &a.Proposer, &a.Status, &a.Approver, &a.TS)
 	if err != nil {
 		return a, err
 	}
+	a.Payload = json.RawMessage(p)
+
 	if a.Status != "pending" {
 		return a, fmt.Errorf("already %s", a.Status)
 	}
-	if a.Proposer == approver {
+	if a.Proposer == approver || isSameActorOrAlias(a.Proposer, approver) {
 		return a, fmt.Errorf("proposer cannot approve their own change")
 	}
-	a.Status = "rejected"
-	if approve {
-		a.Status = "approved"
+	if a.Kind == "role_change" || a.Kind == "role" {
+		var rolePayload struct{ Email, Role string }
+		if json.Unmarshal(a.Payload, &rolePayload) == nil {
+			if approver == rolePayload.Email || isSameActorOrAlias(approver, rolePayload.Email) {
+				return a, fmt.Errorf("user cannot approve their own role change")
+			}
+		}
 	}
-	a.Approver = approver
-	if _, err := s.db.Exec("update approvals set status=$2,approver=$3 where id=$1", approvalID, a.Status, approver); err != nil {
+
+	newStatus := "rejected"
+	if approve {
+		newStatus = "approved"
+	}
+
+	res, err := tx.Exec("update approvals set status=$2,approver=$3 where id=$1 and status='pending'", approvalID, newStatus, approver)
+	if err != nil {
 		return a, err
 	}
-	return a, s.AddAudit(Audit{Actor: approver, Action: a.Status + ":" + a.Kind, Target: approvalID, Approver: approver})
+	n, err := res.RowsAffected()
+	if err != nil || n == 0 {
+		return a, fmt.Errorf("already %s", a.Status)
+	}
+
+	beforeStatus := a.Status
+	a.Status = newStatus
+	a.Approver = approver
+
+	if err := addAuditTx(tx, Audit{
+		Actor:    approver,
+		Action:   a.Status + ":" + a.Kind,
+		Target:   approvalID,
+		Approver: approver,
+		Before:   beforeStatus,
+		After:    newStatus,
+	}); err != nil {
+		return a, err
+	}
+
+	if approve {
+		if err := applyTx(tx, a); err != nil {
+			return a, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return a, err
+	}
+	return a, nil
+}
+
+func applyTx(tx *sql.Tx, a Approval) error {
+	var raw map[string]any
+	if err := json.Unmarshal(a.Payload, &raw); err != nil {
+		return err
+	}
+	getString := func(k string) string {
+		v, _ := raw[k].(string)
+		return v
+	}
+	getInt64 := func(k string) int64 {
+		switch v := raw[k].(type) {
+		case float64:
+			return int64(v)
+		case int64:
+			return v
+		case int:
+			return int64(v)
+		case json.Number:
+			n, _ := v.Int64()
+			return n
+		case string:
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				return t.Unix()
+			} else if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				return n
+			}
+		}
+		return 0
+	}
+	getBool := func(k string) bool {
+		b, _ := raw[k].(bool)
+		return b
+	}
+
+	currentTime := now()
+	switch a.Kind {
+	case "role_change", "role":
+		_, err := tx.Exec("update users set role=$1 where email=$2", getString("role"), getString("email"))
+		return err
+	case "branch":
+		_, err := tx.Exec("update projects set branch=$1 where id=$2", getString("branch"), getString("project"))
+		return err
+	case "schedule":
+		_, err := tx.Exec("update projects set schedule=$1 where id=$2", getString("schedule"), getString("project"))
+		return err
+	case "pack_pins":
+		pins, _ := json.Marshal(raw["pack_pins"])
+		_, err := tx.Exec("update projects set pack_pins=$1 where id=$2", string(pins), getString("project"))
+		return err
+	case "false_positive":
+		findingID := getString("finding")
+		if findingID != "" {
+			_, err := tx.Exec("update findings set status='false_positive', owner=$2, accepted_reason=$3, updated=$4 where id=$1",
+				findingID, getString("owner"), getString("reason"), currentTime)
+			return err
+		}
+		return nil
+	case "accept_risk":
+		_, err := tx.Exec("update findings set status='accepted', owner=$2, accepted_reason=$3, accepted_until=$4, updated=$5 where id=$1",
+			getString("finding"), getString("owner"), getString("reason"), getInt64("until"), currentTime)
+		return err
+	case "disable_rule":
+		sc := getString("scope")
+		if sc == "" {
+			sc = "*"
+		}
+		_, err := tx.Exec("insert into rule_overrides(rule,disabled,severity,scope,expires_at) values($1,1,-1,$2,$3) on conflict(rule, scope) do update set disabled=1, expires_at=excluded.expires_at",
+			getString("rule"), sc, getInt64("until"))
+		return err
+	case "loosen_severity":
+		s, _ := engines.ParseSeverity(getString("severity"))
+		_, err := tx.Exec("insert into rule_overrides(rule,disabled,severity,scope,expires_at) values($1,0,$2,'*',0) on conflict(rule, scope) do update set disabled=0, severity=$2",
+			getString("rule"), int(s))
+		return err
+	case "demote_rule", "rule_demotion":
+		_, err := tx.Exec("insert into rule_overrides(rule,disabled,severity,scope,expires_at) values($1,0,$2,'*',0) on conflict(rule, scope) do update set disabled=0, severity=$2",
+			getString("rule"), int(engines.Info))
+		return err
+	case "enforcement":
+		_, err := tx.Exec("update projects set enforcement=$1 where id=$2", getString("enforcement"), getString("project"))
+		return err
+	case "fail_on":
+		_, err := tx.Exec("update projects set fail_on=$1 where id=$2", getString("fail_on"), getString("project"))
+		return err
+	case "model_policy":
+		_, err := tx.Exec("update projects set model_policy=$1 where id=$2", getString("model_policy"), getString("project"))
+		return err
+	case "ai":
+		aiVal := 0
+		if getBool("ai") {
+			aiVal = 1
+		}
+		_, err := tx.Exec("update projects set ai=$1 where id=$2", aiVal, getString("project"))
+		return err
+	}
+	return nil
 }
 
 func (s *Store) Approval(id string) (Approval, error) {

@@ -16,6 +16,7 @@ import (
 
 type fakeHost struct {
 	state   githost.State
+	desc    string
 	comment string
 }
 
@@ -23,8 +24,10 @@ func (f *fakeHost) Name() string                                        { return
 func (f *fakeHost) Parse(*http.Request, []byte) (*githost.Event, error) { return nil, nil }
 func (f *fakeHost) CloneAuth() (string, string)                         { return "", "" }
 func (f *fakeHost) RepoURL(p string) string                             { return p }
-func (f *fakeHost) Status(_ context.Context, _ *githost.Event, s githost.State, _ string) error {
+func (f *fakeHost) ConfiguredHost() string                              { return "fake.example" }
+func (f *fakeHost) Status(_ context.Context, _ *githost.Event, s githost.State, desc string) error {
 	f.state = s
+	f.desc = desc
 	return nil
 }
 func (f *fakeHost) Comment(_ context.Context, _ *githost.Event, b string) error {
@@ -57,16 +60,23 @@ func TestBlockOrReportPerProject(t *testing.T) {
 		t.Fatalf("new projects block by default, got %q", p.Enforcement)
 	}
 	// per-project report mode: findings are posted but never block
-	e.ok(e.call("adm@example.test", auth.Admin, "PATCH", "/api/projects/"+p.ID, `{"Enforcement":"report"}`), 200)
+	p.Enforcement = "report"
+	if err := e.st.UpdateProject(p); err != nil {
+		t.Fatal(err)
+	}
 	if h := review(t, e.app, engines.Critical); h.state != githost.Success || !strings.Contains(h.comment, "do not block") {
 		t.Fatalf("report mode must not fail the status: %v %s", h.state, h.comment)
 	}
 	// per-project threshold
-	e.ok(e.call("adm@example.test", auth.Admin, "PATCH", "/api/projects/"+p.ID, `{"Enforcement":"block","FailOn":"medium"}`), 200)
+	p.Enforcement = "block"
+	p.FailOn = "medium"
+	if err := e.st.UpdateProject(p); err != nil {
+		t.Fatal(err)
+	}
 	if h := review(t, e.app, engines.Medium); h.state != githost.Failure {
 		t.Fatal("project threshold ignored")
 	}
-	e.ok(e.call("adm@example.test", auth.Admin, "PATCH", "/api/projects/"+p.ID, `{"Enforcement":"maybe"}`), 400)
-	e.ok(e.call("adm@example.test", auth.Admin, "PATCH", "/api/projects/"+p.ID, `{"FailOn":"huge"}`), 400)
-	e.ok(e.call("rev@example.test", auth.Reviewer, "PATCH", "/api/projects/"+p.ID, `{"Enforcement":"report"}`), 403)
+	e.ok(e.call("adm@example.test", auth.Admin, "PATCH", "/api/projects/"+p.ID, `{"enforcement":"maybe"}`), 400)
+	e.ok(e.call("adm@example.test", auth.Admin, "PATCH", "/api/projects/"+p.ID, `{"fail_on":"huge"}`), 400)
+	e.ok(e.call("rev@example.test", auth.Reviewer, "PATCH", "/api/projects/"+p.ID, `{"enforcement":"report"}`), 403)
 }
