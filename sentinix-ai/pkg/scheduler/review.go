@@ -6,12 +6,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -26,25 +28,47 @@ import (
 var (
 	FetchTimeout          = 5 * time.Minute
 	MaxFetchBytes int64   = 500 << 20 // 500 MiB
+
+	// AllowLocalForTest allows local directory paths or file:// in tests when set.
+	AllowLocalForTest = false
+	// AllowInsecureHTTP permits plain http URLs when set.
+	AllowInsecureHTTP = false
 )
 
 type Result struct {
-	New     []engines.Finding
-	Ran     []string
-	Surface []diffmap.Item
-	Commit  string
+	New        []engines.Finding
+	Ran        []string
+	Surface    []diffmap.Item
+	Commit     string
 	// Components is the SBOM of a full scan.
 	Components []advisories.Component
 	Skipped    []string
+	Gaps       []string
+	EngineMeta map[string]engines.EngineMetadata
 }
 
 func isConfiguredHost(rawURL, configuredHost string) error {
+	if !strings.Contains(rawURL, "://") {
+		if AllowLocalForTest {
+			return nil
+		}
+		return fmt.Errorf("invalid clone URL %q: scheme required", rawURL)
+	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return err
+		return fmt.Errorf("invalid clone URL %q: %w", rawURL, err)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil // local directory/path (used in tests)
+	if u.Scheme != "https" {
+		if u.Scheme == "http" && AllowInsecureHTTP {
+			// dev flag allowed
+		} else if AllowLocalForTest && (u.Scheme == "file" || u.Scheme == "") {
+			return nil
+		} else {
+			return fmt.Errorf("unsupported clone URL scheme %q in %q (only https allowed)", u.Scheme, rawURL)
+		}
+	}
+	if u.User != nil {
+		return fmt.Errorf("credentials in clone URL are forbidden: %q", rawURL)
 	}
 	host := u.Hostname()
 	if configuredHost == "" {
@@ -112,13 +136,16 @@ func (r *repo) gitContext(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", r.dir}, args...)...)
 	cmd.WaitDelay = 100 * time.Millisecond
 	credHelper := filepath.Join(r.dir, "cred-helper.sh")
-	cmd.Env = append(os.Environ(),
-		"SENTINIX_GIT_USER="+r.user,
-		"SENTINIX_GIT_TOKEN="+r.token,
-		"GIT_ASKPASS="+credHelper,
-		"SSH_ASKPASS="+credHelper,
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + r.dir,
+		"TMPDIR=" + os.TempDir(),
+		"SENTINIX_GIT_USER=" + r.user,
+		"SENTINIX_GIT_TOKEN=" + r.token,
+		"GIT_ASKPASS=" + credHelper,
+		"SSH_ASKPASS=" + credHelper,
 		"GIT_TERMINAL_PROMPT=0",
-	)
+	}
 	out, err := cmd.CombinedOutput()
 	s := strings.TrimSpace(string(out))
 	if r.token != "" {
@@ -129,6 +156,30 @@ func (r *repo) gitContext(ctx context.Context, args ...string) (string, error) {
 	}
 	return s, nil
 }
+
+func (r *repo) checkTreeSize(ctx context.Context, commit string) error {
+	out, err := r.gitContext(ctx, "ls-tree", "-r", "-l", commit)
+	if err != nil {
+		return err
+	}
+	var totalSize int64
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 4 && fields[1] == "blob" {
+			sizeStr := fields[3]
+			if sizeStr != "-" {
+				if sz, err := strconv.ParseInt(sizeStr, 10, 64); err == nil {
+					totalSize += sz
+					if totalSize > MaxFetchBytes {
+						return fmt.Errorf("working-tree size exceeded limit (%d bytes)", totalSize)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 
 func dirSize(path string) (int64, error) {
 	var size int64
@@ -255,36 +306,56 @@ func (r *repo) worktree(ctx context.Context, name, sha string) (string, error) {
 	return p, err
 }
 
-func scanAll(ctx context.Context, root string, extra []engines.Engine) ([]engines.Finding, []string, []string, error) {
+func scanAll(ctx context.Context, root string, extra []engines.Engine) ([]engines.Finding, []string, []string, []string, map[string]engines.EngineMetadata, error) {
 	var all []engines.Finding
 	var ran []string
 	var skipped []string
+	var gaps []string
+	meta := make(map[string]engines.EngineMetadata)
 	occ := map[string]int{}
 
 	for _, e := range engines.Bundled(extra...) {
+		m := engines.EngineMeta(e.Name())
 		fs, err := e.Scan(ctx, root)
 		if err != nil {
-			return nil, nil, nil, err // a broken engine must not look like a clean scan
+			if errors.Is(err, engines.ErrEngineUnavailable) {
+				m.Status = "ENGINE_UNAVAILABLE"
+				meta[e.Name()] = m
+				gaps = append(gaps, err.Error())
+				continue
+			}
+			return nil, nil, nil, nil, nil, err
 		}
+		meta[e.Name()] = m
 		ran = append(ran, e.Name())
 		if se, ok := e.(interface{ Skipped() []string }); ok {
 			skipped = append(skipped, se.Skipped()...)
 		}
 		for _, f := range fs {
-			if f.Occurrence == 0 {
-				m := f.Match
+			rf := rel(f, root)
+			if rf.Occurrence == 0 {
+				m := rf.Match
 				if m == "" {
-					m = f.Evidence
+					m = rf.Evidence
 				}
 				h := sha256.Sum256([]byte(m))
-				key := f.Rule + ":" + hex.EncodeToString(h[:])
-				f.Occurrence = occ[key]
+				key := rf.Rule + ":" + hex.EncodeToString(h[:])
+				rf.Occurrence = occ[key]
 				occ[key]++
 			}
-			all = append(all, rel(f, root))
+			dup := false
+			for _, ef := range all {
+				if ef.File == rf.File && ef.Line == rf.Line && ef.Rule == rf.Rule {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				all = append(all, rf)
+			}
 		}
 	}
-	return all, ran, skipped, nil
+	return all, ran, skipped, gaps, meta, nil
 }
 
 // Review scans ev.HeadSHA and ev.BaseRef.
@@ -332,39 +403,43 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 		return nil, err
 	}
 
-	baseCommit := baseSHA
+	targetCommit := baseSHA
 	if ev.BaseSHA != "" {
-		baseCommit = ev.BaseSHA
-	} else if mb, err := r.gitContext(ctx, "merge-base", headSHA, baseSHA); err == nil && mb != "" {
+		targetCommit = ev.BaseSHA
+	}
+	baseCommit := targetCommit
+	if mb, err := r.gitContext(ctx, "merge-base", headSHA, targetCommit); err == nil && mb != "" {
 		baseCommit = mb
 	} else {
-		// Deepen history to find merge base for GitLab/Bitbucket shallow fetches
+		// Deepen history to find merge base for shallow fetches
 		r.fetchDeepen(ctx, ev.CloneURL, headRef, !ev.Fork, 50)
 		r.fetchDeepen(ctx, ev.BaseCloneURL, baseRefToFetch, true, 50)
-		if mb, err := r.gitContext(ctx, "merge-base", headSHA, baseSHA); err == nil && mb != "" {
+		if mb, err := r.gitContext(ctx, "merge-base", headSHA, targetCommit); err == nil && mb != "" {
 			baseCommit = mb
 		}
+	}
+
+	if err := r.checkTreeSize(ctx, headSHA); err != nil {
+		return nil, err
+	}
+	if err := r.checkTreeSize(ctx, baseCommit); err != nil {
+		return nil, err
 	}
 
 	head, err := r.worktree(ctx, "wt-head", headSHA)
 	if err != nil {
 		return nil, err
 	}
-	if sz, _ := dirSize(head); sz > MaxFetchBytes {
-		return nil, fmt.Errorf("working-tree size exceeded limit (%d bytes)", sz)
-	}
 	base, err := r.worktree(ctx, "wt-base", baseCommit)
 	if err != nil {
 		return nil, err
 	}
-	if sz, _ := dirSize(base); sz > MaxFetchBytes {
-		return nil, fmt.Errorf("working-tree size exceeded limit (%d bytes)", sz)
-	}
-	hf, ran, skipped, err := scanAll(ctx, head, extra)
+
+	hf, ran, skipped, gaps, meta, err := scanAll(ctx, head, extra)
 	if err != nil {
 		return nil, err
 	}
-	bf, _, _, err := scanAll(ctx, base, extra)
+	bf, _, _, _, _, err := scanAll(ctx, base, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +492,14 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 		}
 	}
 
-	res := &Result{New: known.New(hf), Ran: ran, Commit: headSHA, Skipped: skipped}
+	res := &Result{
+		New:        known.New(hf),
+		Ran:        ran,
+		Commit:     headSHA,
+		Skipped:    skipped,
+		Gaps:       gaps,
+		EngineMeta: meta,
+	}
 	if d, err := r.gitContext(ctx, "diff", "-U0", baseCommit, headSHA); err == nil {
 		res.Surface, _ = diffmap.Parse(strings.NewReader(d))
 	}
@@ -445,19 +527,28 @@ func Full(ctx context.Context, cloneURL, branch, user, token, configuredHost str
 	if err != nil {
 		return nil, 0, err
 	}
+	if err := r.checkTreeSize(ctx, sha); err != nil {
+		return nil, 0, err
+	}
 	wt, err := r.worktree(ctx, "wt", sha)
 	if err != nil {
 		return nil, 0, err
 	}
-	if sz, _ := dirSize(wt); sz > MaxFetchBytes {
-		return nil, 0, fmt.Errorf("working-tree size exceeded limit (%d bytes)", sz)
-	}
-	fs, ran, skipped, err := scanAll(ctx, wt, extra)
+	fs, ran, skipped, gaps, meta, err := scanAll(ctx, wt, extra)
 	if err != nil {
 		return nil, 0, err
 	}
-	return &Result{New: fs, Ran: ran, Commit: sha, Components: advisories.Components(wt), Skipped: skipped}, time.Since(start), nil
+	return &Result{
+		New:        fs,
+		Ran:        ran,
+		Commit:     sha,
+		Components: advisories.Components(wt),
+		Skipped:    skipped,
+		Gaps:       gaps,
+		EngineMeta: meta,
+	}, time.Since(start), nil
 }
+
 
 func rel(f engines.Finding, root string) engines.Finding {
 	f.File = strings.TrimPrefix(strings.TrimPrefix(f.File, "file://"+root), root)

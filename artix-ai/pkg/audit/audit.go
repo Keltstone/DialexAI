@@ -186,11 +186,19 @@ type Logger struct {
 	remoteSinks    []policy.RemoteSinkConfig
 	lastHash       string
 	initError      error
+	eval           bool
 	mu             sync.Mutex
 	httpClient     *http.Client
 	spoolChan      chan spooledSinkItem
 	stopChan       chan struct{}
 	spoolWg        sync.WaitGroup
+}
+
+// SetEval sets default eval mode on this logger instance.
+func (l *Logger) SetEval(eval bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.eval = eval
 }
 
 // InitError returns any fatal error encountered during logger initialization.
@@ -424,9 +432,16 @@ func (l *Logger) Emit(event AuditEvent) error {
 	if event.PolicyHash == "" {
 		event.PolicyHash = policy.GetPolicyHash()
 	}
-
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	if l.eval || event.Eval || (event.Details != nil && event.Details["eval"] == true) {
+		event.Eval = true
+		if event.Details == nil {
+			event.Details = make(map[string]any)
+		}
+		event.Details["eval"] = true
+	}
 
 	if l.initError != nil {
 		return fmt.Errorf("audit logging refused: %w", l.initError)

@@ -69,9 +69,11 @@ type AgentCapabilities struct {
 // Session Models
 
 type SessionNewParams struct {
-	SessionID string `json:"sessionId,omitempty"`
-	RootDir   string `json:"rootDir,omitempty"`
-	Domain    string `json:"domain,omitempty"`
+	SessionID string  `json:"sessionId,omitempty"`
+	RootDir   string  `json:"rootDir,omitempty"`
+	Domain    string  `json:"domain,omitempty"`
+	MaxTokens int     `json:"maxTokens,omitempty"`
+	MaxUSD    float64 `json:"maxUsd,omitempty"`
 }
 
 type SessionNewResult struct {
@@ -80,11 +82,13 @@ type SessionNewResult struct {
 }
 
 type SessionPromptParams struct {
-	SessionID string `json:"sessionId"`
-	Prompt    string `json:"prompt"`
-	Mode      string `json:"mode,omitempty"` // "plan", "code", "review", or "auto"
-	Provider  string `json:"provider,omitempty"`
-	Model     string `json:"model,omitempty"`
+	SessionID string  `json:"sessionId"`
+	Prompt    string  `json:"prompt"`
+	Mode      string  `json:"mode,omitempty"` // "plan", "code", "review", or "auto"
+	Provider  string  `json:"provider,omitempty"`
+	Model     string  `json:"model,omitempty"`
+	MaxTokens int     `json:"maxTokens,omitempty"`
+	MaxUSD    float64 `json:"maxUsd,omitempty"`
 }
 
 type SessionPromptResult struct {

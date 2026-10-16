@@ -80,6 +80,12 @@ func (s Secrets) ScanWithSkipped(ctx context.Context, root string) ([]Finding, [
 		if rel == "." {
 			return nil
 		}
+		if d.Name() == ".git" || rel == ".git" || strings.HasPrefix(rel, ".git/") || strings.HasPrefix(rel, ".git\\") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 
 		info, err := os.Lstat(p)
 		if err != nil {
@@ -98,9 +104,6 @@ func (s Secrets) ScanWithSkipped(ctx context.Context, root string) ([]Finding, [
 		// Handle directories
 		if d.IsDir() {
 			n := d.Name()
-			if n == ".git" {
-				return filepath.SkipDir
-			}
 			if n == "node_modules" || n == "build" {
 				skipped = append(skipped, rel)
 				return filepath.SkipDir
@@ -210,7 +213,7 @@ func (s Secrets) ScanWithSkipped(ctx context.Context, root string) ([]Finding, [
 						// Avoid duplicate if already matched by rule
 						alreadyMatched := false
 						for _, f := range out {
-							if f.Line == n && strings.Contains(f.Match, word) {
+							if f.File == rel && f.Line == n && (strings.Contains(f.Match, word) || strings.Contains(word, f.Match) || strings.Contains(lineTrimmed, f.Match)) {
 								alreadyMatched = true
 								break
 							}
