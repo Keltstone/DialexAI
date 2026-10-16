@@ -1561,14 +1561,17 @@ func TestR6_5_IssueCommentAuthorizesOnCommentAuthorWithoutSenderAssociation(t *t
 }
 
 func TestWebhookServer_TasksEndpoint(t *testing.T) {
+	tempDir := t.TempDir()
 	cfg := WebhookServerConfig{
-		DefaultDomain: "backend_engineer",
+		DefaultDomain:  "backend_engineer",
+		AllowedRoots:   []string{tempDir},
+		AllowedRepoIDs: map[string]string{"test-repo": tempDir},
 	}
 	server := NewWebhookServer(cfg)
 	handler := server.Handler()
 
 	// 1. Submit task
-	payload := []byte(`{"prompt":"Add OAuth2 authentication","domain":"backend_engineer"}`)
+	payload := []byte(`{"prompt":"Add OAuth2 authentication","domain":"backend_engineer","repoId":"test-repo"}`)
 	req := httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -1612,8 +1615,10 @@ func TestWebhookServer_PilotStopRule_RefusesJob(t *testing.T) {
 	})
 
 	cfg := WebhookServerConfig{
-		DefaultDomain: "backend_engineer",
-		WorkspaceDir:  tempDir,
+		DefaultDomain:  "backend_engineer",
+		WorkspaceDir:   tempDir,
+		AllowedRoots:   []string{tempDir},
+		AllowedRepoIDs: map[string]string{"test-repo": tempDir},
 		PilotStopRuleConfig: pilot.PilotStopRuleConfig{
 			MaxAbortRate: 0.50,
 		},
@@ -1621,7 +1626,7 @@ func TestWebhookServer_PilotStopRule_RefusesJob(t *testing.T) {
 	server := NewWebhookServer(cfg)
 	handler := server.Handler()
 
-	payload := []byte(`{"prompt":"Implement feature","domain":"backend_engineer"}`)
+	payload := []byte(`{"prompt":"Implement feature","domain":"backend_engineer","repoId":"test-repo"}`)
 	req := httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -1725,5 +1730,74 @@ func TestT2_TasksEndpoint_SecurityControls(t *testing.T) {
 		t.Fatalf("expected 400 Bad Request for unallowed repo ID, got %d (%s)", recUnknownRepo.Code, recUnknownRepo.Body.String())
 	}
 }
+
+func TestT2_TasksEndpoint_AcceptanceControls(t *testing.T) {
+	// With a default WebhookServerConfig (token only), POST /tasks with rootDir set to
+	// /root, /var/lib, https://evil.example/x.git, http://169.254.169.254/, ssh://… and ext::sh -c id
+	// returns 400 or 403 for each, and a request without repoId returns 400.
+	cfg := WebhookServerConfig{
+		JobsAuthToken: "token-only",
+	}
+	server := NewWebhookServer(cfg)
+	handler := server.Handler()
+
+	sendPost := func(body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer token-only")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	dangerousRoots := []string{
+		"/root",
+		"/var/lib",
+		"https://evil.example/x.git",
+		"http://169.254.169.254/",
+		"ssh://git@github.com/evil/repo.git",
+		"ext::sh -c id",
+	}
+
+	for _, dr := range dangerousRoots {
+		code := sendPost(fmt.Sprintf(`{"prompt":"test","rootDir":%q}`, dr))
+		if code != http.StatusBadRequest && code != http.StatusForbidden {
+			t.Fatalf("expected 400 or 403 for rootDir=%q with default config, got %d", dr, code)
+		}
+	}
+
+	// Request without repoId returns 400
+	codeNoRepo := sendPost(`{"prompt":"do task"}`)
+	if codeNoRepo != http.StatusBadRequest {
+		t.Fatalf("expected 400 for request without repoId, got %d", codeNoRepo)
+	}
+
+	// A symlink inside an allowed root that points outside it is rejected
+	tmpDir := t.TempDir()
+	outsideDir := t.TempDir()
+	symlinkPath := filepath.Join(tmpDir, "symlink_outside")
+	if err := os.Symlink(outsideDir, symlinkPath); err != nil {
+		t.Skipf("symlink creation not supported: %v", err)
+	}
+
+	serverWithRoots := NewWebhookServer(WebhookServerConfig{
+		JobsAuthToken:  "token-only",
+		AllowedRoots:   []string{tmpDir},
+		AllowedRepoIDs: map[string]string{
+			"bad-symlink": symlinkPath,
+		},
+	})
+	handlerWithRoots := serverWithRoots.Handler()
+
+	reqSymlink := httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{"prompt":"test","repoId":"bad-symlink"}`))
+	reqSymlink.Header.Set("Authorization", "Bearer token-only")
+	reqSymlink.Header.Set("Content-Type", "application/json")
+	recSymlink := httptest.NewRecorder()
+	handlerWithRoots.ServeHTTP(recSymlink, reqSymlink)
+	if recSymlink.Code != http.StatusBadRequest && recSymlink.Code != http.StatusForbidden {
+		t.Fatalf("expected 400 or 403 for symlink pointing outside allowed root, got %d (%s)", recSymlink.Code, recSymlink.Body.String())
+	}
+}
+
 
 

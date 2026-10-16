@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -620,3 +621,24 @@ func TestRunCLI_ACPCommand(t *testing.T) {
 		t.Errorf("expected shutdown response in stdout, got: %s", stdout.String())
 	}
 }
+
+func TestT4_RunCLI_ACP_RejectsRootDirOutsideRepoRoot(t *testing.T) {
+	tmpRepoDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	_ = exec.Command("git", "init", tmpRepoDir).Run()
+
+	req := fmt.Sprintf("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"session/new\",\"params\":{\"rootDir\":%q}}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"shutdown\"}\n", outsideDir)
+	in := strings.NewReader(req)
+	var stdout, stderr bytes.Buffer
+
+	code := RunCLIWithIO(tmpRepoDir, nil, []string{"acp"}, in, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected code 0, got %d, stderr: %s", code, stderr.String())
+	}
+	outStr := stdout.String()
+	if !strings.Contains(outStr, "-32602") || !strings.Contains(outStr, "outside allowed roots") {
+		t.Fatalf("expected session/new to be rejected for rootDir outside repo root, got: %s", outStr)
+	}
+}
+

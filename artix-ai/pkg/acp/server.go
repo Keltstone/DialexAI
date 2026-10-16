@@ -74,24 +74,34 @@ func (s *Server) validateRootDir(path string) (string, error) {
 		return "", fmt.Errorf("invalid rootDir: file:// scheme prohibited")
 	}
 	clean := filepath.Clean(trimmed)
-	if clean == "/" || clean == "/etc" || strings.HasPrefix(clean, "/etc/") || strings.HasPrefix(clean, "/sys") || strings.HasPrefix(clean, "/proc") || strings.HasPrefix(clean, "/dev") {
-		return "", fmt.Errorf("prohibited rootDir %q", clean)
+	evalClean, err := filepath.EvalSymlinks(clean)
+	if err != nil {
+		return "", fmt.Errorf("invalid rootDir %q: %w", clean, err)
 	}
+	clean = filepath.Clean(evalClean)
+
 	s.sessionsMu.RLock()
 	roots := s.allowedRoots
 	s.sessionsMu.RUnlock()
-	if len(roots) > 0 {
-		allowed := false
-		for _, ar := range roots {
-			cleanAR := filepath.Clean(ar)
-			if clean == cleanAR || strings.HasPrefix(clean, cleanAR+string(filepath.Separator)) {
-				allowed = true
-				break
-			}
+	if len(roots) == 0 {
+		return "", fmt.Errorf("prohibited rootDir %q: outside allowed roots", clean)
+	}
+	allowed := false
+	for _, ar := range roots {
+		evalAR, err := filepath.EvalSymlinks(ar)
+		if err != nil {
+			evalAR = filepath.Clean(ar)
+		} else {
+			evalAR = filepath.Clean(evalAR)
 		}
-		if !allowed {
-			return "", fmt.Errorf("rootDir %q outside allowed roots", clean)
+		rel, err := filepath.Rel(evalAR, clean)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			allowed = true
+			break
 		}
+	}
+	if !allowed {
+		return "", fmt.Errorf("prohibited rootDir %q: outside allowed roots", clean)
 	}
 	return clean, nil
 }
@@ -103,6 +113,7 @@ func NewServer(rootDir string, reg *persona.Registry, in io.Reader, out io.Write
 	}
 	return &Server{
 		rootDir:         rootDir,
+		allowedRoots:    []string{rootDir},
 		budget:          coder.LoadBudgetFromEnv(),
 		in:              bufio.NewReader(in),
 		out:             out,
