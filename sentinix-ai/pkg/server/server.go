@@ -5,13 +5,18 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"sentinix/pkg/advisories"
@@ -22,6 +27,7 @@ import (
 	"sentinix/pkg/integrations"
 	"sentinix/pkg/packs"
 	"sentinix/pkg/report"
+	"sentinix/pkg/scheduler"
 	"sentinix/pkg/store"
 )
 
@@ -47,8 +53,10 @@ type App struct {
 	// OnScan is called after a recorded full scan or reviewed PR (integrations hook).
 	OnScan func(ctx context.Context, p store.Project, sc store.Scan, newFindings []store.Finding)
 
-	sem        chan struct{}
-	webhookSem chan struct{}
+	sem         chan struct{}
+	webhookSem  chan struct{}
+	InstanceID  string
+	SyncForTest bool
 }
 
 type principal struct {
@@ -61,6 +69,7 @@ func (a *App) Handler() http.Handler {
 	if a.Workers < 1 {
 		a.Workers = 2
 	}
+	scheduler.OnBaseCacheHit = RecordBaseCacheHit
 	a.sem = make(chan struct{}, a.Workers)
 	a.webhookSem = make(chan struct{}, 32)
 	if a.Store != nil {
@@ -92,6 +101,8 @@ func (a *App) Handler() http.Handler {
 		m.HandleFunc("GET /auth/callback", a.OIDC.Callback)
 	}
 	m.HandleFunc("POST /auth/logout", func(w http.ResponseWriter, _ *http.Request) { a.Sess.Clear(w) })
+	m.HandleFunc("GET /readyz", a.readyz)
+	m.HandleFunc("GET /metrics", a.metrics)
 
 	api := func(perm string, h http.HandlerFunc) http.HandlerFunc { return a.guard(perm, h) }
 	m.HandleFunc("GET /api/me", api("read", a.me))
@@ -315,8 +326,98 @@ func fail(w http.ResponseWriter, err error, code int) {
 	http.Error(w, err.Error(), code)
 }
 
+func (a *App) readyz(w http.ResponseWriter, r *http.Request) {
+	if a.Store != nil && a.Store.DB() != nil {
+		if err := a.Store.DB().PingContext(r.Context()); err != nil {
+			http.Error(w, "not ready: db ping failed", http.StatusServiceUnavailable)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("ready\n"))
+}
+
+var (
+	baseCacheHits      atomic.Int64
+	reviewLatencies    []float64
+	latenciesMu        sync.Mutex
+	failuresTotal      atomic.Int64
+	redactionFallbacks atomic.Int64
+)
+
+func RecordBaseCacheHit() {
+	baseCacheHits.Add(1)
+}
+
+func RecordReviewLatency(d time.Duration) {
+	latenciesMu.Lock()
+	defer latenciesMu.Unlock()
+	reviewLatencies = append(reviewLatencies, d.Seconds())
+}
+
+func (a *App) metrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+
+	latenciesMu.Lock()
+	var p50, p95 float64
+	n := len(reviewLatencies)
+	if n > 0 {
+		sorted := make([]float64, n)
+		copy(sorted, reviewLatencies)
+		sort.Float64s(sorted)
+		p50 = sorted[int(float64(n)*0.5)]
+		p95 = sorted[int(float64(n)*0.95)]
+	}
+	latenciesMu.Unlock()
+
+	var qDepth int
+	if a.Store != nil && a.Store.DB() != nil {
+		row := a.Store.DB().QueryRowContext(r.Context(), "select count(*) from durable_queue where status='pending' or status='running'")
+		_ = row.Scan(&qDepth)
+	}
+
+	fmt.Fprintf(w, "# HELP sentinix_queue_depth Current depth of the scan job queue.\n")
+	fmt.Fprintf(w, "# TYPE sentinix_queue_depth gauge\n")
+	fmt.Fprintf(w, "sentinix_queue_depth %d\n", qDepth)
+
+	fmt.Fprintf(w, "# HELP sentinix_review_latency_seconds_p50 p50 review latency in seconds.\n")
+	fmt.Fprintf(w, "# TYPE sentinix_review_latency_seconds_p50 gauge\n")
+	fmt.Fprintf(w, "sentinix_review_latency_seconds_p50 %f\n", p50)
+
+	fmt.Fprintf(w, "# HELP sentinix_review_latency_seconds_p95 p95 review latency in seconds.\n")
+	fmt.Fprintf(w, "# TYPE sentinix_review_latency_seconds_p95 gauge\n")
+	fmt.Fprintf(w, "sentinix_review_latency_seconds_p95 %f\n", p95)
+
+	fmt.Fprintf(w, "# HELP sentinix_base_cache_hits_total Number of base branch scan cache hits.\n")
+	fmt.Fprintf(w, "# TYPE sentinix_base_cache_hits_total counter\n")
+	fmt.Fprintf(w, "sentinix_base_cache_hits_total %d\n", baseCacheHits.Load())
+
+	fmt.Fprintf(w, "# HELP sentinix_failures_total Failures by cause.\n")
+	fmt.Fprintf(w, "# TYPE sentinix_failures_total counter\n")
+	fmt.Fprintf(w, "sentinix_failures_total %d\n", failuresTotal.Load())
+
+	fmt.Fprintf(w, "# HELP sentinix_redaction_fallback_total Redaction fallback count.\n")
+	fmt.Fprintf(w, "# TYPE sentinix_redaction_fallback_total counter\n")
+	fmt.Fprintf(w, "sentinix_redaction_fallback_total %d\n", redactionFallbacks.Load())
+}
+
+func randID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 // Tick runs scheduled full scans for projects whose cron fires in the current minute. Call once a minute.
 func (a *App) Tick(ctx context.Context, now time.Time) {
+	if a.InstanceID == "" {
+		a.InstanceID = randID()
+	}
+	if a.Store != nil {
+		leader, err := a.Store.TryAcquireLeader(ctx, "cron", a.InstanceID, 30*time.Second)
+		if err != nil || !leader {
+			return // only the leader runs the cron
+		}
+	}
 	ps, err := a.Store.Projects()
 	if err != nil {
 		log.Printf("tick: %v", err)
@@ -332,7 +433,11 @@ func (a *App) Tick(ctx context.Context, now time.Time) {
 			continue
 		}
 		if due {
-			go a.queueFull(ctx, p, "")
+			if a.SyncForTest {
+				a.queueFull(ctx, p, "")
+			} else {
+				go a.queueFull(ctx, p, "")
+			}
 		}
 	}
 }

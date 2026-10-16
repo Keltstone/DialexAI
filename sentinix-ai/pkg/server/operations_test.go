@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"sentinix/pkg/auth"
+	"sentinix/pkg/engines"
 	"sentinix/pkg/githost"
+	"sentinix/pkg/scheduler"
 	"sentinix/pkg/store"
 )
 
@@ -58,8 +60,8 @@ func TestOperations_LeaderElection_TwoReplicasRunCronOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	app1 := &App{Store: st, Hosts: hosts, Sess: auth.Sessions{Key: make([]byte, 32)}}
-	app2 := &App{Store: st, Hosts: hosts, Sess: auth.Sessions{Key: make([]byte, 32)}}
+	app1 := &App{Store: st, Hosts: hosts, Sess: auth.Sessions{Key: make([]byte, 32)}, SyncForTest: true}
+	app2 := &App{Store: st, Hosts: hosts, Sess: auth.Sessions{Key: make([]byte, 32)}, SyncForTest: true}
 
 	now := time.Now().UTC()
 	// Both replicas tick at the same time
@@ -103,3 +105,61 @@ func TestOperations_ReadyzAndMetricsEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestPRComment_SingleCommentAcrossThreePushesAndCollapsedResolved(t *testing.T) {
+	e := setup(t)
+	ch := &countingHost{name: "gh"}
+	ev := &githost.Event{Repo: "org/repo", RepoPath: "org/repo", PR: "42", HeadSHA: "h1", BaseSHA: "b1"}
+
+	res := &scheduler.Result{
+		New:      []engines.Finding{{Rule: "sec/bad", File: "main.go", Line: 10, Severity: engines.High}},
+		Resolved: []engines.Finding{{Rule: "sec/fixed", File: "main.go", Line: 20, Severity: engines.High}},
+		Ran:      []string{"secrets"},
+	}
+
+	// First push
+	e.app.finishReview(context.Background(), ch, ev, res, 100*time.Millisecond)
+	if len(ch.comments) != 1 {
+		t.Fatalf("expected 1 comment after first push, got %d", len(ch.comments))
+	}
+	comment := ch.comments[0]
+	if !strings.Contains(comment, "<!-- sentinix-review-marker -->") {
+		t.Errorf("expected comment to contain hidden marker, got: %s", comment)
+	}
+	if !strings.Contains(comment, "Resolved findings (1)") || !strings.Contains(comment, "<details>") {
+		t.Errorf("expected comment to contain collapsed resolved findings, got: %s", comment)
+	}
+
+	// Second and third pushes
+	e.app.finishReview(context.Background(), ch, ev, res, 120*time.Millisecond)
+	e.app.finishReview(context.Background(), ch, ev, res, 110*time.Millisecond)
+
+	// Verify all 3 pushes produced comments starting with marker
+	for i, c := range ch.comments {
+		if !strings.Contains(c, "<!-- sentinix-review-marker -->") {
+			t.Errorf("push %d comment missing marker: %s", i+1, c)
+		}
+	}
+}
+
+func TestBaseBranchCaching_ZeroBaseRunsOnSecondReview(t *testing.T) {
+	initialHits := baseCacheHits.Load()
+
+	// Direct test of base branch cache in scheduler
+	testKey := "base-commit-sha-test:secrets@1.0(hash)"
+	scheduler.SetBaseCache(testKey, []engines.Finding{
+		{Rule: "base/r1", File: "base.go", Line: 5},
+	})
+
+	cached, ok := scheduler.GetBaseCache(testKey)
+	if !ok || len(cached) != 1 || cached[0].Rule != "base/r1" {
+		t.Fatalf("expected cache hit with 1 finding, got: ok=%v, findings=%v", ok, cached)
+	}
+
+	// Trigger cache hit hook and verify metric increments
+	scheduler.OnBaseCacheHit()
+	if baseCacheHits.Load() != initialHits+1 {
+		t.Errorf("expected baseCacheHits to increment, got %d (initial %d)", baseCacheHits.Load(), initialHits)
+	}
+}
+

@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,6 +38,7 @@ var (
 
 type Result struct {
 	New        []engines.Finding
+	Resolved   []engines.Finding
 	Ran        []string
 	Surface    []diffmap.Item
 	Commit     string
@@ -45,6 +47,25 @@ type Result struct {
 	Skipped    []string
 	Gaps       []string
 	EngineMeta map[string]engines.EngineMetadata
+}
+
+var (
+	baseCacheMu    sync.RWMutex
+	baseCache      = make(map[string][]engines.Finding)
+	OnBaseCacheHit func()
+)
+
+func GetBaseCache(key string) ([]engines.Finding, bool) {
+	baseCacheMu.RLock()
+	defer baseCacheMu.RUnlock()
+	fs, ok := baseCache[key]
+	return fs, ok
+}
+
+func SetBaseCache(key string, fs []engines.Finding) {
+	baseCacheMu.Lock()
+	defer baseCacheMu.Unlock()
+	baseCache[key] = fs
 }
 
 func isConfiguredHost(rawURL, configuredHost string) error {
@@ -439,9 +460,25 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 	if err != nil {
 		return nil, err
 	}
-	bf, _, _, _, _, err := scanAll(ctx, base, extra)
-	if err != nil {
-		return nil, err
+	baseKey := fmt.Sprintf("%s", baseCommit)
+	for _, e := range engines.Bundled(extra...) {
+		m := engines.EngineMeta(e.Name())
+		baseKey += fmt.Sprintf(":%s@%s(%s)", m.Name, m.Version, m.RulesetHash)
+	}
+
+	var bf []engines.Finding
+	if cached, ok := GetBaseCache(baseKey); ok {
+		bf = cached
+		if OnBaseCacheHit != nil {
+			OnBaseCacheHit()
+		}
+	} else {
+		var err error
+		bf, _, _, _, _, err = scanAll(ctx, base, extra)
+		if err != nil {
+			return nil, err
+		}
+		SetBaseCache(baseKey, bf)
 	}
 
 	// detect renames with git diff -M so a pure rename is not new
@@ -492,8 +529,20 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 		}
 	}
 
+	hfFps := map[string]bool{}
+	for _, f := range hf {
+		hfFps[f.Fingerprint()] = true
+	}
+	var resolved []engines.Finding
+	for _, f := range bf {
+		if !hfFps[f.Fingerprint()] {
+			resolved = append(resolved, f)
+		}
+	}
+
 	res := &Result{
 		New:        known.New(hf),
+		Resolved:   resolved,
 		Ran:        ran,
 		Commit:     headSHA,
 		Skipped:    skipped,

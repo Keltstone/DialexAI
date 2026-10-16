@@ -225,6 +225,7 @@ func (a *App) finishReview(ctx context.Context, h githost.Host, ev *githost.Even
 		shown = shown[:50]
 	}
 	var buf bytes.Buffer
+	buf.WriteString("<!-- sentinix-review-marker -->\n")
 	buf.WriteString("### Sentinix\n")
 	if blocking {
 		fmt.Fprintf(&buf, "Merge is blocked by new findings at **%s** or above.\n", threshold)
@@ -237,7 +238,14 @@ func (a *App) finishReview(ctx context.Context, h githost.Host, ev *githost.Even
 	if len(res.New) > 50 {
 		fmt.Fprintf(&buf, "%d more not shown.\n", len(res.New)-50)
 	}
-	// ponytail: posts a new comment per push; add find-and-update when it gets noisy.
+	if len(res.Resolved) > 0 {
+		fmt.Fprintf(&buf, "\n<details><summary>Resolved findings (%d)</summary>\n\n", len(res.Resolved))
+		for _, f := range res.Resolved {
+			fmt.Fprintf(&buf, "- ~%s~ in `%s:%d`\n", report.SanitizeField(f.Rule), report.SanitizeField(f.File), f.Line)
+		}
+		buf.WriteString("</details>\n")
+	}
+	RecordReviewLatency(dur)
 	if err := h.Comment(ctx, ev, buf.String()); err != nil {
 		log.Printf("%s: comment: %v", h.Name(), err)
 	}
@@ -330,6 +338,13 @@ func (a *App) finishReview(ctx context.Context, h githost.Host, ev *githost.Even
 
 // queueFull runs a full scan of a project's branch (or the given one) and records it.
 func (a *App) queueFull(ctx context.Context, p store.Project, branch string) {
+	if a.sem == nil {
+		workers := a.Workers
+		if workers <= 0 {
+			workers = 2
+		}
+		a.sem = make(chan struct{}, workers)
+	}
 	a.sem <- struct{}{}
 	defer func() { <-a.sem }()
 	if branch == "" {
