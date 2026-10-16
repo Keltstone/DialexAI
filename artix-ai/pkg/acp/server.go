@@ -14,6 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"artix/pkg/audit"
+	"artix/pkg/coder"
+	"artix/pkg/git"
 	"artix/pkg/persona"
 	"artix/pkg/repo"
 	"artix/pkg/reviewer"
@@ -25,6 +28,8 @@ var sessionCounter uint64
 // Server implements the Agent Communication Protocol (ACP) standard JSON-RPC 2.0 server.
 type Server struct {
 	rootDir         string
+	allowedRoots    []string
+	budget          *coder.TokenBudget
 	in              *bufio.Reader
 	out             io.Writer
 	outMu           sync.Mutex
@@ -41,7 +46,54 @@ type sessionState struct {
 	id        string
 	rootDir   string
 	domain    string
+	maxTokens int
+	maxUSD    float64
 	createdAt time.Time
+}
+
+// SetAllowedRoots configures allowed workspace directory roots.
+func (s *Server) SetAllowedRoots(roots []string) {
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	s.allowedRoots = roots
+}
+
+// SetBudget configures the token budget for planning and reviews.
+func (s *Server) SetBudget(b *coder.TokenBudget) {
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	s.budget = b
+}
+
+func (s *Server) validateRootDir(path string) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		trimmed = s.rootDir
+	}
+	if strings.HasPrefix(strings.ToLower(trimmed), "file:") {
+		return "", fmt.Errorf("invalid rootDir: file:// scheme prohibited")
+	}
+	clean := filepath.Clean(trimmed)
+	if clean == "/" || clean == "/etc" || strings.HasPrefix(clean, "/etc/") || strings.HasPrefix(clean, "/sys") || strings.HasPrefix(clean, "/proc") || strings.HasPrefix(clean, "/dev") {
+		return "", fmt.Errorf("prohibited rootDir %q", clean)
+	}
+	s.sessionsMu.RLock()
+	roots := s.allowedRoots
+	s.sessionsMu.RUnlock()
+	if len(roots) > 0 {
+		allowed := false
+		for _, ar := range roots {
+			cleanAR := filepath.Clean(ar)
+			if clean == cleanAR || strings.HasPrefix(clean, cleanAR+string(filepath.Separator)) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return "", fmt.Errorf("rootDir %q outside allowed roots", clean)
+		}
+	}
+	return clean, nil
 }
 
 // NewServer initializes an ACP server for standard I/O communication.
@@ -51,6 +103,7 @@ func NewServer(rootDir string, reg *persona.Registry, in io.Reader, out io.Write
 	}
 	return &Server{
 		rootDir:         rootDir,
+		budget:          coder.LoadBudgetFromEnv(),
 		in:              bufio.NewReader(in),
 		out:             out,
 		registry:        reg,
@@ -239,14 +292,19 @@ func (s *Server) handleRequest(req *Request) {
 			_ = json.Unmarshal(req.Params, &params)
 		}
 
-		sessionID := params.SessionID
-		if sessionID == "" {
-			sessionID = fmt.Sprintf("acp-sess-%d-%d", time.Now().Unix(), atomic.AddUint64(&sessionCounter, 1))
-		}
-
 		root := params.RootDir
 		if root == "" {
 			root = s.rootDir
+		}
+		validatedRoot, err := s.validateRootDir(root)
+		if err != nil {
+			s.sendError(req.ID, -32602, err.Error(), nil)
+			return
+		}
+
+		sessionID := params.SessionID
+		if sessionID == "" {
+			sessionID = fmt.Sprintf("acp-sess-%d-%d", time.Now().Unix(), atomic.AddUint64(&sessionCounter, 1))
 		}
 
 		domain := params.Domain
@@ -257,8 +315,10 @@ func (s *Server) handleRequest(req *Request) {
 		s.sessionsMu.Lock()
 		s.sessions[sessionID] = &sessionState{
 			id:        sessionID,
-			rootDir:   root,
+			rootDir:   validatedRoot,
 			domain:    domain,
+			maxTokens: params.MaxTokens,
+			maxUSD:    params.MaxUSD,
 			createdAt: time.Now(),
 		}
 		s.sessionsMu.Unlock()
@@ -286,6 +346,13 @@ func (s *Server) handleRequest(req *Request) {
 			s.sendError(req.ID, -32602, fmt.Sprintf("Session %q not found", params.SessionID), nil)
 			return
 		}
+
+		validatedRoot, err := s.validateRootDir(sess.rootDir)
+		if err != nil {
+			s.sendError(req.ID, -32602, err.Error(), nil)
+			return
+		}
+		sess.rootDir = validatedRoot
 
 		ctx, cancel := context.WithCancel(context.Background())
 		s.inFlightMu.Lock()
@@ -346,6 +413,37 @@ func (s *Server) handleRequest(req *Request) {
 	}
 }
 
+func (s *Server) resolveBudget(sess *sessionState, params SessionPromptParams) *coder.TokenBudget {
+	s.sessionsMu.RLock()
+	b := s.budget
+	s.sessionsMu.RUnlock()
+	if b == nil {
+		b = coder.LoadBudgetFromEnv()
+	}
+	maxTokens := params.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = sess.maxTokens
+	}
+	maxUSD := params.MaxUSD
+	if maxUSD <= 0 {
+		maxUSD = sess.maxUSD
+	}
+	if b == nil && (maxTokens > 0 || maxUSD > 0) {
+		b = &coder.TokenBudget{
+			MaxStoryTokens: maxTokens,
+			MaxStoryCost:   maxUSD,
+		}
+	} else if b != nil {
+		if maxTokens > 0 {
+			b.MaxStoryTokens = maxTokens
+		}
+		if maxUSD > 0 {
+			b.MaxStoryCost = maxUSD
+		}
+	}
+	return b
+}
+
 func (s *Server) handlePlanPrompt(ctx context.Context, reqID any, sess *sessionState, params SessionPromptParams) {
 	s.sendNotification("session/progress", SessionProgressNotification{
 		SessionID: sess.id,
@@ -354,6 +452,22 @@ func (s *Server) handlePlanPrompt(ctx context.Context, reqID any, sess *sessionS
 		Message:   fmt.Sprintf("Starting deliberation on story: %s", params.Prompt),
 		Timestamp: time.Now().UTC(),
 	})
+
+	b := s.resolveBudget(sess, params)
+	if b != nil {
+		if exhausted, reason := b.CheckExhaustion(); exhausted {
+			_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+				EventType: audit.EventBudgetExhausted,
+				Status:    "FAILED",
+				Details: map[string]any{
+					"reason":  reason,
+					"context": "acp.plan",
+				},
+			})
+			s.sendError(reqID, -32000, fmt.Sprintf("budget exhausted: %s", reason), nil)
+			return
+		}
+	}
 
 	council := spec.NewCouncil(s.registry)
 
@@ -379,6 +493,14 @@ func (s *Server) handlePlanPrompt(ctx context.Context, reqID any, sess *sessionS
 
 	storySpec, err := council.Plan(ctx, pCtx)
 	if err != nil {
+		_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+			EventType: audit.EventSpecDeliberation,
+			Status:    "FAILED",
+			Details: map[string]any{
+				"error":  err.Error(),
+				"prompt": params.Prompt,
+			},
+		})
 		s.sendError(reqID, -32000, "Planning failed", err.Error())
 		return
 	}
@@ -386,13 +508,49 @@ func (s *Server) handlePlanPrompt(ctx context.Context, reqID any, sess *sessionS
 	specsDir := filepath.Join(sess.rootDir, "docs", "specs")
 	specPath, _, _ := spec.WriteSpecWithProvenance(specsDir, storySpec, nil)
 
+	approved := err == nil && storySpec != nil && len(storySpec.AcceptanceCriteria) > 0
+
+	usedTokens := coder.EstimateTokens(params.Prompt) + coder.EstimateTokens(fmt.Sprintf("%+v", storySpec))
+	var costUSD float64
+	if b != nil {
+		price, _ := b.GetModelPrice(params.Model)
+		costUSD = (float64(usedTokens) / 1000.0) * price
+		b.RecordRoundUsage(usedTokens, costUSD)
+	}
+
+	_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+		EventType: audit.EventSpecDeliberation,
+		Status:    "SUCCESS",
+		Cost:      costUSD,
+		Details: map[string]any{
+			"tokens":    usedTokens,
+			"specId":    storySpec.ID,
+			"title":     storySpec.Title,
+			"scenarios": len(storySpec.AcceptanceCriteria),
+			"approved":  approved,
+		},
+	})
+
+	if b != nil {
+		if exhausted, reason := b.CheckExhaustion(); exhausted {
+			_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+				EventType: audit.EventBudgetExhausted,
+				Status:    "FAILED",
+				Details: map[string]any{
+					"reason":  reason,
+					"context": "acp.plan",
+				},
+			})
+		}
+	}
+
 	s.sendResponse(reqID, SessionPromptResult{
 		SessionID: sess.id,
 		Status:    "completed",
 		SpecID:    storySpec.ID,
 		Summary:   fmt.Sprintf("Spec %s: %s (%d scenarios)", storySpec.ID, storySpec.Title, len(storySpec.AcceptanceCriteria)),
 		Output:    specPath,
-		Approved:  true,
+		Approved:  approved,
 	})
 }
 
@@ -405,15 +563,99 @@ func (s *Server) handleReviewPrompt(ctx context.Context, reqID any, sess *sessio
 		Timestamp: time.Now().UTC(),
 	})
 
+	b := s.resolveBudget(sess, params)
+	if b != nil {
+		if exhausted, reason := b.CheckExhaustion(); exhausted {
+			_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+				EventType: audit.EventBudgetExhausted,
+				Status:    "FAILED",
+				Details: map[string]any{
+					"reason":  reason,
+					"context": "acp.review",
+				},
+			})
+			s.sendError(reqID, -32000, fmt.Sprintf("budget exhausted: %s", reason), nil)
+			return
+		}
+	}
+
+	// Read diff from git
+	gDriver := git.NewDriver(sess.rootDir)
+	diff, _ := gDriver.Diff(false)
+	if strings.TrimSpace(diff) == "" {
+		stagedDiff, _ := gDriver.Diff(true)
+		diff = stagedDiff
+	}
+
+	// Empty-diff reviews are not approved!
+	if strings.TrimSpace(diff) == "" {
+		verdictSummary := "empty diff: no changes found to review"
+		_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+			EventType: audit.EventReviewerVerdict,
+			Status:    "REJECTED",
+			Details: map[string]any{
+				"summary":        verdictSummary,
+				"blockingIssues": []string{"Workspace diff is empty; no code changes were produced."},
+				"approved":       false,
+			},
+		})
+		s.sendResponse(reqID, SessionPromptResult{
+			SessionID: sess.id,
+			Status:    "REJECTED",
+			Summary:   verdictSummary,
+			Approved:  false,
+		})
+		return
+	}
+
 	advReviewer := reviewer.NewAdversarialReviewer(s.registry)
 	testCount := reviewer.CountTestsInWorkspace(sess.rootDir)
 	rCtx := &reviewer.ReviewContext{
 		WorkspaceDir:    sess.rootDir,
+		Diff:            diff,
 		TestCountBefore: testCount,
 		TestCountAfter:  testCount,
 	}
 
 	verdict := advReviewer.Evaluate(rCtx)
+
+	reviewTokens := coder.EstimateTokens(diff)
+	var costUSD float64
+	if b != nil {
+		price, _ := b.GetModelPrice(params.Model)
+		costUSD = (float64(reviewTokens) / 1000.0) * price
+		b.RecordRoundUsage(reviewTokens, costUSD)
+	}
+
+	status := "SUCCESS"
+	if !verdict.Approved {
+		status = "REJECTED"
+	}
+	_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+		EventType: audit.EventReviewerVerdict,
+		Status:    status,
+		Cost:      costUSD,
+		Details: map[string]any{
+			"tokens":         reviewTokens,
+			"summary":        verdict.Summary,
+			"blockingIssues": verdict.BlockingIssues,
+			"warnings":       verdict.Warnings,
+			"approved":       verdict.Approved,
+		},
+	})
+
+	if b != nil {
+		if exhausted, reason := b.CheckExhaustion(); exhausted {
+			_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+				EventType: audit.EventBudgetExhausted,
+				Status:    "FAILED",
+				Details: map[string]any{
+					"reason":  reason,
+					"context": "acp.review",
+				},
+			})
+		}
+	}
 
 	s.sendResponse(reqID, SessionPromptResult{
 		SessionID: sess.id,

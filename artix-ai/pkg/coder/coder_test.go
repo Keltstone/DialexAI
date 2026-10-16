@@ -2282,7 +2282,6 @@ func TestLoop_RealABEvalHarness_AutoDemotesHarmfulKI_WithoutSuppliedRunner(t *te
 					}
 				}
 			}
-
 			if hasHarmfulKI {
 				if req.Round == 1 {
 					return "diff --git a/counter.txt b/counter.txt\n--- a/counter.txt\n+++ b/counter.txt\n@@ -1 +1 @@\n-0\n+STILL_WAITING\n", nil
@@ -2441,6 +2440,94 @@ func TestIOSPersonaPrompt_NoticeOnUnsupportedHosts(t *testing.T) {
 		t.Fatalf("expected iOS persona prompt on unsupported host to contain 'could not be compiled', got:\n%s", sysPrompt)
 	}
 }
+
+func TestT3_ABEval_SubRuns_ForcedSupervised_NoForgeOrPush_TaggedEvalInAudit(t *testing.T) {
+	tempDir, driver := setupTestRepo(t)
+	defer os.RemoveAll(tempDir)
+
+	repoCtx := &repo.RepositoryContext{RootDir: tempDir}
+	kStore := knowledge.NewStore(tempDir)
+
+	candidateKI := &knowledge.KnowledgeItem{
+		ID:           "ki-eval-audit-tag-01",
+		Title:        "Audit Tagged Learning",
+		Category:     knowledge.CategoryArchitecture,
+		Breakthrough: "Verify eval=true tag in audit",
+		Status:       "active",
+		ApprovedBy:   "lead-engineer",
+	}
+	if err := kStore.Save(candidateKI); err != nil {
+		t.Fatalf("failed to save candidate KI: %v", err)
+	}
+
+	reg := persona.NewRegistry("")
+	coderObj, _ := NewDomainCoder("backend_engineer", reg)
+	rev := newTestReviewer(reg)
+	rev.SetCritic(func(ctx context.Context, prompt string) (string, error) {
+		return `{"approved":true,"blocking":[],"warnings":[]}`, nil
+	})
+	box := sandbox.NewSandbox(tempDir)
+	coord := NewCoordinator(coderObj, rev, driver, box)
+
+	storySpec := &spec.StorySpec{
+		ID:           "SPEC-EVAL-AUDIT-01",
+		Title:        "Audit Eval Tag Test",
+		TestCommands: []string{"grep '1' counter.txt"},
+	}
+
+	opts := &LoopOptions{
+		MaxRounds:             3,
+		TriggerABEval:         true,
+		ABEvalInterval:        1,
+		TestCommandsConfirmed: true,
+		Autonomy:              AutonomySupervised,
+		ForgeApproval:         &policy.PRApproval{ApproverUsername: "reviewer-1"},
+		ForgeVerifier: func(ctx context.Context, commitSHA string) (*policy.PRApproval, error) {
+			return &policy.PRApproval{ApproverUsername: "reviewer-1"}, nil
+		},
+		ForgePusher: func(ctx context.Context, commitSHA string) error {
+			return nil
+		},
+		MockPatchGen: func(round int, feedback string) string {
+			return "diff --git a/counter.txt b/counter.txt\n--- a/counter.txt\n+++ b/counter.txt\n@@ -1 +1 @@\n-0\n+1\n"
+		},
+		ABEvalRunner: func(ctx context.Context, item any) (int, bool, error) {
+			// Sub-run executed with audit tagged eval=true
+			subLogger := audit.Default(tempDir)
+			subLogger.SetEval(true)
+			_ = subLogger.Emit(audit.AuditEvent{
+				EventType: audit.EventCodeConvergence,
+				Status:    "SUCCESS",
+				Details: map[string]any{
+					"storyId": storySpec.ID,
+				},
+			})
+			return 1, true, nil
+		},
+	}
+
+	res := coord.Run(context.Background(), storySpec, repoCtx, nil, nil, opts)
+	if !res.Success {
+		t.Fatalf("expected coordinator run to succeed, got: %+v", res)
+	}
+
+	// Verify that audit log records contain events with eval: true
+	events, err := audit.Default(tempDir).ReadEvents()
+	if err != nil {
+		t.Fatalf("failed to read audit events: %v", err)
+	}
+	foundEvalEvent := false
+	for _, e := range events {
+		if e.Eval || (e.Details != nil && e.Details["eval"] == true) {
+			foundEvalEvent = true
+			break
+		}
+	}
+	if !foundEvalEvent {
+		t.Fatalf("SECURITY/GOVERNANCE VIOLATION: expected sub-run audit events tagged eval=true, but none found!")
+	}
+}
+
 
 
 

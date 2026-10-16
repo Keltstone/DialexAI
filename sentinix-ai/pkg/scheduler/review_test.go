@@ -4,12 +4,49 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"sentinix/pkg/githost"
 )
 
+func init() {
+	AllowLocalForTest = true
+}
+
+
+func TestHostPinning_RejectsInsecureSchemesAndCredentials(t *testing.T) {
+	// Without AllowLocalForTest, test that insecure schemes and credentials are rejected
+	AllowLocalForTest = false
+	defer func() { AllowLocalForTest = true }()
+
+	tests := []struct {
+		url     string
+		wantErr string
+	}{
+		{"file:///etc/passwd", "unsupported clone URL scheme"},
+		{"ssh://git@github.com/org/repo.git", "unsupported clone URL scheme"},
+		{"ext::sh -c 'echo pwned'", "invalid clone URL"},
+		{"/var/tmp/repo", "invalid clone URL"},
+		{"https://user:password@github.com/org/repo.git", "credentials in clone URL are forbidden"},
+		{"http://github.com/org/repo.git", "unsupported clone URL scheme"},
+	}
+
+	for _, tt := range tests {
+		err := isConfiguredHost(tt.url, "github.com")
+		if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+			t.Errorf("url %q: expected error containing %q, got: %v", tt.url, tt.wantErr, err)
+		}
+	}
+
+	// Valid https URL matching host should succeed
+	if err := isConfiguredHost("https://github.com/org/repo.git", "github.com"); err != nil {
+		t.Errorf("expected valid https URL to pass, got: %v", err)
+	}
+}
+
 func TestReviewReportsOnlyNew(t *testing.T) {
+
 	d := t.TempDir()
 	run := func(args ...string) {
 		c := exec.Command("git", append([]string{"-C", d, "-c", "user.name=t", "-c", "user.email=t@example.test"}, args...)...)

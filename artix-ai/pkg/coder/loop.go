@@ -323,6 +323,10 @@ func (c *ConvergenceCoordinator) Run(
 		}
 	}
 
+	if opts != nil && opts.AuditEval {
+		auditLogger.SetEval(true)
+	}
+
 	if opts != nil && opts.StreamEmitter != nil {
 		opts.StreamEmitter.Emit(StreamEvent{
 			Type:      EventWorktreeProvisioned,
@@ -1304,6 +1308,7 @@ func (c *ConvergenceCoordinator) Run(
 							subOpts.ForgeVerifier = nil
 							subOpts.ForgePusher = nil
 							subOpts.AuditEval = true
+							subOpts.TestCommandsConfirmed = true
 
 							if item == nil {
 								// Baseline run: exclude target KI from KnowledgeItems

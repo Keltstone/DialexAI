@@ -2,10 +2,12 @@
 package engines
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -77,6 +79,77 @@ type Engine interface {
 }
 
 // Bundled returns the built-in engine plus external engines found on PATH.
+var ErrEngineUnavailable = errors.New("ENGINE_UNAVAILABLE")
+
+type EngineMetadata struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	RulesetHash string `json:"ruleset_hash"`
+	Status      string `json:"status"` // "active", "ENGINE_UNAVAILABLE"
+}
+
+func resolveSemgrepConfig() (string, bool) {
+	if cfg := os.Getenv("SENTINIX_SEMGREP_CONFIG"); cfg != "" {
+		if _, err := os.Stat(cfg); err == nil {
+			return cfg, true
+		}
+	}
+	if _, err := os.Stat("/rules"); err == nil {
+		return "/rules", true
+	}
+	for _, p := range []string{"rules/default.yml", "../rules/default.yml", "../../rules/default.yml"} {
+		if _, err := os.Stat(p); err == nil {
+			if abs, err := filepath.Abs(p); err == nil {
+				return abs, true
+			}
+			return p, true
+		}
+	}
+	return "", false
+}
+
+func EngineMeta(name string) EngineMetadata {
+	switch name {
+	case "secrets":
+		h := sha256.Sum256([]byte(GitleaksRulesVersion))
+		return EngineMetadata{Name: "secrets", Version: GitleaksRulesVersion, RulesetHash: hex.EncodeToString(h[:8]), Status: "active"}
+	case "packs":
+		return EngineMetadata{Name: "packs", Version: "1.0.0", RulesetHash: "builtin", Status: "active"}
+	case "semgrep":
+		cfg, ok := resolveSemgrepConfig()
+		if !ok {
+			return EngineMetadata{Name: "semgrep", Version: "unknown", RulesetHash: "none", Status: "ENGINE_UNAVAILABLE"}
+		}
+		var hashStr string
+		if b, err := os.ReadFile(cfg); err == nil {
+			h := sha256.Sum256(b)
+			hashStr = hex.EncodeToString(h[:8])
+		} else {
+			hashStr = "rules"
+		}
+		ver := "unknown"
+		if out, err := exec.Command("semgrep", "--version").Output(); err == nil {
+			ver = strings.TrimSpace(string(out))
+		}
+		return EngineMetadata{Name: "semgrep", Version: ver, RulesetHash: hashStr, Status: "active"}
+	case "gitleaks":
+		ver := "unknown"
+		if out, err := exec.Command("gitleaks", "version").Output(); err == nil {
+			ver = strings.TrimSpace(string(out))
+		}
+		return EngineMetadata{Name: "gitleaks", Version: ver, RulesetHash: "default", Status: "active"}
+	case "osv-scanner":
+		ver := "unknown"
+		if out, err := exec.Command("osv-scanner", "--version").Output(); err == nil {
+			ver = strings.TrimSpace(string(out))
+		}
+		return EngineMetadata{Name: "osv-scanner", Version: ver, RulesetHash: "default", Status: "active"}
+	default:
+		return EngineMetadata{Name: name, Version: "1.0.0", RulesetHash: "default", Status: "active"}
+	}
+}
+
+// Bundled returns the built-in engine plus external engines found on PATH.
 // Missing binaries are skipped; the report's coverage line says what ran.
 func Bundled(extra ...Engine) []Engine {
 	hasSecrets := false
@@ -95,18 +168,15 @@ func Bundled(extra ...Engine) []Engine {
 	if !hasSecrets {
 		es = append([]Engine{Secrets{SkippedFiles: new([]string)}}, es...)
 	}
-	semgrepCfg := os.Getenv("SENTINIX_SEMGREP_CONFIG") // inside a sandbox point at rules baked into the image (/rules)
-	if semgrepCfg == "" {
-		semgrepCfg = "/rules"
-	}
+	semgrepCfg, semgrepHasConfig := resolveSemgrepConfig()
 	osvCfg := os.Getenv("SENTINIX_OSV_CONFIG")
 	if osvCfg == "" {
 		osvCfg = "/dev/null"
 	}
 	for _, e := range []External{
-		{"semgrep", []string{"scan", "--config", semgrepCfg, "--sarif", "--quiet", "--no-git-ignore", "--disable-nosem"}, nil},
-		{"gitleaks", []string{"detect", "--no-git", "--report-format", "sarif", "--report-path", "/dev/stdout", "--no-banner", "--ignore-gitleaks-allow", "-s"}, nil},
-		{"osv-scanner", []string{"--format", "sarif", "-r", "--config", osvCfg}, nil},
+		{"semgrep", []string{"scan", "--config", semgrepCfg, "--sarif", "--quiet", "--no-git-ignore", "--disable-nosem"}, nil, !semgrepHasConfig},
+		{"gitleaks", []string{"detect", "--no-git", "--report-format", "sarif", "--report-path", "-", "--no-banner", "--ignore-gitleaks-allow", "-s"}, nil, false},
+		{"osv-scanner", []string{"--format", "sarif", "-r", "--config", osvCfg}, nil, false},
 	} {
 		// in a sandbox the binaries live in the image, not on the host
 		if _, err := exec.LookPath(e.Bin); err == nil || Sandbox != nil {
@@ -117,14 +187,14 @@ func Bundled(extra ...Engine) []Engine {
 }
 
 // Sandbox, when set, builds the command that runs an external engine inside a container (see package sandbox).
-// ponytail: package-level switch set once at startup; make it a per-engine option if scans ever differ.
 var Sandbox func(root, bin string, args []string) *exec.Cmd
 
 // External wraps a binary that emits SARIF on stdout. Root is appended last.
 type External struct {
-	Bin     string
-	Args    []string
-	Context context.Context
+	Bin         string
+	Args        []string
+	Context     context.Context
+	Unavailable bool
 }
 
 func (e External) Name() string { return e.Bin }
@@ -133,52 +203,94 @@ func (e External) Scan(ctx context.Context, root string) ([]Finding, error) {
 	return e.ScanContext(ctx, root)
 }
 
-func (e External) ScanContext(ctx context.Context, root string) ([]Finding, error) {
-	// Ignore in-repo .semgrepignore, .gitleaks.toml, .gitleaksignore, osv-scanner.toml by temporarily isolating them recursively
+func copyTreeForScan(src, dst string) error {
 	inRepoIgnores := map[string]bool{
 		".semgrepignore":   true,
 		".gitleaks.toml":   true,
 		".gitleaksignore":  true,
 		"osv-scanner.toml": true,
 	}
-	var restores []func()
-	_ = filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+	return filepath.Walk(src, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
-		if !fi.IsDir() && inRepoIgnores[fi.Name()] {
-			tmp := p + ".sentinix-isolated"
-			if err := os.Rename(p, tmp); err == nil {
-				restores = append(restores, func() {
-					_ = os.Rename(tmp, p)
-				})
+		rel, err := filepath.Rel(src, p)
+		if err != nil || rel == "." {
+			return nil
+		}
+		target := filepath.Join(dst, rel)
+		if fi.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		if inRepoIgnores[fi.Name()] {
+			return nil
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			linkTarget, err := os.Readlink(p)
+			if err != nil {
+				return nil
 			}
+			if filepath.IsAbs(linkTarget) || strings.HasPrefix(linkTarget, "..") {
+				return nil
+			}
+			return os.Symlink(linkTarget, target)
 		}
-		return nil
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		return os.WriteFile(target, data, fi.Mode())
 	})
-	defer func() {
-		for i := len(restores) - 1; i >= 0; i-- {
-			restores[i]()
-		}
-	}()
+}
+
+func (e External) ScanContext(ctx context.Context, root string) ([]Finding, error) {
+	if e.Unavailable {
+		return nil, fmt.Errorf("%w: %s has no configuration", ErrEngineUnavailable, e.Bin)
+	}
+
+	isoDir, err := os.MkdirTemp("", "sentinix-isolated-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(isoDir)
+
+	if err := copyTreeForScan(root, isoDir); err != nil {
+		return nil, err
+	}
 
 	var cmd *exec.Cmd
 	if Sandbox != nil {
-		scmd := Sandbox(root, e.Bin, e.Args)
+		scmd := Sandbox(isoDir, e.Bin, e.Args)
 		cmd = exec.CommandContext(ctx, scmd.Path, scmd.Args[1:]...)
 		cmd.Env = scmd.Env
 		cmd.Dir = scmd.Dir
 	} else {
-		cmd = exec.CommandContext(ctx, e.Bin, append(append([]string{}, e.Args...), root)...)
+		cmd = exec.CommandContext(ctx, e.Bin, append(append([]string{}, e.Args...), isoDir)...)
 		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")} // no server tokens in scan processes
 	}
 	cmd.WaitDelay = 200 * time.Millisecond
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if len(out) == 0 && err != nil { // scanners exit non-zero when they find things
+		if e.Bin == "osv-scanner" && (strings.Contains(stderr.String(), "No package sources found") || strings.Contains(err.Error(), "128")) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("%s: %w", e.Bin, err)
 	}
-	return ParseSARIF(e.Bin, out)
+	fs, err := ParseSARIF(e.Bin, out)
+	if err != nil {
+		return nil, err
+	}
+	for i := range fs {
+		cleanFile := strings.TrimPrefix(fs[i].File, "file://")
+		cleanFile = strings.TrimPrefix(cleanFile, isoDir)
+		cleanFile = strings.TrimPrefix(cleanFile, "/")
+		fs[i].File = cleanFile
+	}
+	return fs, nil
 }
+
 
 func ParseSARIF(engine string, data []byte) ([]Finding, error) {
 	type notification struct {

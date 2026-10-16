@@ -59,9 +59,9 @@ func TestExternalScan_IsolatesInRepoSuppressionConfigsRecursively(t *testing.T) 
 func TestExternalBundledFlags(t *testing.T) {
 	// Test that external engines include the required flags
 	exts := []External{
-		{"semgrep", []string{"scan", "--config", "/rules", "--sarif", "--quiet", "--no-git-ignore", "--disable-nosem"}, nil},
-		{"gitleaks", []string{"detect", "--no-git", "--report-format", "sarif", "--report-path", "/dev/stdout", "--no-banner", "--ignore-gitleaks-allow", "-s"}, nil},
-		{"osv-scanner", []string{"--format", "sarif", "-r", "--config", "/dev/null"}, nil},
+		{Bin: "semgrep", Args: []string{"scan", "--config", "/rules", "--sarif", "--quiet", "--no-git-ignore", "--disable-nosem"}},
+		{Bin: "gitleaks", Args: []string{"detect", "--no-git", "--report-format", "sarif", "--report-path", "-", "--no-banner", "--ignore-gitleaks-allow", "-s"}},
+		{Bin: "osv-scanner", Args: []string{"--format", "sarif", "-r", "--config", "/dev/null"}},
 	}
 	for _, e := range exts {
 		argsStr := strings.Join(e.Args, " ")
