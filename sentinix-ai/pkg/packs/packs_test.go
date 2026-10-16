@@ -35,11 +35,11 @@ func TestEngineDetectsStackAndScans(t *testing.T) {
 	os.MkdirAll(filepath.Join(d, "app"), 0o755)
 	os.WriteFile(filepath.Join(d, "app", "AndroidManifest.xml"), []byte("<application android:debuggable=\"true\">"), 0o644)
 	ps, _ := Builtin()
-	fs, err := Engine{Packs: ps}.Scan(d)
+	fs, err := Engine{Packs: ps}.Scan(t.Context(), d)
 	if err != nil || len(fs) != 1 || fs[0].Rule != "android/debuggable" || fs[0].Line != 1 {
 		t.Fatalf("%+v %v", fs, err)
 	}
-	fs, _ = Engine{Packs: ps, Disabled: map[string]bool{"android/debuggable": true}}.Scan(d)
+	fs, _ = Engine{Packs: ps, Disabled: map[string]bool{"android/debuggable": true}}.Scan(t.Context(), d)
 	if len(fs) != 0 {
 		t.Fatal("disabled rule still fired")
 	}

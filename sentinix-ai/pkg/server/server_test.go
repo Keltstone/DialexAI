@@ -105,7 +105,7 @@ func TestAuthAndApprovalFlow(t *testing.T) {
 	}
 
 	// disabling a rule also needs a second person and lands in the audit log
-	w = e.call("rev1@example.test", auth.Reviewer, "POST", "/api/approvals", `{"kind":"disable_rule","payload":{"rule":"android/debuggable"}}`)
+	w = e.call("rev1@example.test", auth.Reviewer, "POST", "/api/approvals", `{"kind":"disable_rule","payload":{"rule":"android/debuggable","scope":"*","until":"2029-01-01T00:00:00Z"}}`)
 	e.ok(w, 202)
 	json.Unmarshal(w.Body.Bytes(), &ap)
 	e.ok(e.call("rev2@example.test", auth.Reviewer, "POST", "/api/approvals/"+ap["approval"]+"/decide", `{"approve":true}`), 200)
@@ -120,9 +120,63 @@ func TestAuthAndApprovalFlow(t *testing.T) {
 func TestOnlyOwnerGrantsOwner(t *testing.T) {
 	e := setup(t)
 	e.st.UpsertUser("bob@example.test", "bob", auth.Developer)
+	e.st.UpsertUser("own2@example.test", "own2", auth.Owner)
 	set := `{"email":"bob@example.test","role":"owner"}`
 	e.ok(e.call("adm@example.test", auth.Admin, "PUT", "/api/users/role", set), 403)
-	e.ok(e.call("own@example.test", auth.Owner, "PUT", "/api/users/role", set), 204)
+
+	// Owner PUT /api/users/role returns 202 approval_required
+	w := e.call("own@example.test", auth.Owner, "PUT", "/api/users/role", set)
+	e.ok(w, 202)
+	var resp map[string]string
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != "approval_required" || resp["approval_id"] == "" {
+		t.Fatalf("expected approval_required with approval_id, got %v", resp)
+	}
+
+	// Proposer cannot approve
+	e.ok(e.call("own@example.test", auth.Owner, "POST", "/api/approvals/"+resp["approval_id"]+"/decide", `{"approve":true}`), 409)
+	// Target user cannot approve
+	e.ok(e.call("bob@example.test", auth.Developer, "POST", "/api/approvals/"+resp["approval_id"]+"/decide", `{"approve":true}`), 403)
+
+	// Second owner approves
+	e.ok(e.call("own2@example.test", auth.Owner, "POST", "/api/approvals/"+resp["approval_id"]+"/decide", `{"approve":true}`), 200)
+}
+
+func TestOwnerAndAliasCannotSelfApproveDisableRule(t *testing.T) {
+	e := setup(t)
+	e.st.UpsertUser("dev@example.test", "Developer", auth.Developer)
+	e.st.UpsertUser("owner@corp.test", "Owner", auth.Owner)
+	e.st.UpsertUser("owner+alias@corp.test", "Owner Alias", auth.Owner)
+	e.st.UpsertUser("independent-owner@corp.test", "Independent Owner", auth.Owner)
+
+	// 1. Owner PUT /api/users/role returns approval_required
+	roleReq := `{"email":"dev@example.test","role":"owner"}`
+	wRole := e.call("owner@corp.test", auth.Owner, "PUT", "/api/users/role", roleReq)
+	e.ok(wRole, 202)
+	t.Logf("Owner PUT /api/users/role response: status=%d body=%s", wRole.Code, wRole.Body.String())
+
+	// 2. Owner proposes disable_rule
+	ruleReq := `{"kind":"disable_rule","payload":{"rule":"sec/dangerous-api","scope":"*","until":"2029-01-01T00:00:00Z"}}`
+	wProp := e.call("owner@corp.test", auth.Owner, "POST", "/api/approvals", ruleReq)
+	e.ok(wProp, 202)
+	var ap map[string]string
+	json.Unmarshal(wProp.Body.Bytes(), &ap)
+	appID := ap["approval"]
+
+	// 3. Proposing Owner attempts to self-approve -> rejected
+	wSelf := e.call("owner@corp.test", auth.Owner, "POST", "/api/approvals/"+appID+"/decide", `{"approve":true}`)
+	e.ok(wSelf, 409)
+	t.Logf("Proposer self-approval attempt response: status=%d body=%s", wSelf.Code, wSelf.Body.String())
+
+	// 4. Owner alias attempts to approve -> rejected
+	wAlias := e.call("owner+alias@corp.test", auth.Owner, "POST", "/api/approvals/"+appID+"/decide", `{"approve":true}`)
+	e.ok(wAlias, 409)
+	t.Logf("Alias self-approval attempt response: status=%d body=%s", wAlias.Code, wAlias.Body.String())
+
+	// 5. Independent second owner approves -> succeeds
+	wSecond := e.call("independent-owner@corp.test", auth.Owner, "POST", "/api/approvals/"+appID+"/decide", `{"approve":true}`)
+	e.ok(wSecond, 200)
+	t.Logf("Independent second owner approval response: status=%d body=%s", wSecond.Code, wSecond.Body.String())
 }
 
 func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }

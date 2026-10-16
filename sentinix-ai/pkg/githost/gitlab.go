@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 type gitlab struct{ Config }
@@ -51,17 +52,48 @@ func (g gitlab) Parse(r *http.Request, body []byte) (*Event, error) {
 	}
 	return &Event{RepoPath: p.Project.Path, Repo: strconv.Itoa(a.TargetProj), PR: strconv.Itoa(a.IID), HeadSHA: a.LastCommit.ID,
 		HeadRef: a.SourceBranch, BaseRef: a.TargetBranch, CloneURL: a.Source.GitHTTPURL,
-		BaseCloneURL: a.Target.GitHTTPURL, Fork: a.SourceProj != a.TargetProj}, nil
+		BaseCloneURL: a.Target.GitHTTPURL, Fork: a.SourceProj != a.TargetProj,
+		ConfiguredHost: g.Config.web()}, nil
 }
 
 // ponytail: fork MRs have their commit in the source project, so the status call may 404; the comment still posts.
 func (g gitlab) Status(ctx context.Context, e *Event, s State, desc string) error {
-	st := [...]string{"pending", "success", "failed"}[s]
+	st := "pending"
+	switch s {
+	case Success:
+		st = "success"
+	case Neutral:
+		st = "success"
+		desc = "scanner unavailable"
+	case Failure, Error:
+		st = "failed"
+	}
 	return g.post(ctx, fmt.Sprintf("%s/projects/%s/statuses/%s", g.API, e.Repo, e.HeadSHA), g.hdr(),
 		map[string]string{"state": st, "name": "sentinix", "description": desc})
 }
 
 func (g gitlab) Comment(ctx context.Context, e *Event, body string) error {
-	return g.post(ctx, fmt.Sprintf("%s/projects/%s/merge_requests/%s/notes", g.API, e.Repo, e.PR), g.hdr(),
-		map[string]string{"body": body})
+	url := fmt.Sprintf("%s/projects/%s/merge_requests/%s/notes", g.API, e.Repo, e.PR)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err == nil {
+		for k, v := range g.hdr() {
+			req.Header.Set(k, v)
+		}
+		if resp, err := http.DefaultClient.Do(req); err == nil && resp.StatusCode == 200 {
+			defer resp.Body.Close()
+			var notes []struct {
+				ID   int64  `json:"id"`
+				Body string `json:"body"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&notes) == nil {
+				for _, n := range notes {
+					if strings.HasPrefix(strings.TrimSpace(n.Body), "### Sentinix") {
+						putURL := fmt.Sprintf("%s/projects/%s/merge_requests/%s/notes/%d", g.API, e.Repo, e.PR, n.ID)
+						return g.request(ctx, "PUT", putURL, g.hdr(), map[string]string{"body": body})
+					}
+				}
+			}
+		}
+	}
+	return g.request(ctx, "POST", url, g.hdr(), map[string]string{"body": body})
 }

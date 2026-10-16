@@ -89,18 +89,47 @@ func (s *Store) UpdateProject(p Project) error {
 }
 
 // API tokens: scoped to one project, stored hashed, shown once.
-func (s *Store) CreateToken(project, name string) (string, error) {
+func (s *Store) CreateToken(project, name string, expiresAt ...int64) (string, error) {
 	raw := "sx_" + id() + id()
 	h := sha256.Sum256([]byte(raw))
-	_, err := s.db.Exec("insert into tokens(hash,project_id,name,created) values($1,$2,$3,$4)", hex.EncodeToString(h[:]), project, name, now())
+	var exp int64
+	if len(expiresAt) > 0 {
+		exp = expiresAt[0]
+	}
+	_, err := s.db.Exec("insert into tokens(hash,project_id,name,created,expires_at,revoked) values($1,$2,$3,$4,$5,0)",
+		hex.EncodeToString(h[:]), project, name, now(), exp)
 	return raw, err
+}
+
+func (s *Store) RevokeToken(project, rawOrHash string) error {
+	h := sha256.Sum256([]byte(rawOrHash))
+	hashStr := hex.EncodeToString(h[:])
+	_, err := s.db.Exec("update tokens set revoked=1 where (hash=$1 or hash=$2 or name=$2) and (project_id=$3 or $3='')", hashStr, rawOrHash, project)
+	return err
+}
+
+func (s *Store) DeleteToken(project, rawOrHash string) error {
+	h := sha256.Sum256([]byte(rawOrHash))
+	hashStr := hex.EncodeToString(h[:])
+	_, err := s.db.Exec("delete from tokens where (hash=$1 or hash=$2 or name=$2) and (project_id=$3 or $3='')", hashStr, rawOrHash, project)
+	return err
 }
 
 func (s *Store) TokenProject(raw string) (string, bool) {
 	h := sha256.Sum256([]byte(raw))
 	var p string
-	err := s.db.QueryRow("select project_id from tokens where hash=$1", hex.EncodeToString(h[:])).Scan(&p)
-	return p, err == nil
+	var exp, revoked int64
+	err := s.db.QueryRow("select project_id, expires_at, revoked from tokens where hash=$1", hex.EncodeToString(h[:])).Scan(&p, &exp, &revoked)
+	if err != nil {
+		return "", false
+	}
+	if revoked == 1 {
+		return "", false
+	}
+	if exp > 0 && now() > exp {
+		return "", false
+	}
+	return p, true
 }
 
 var ErrNotFound = sql.ErrNoRows

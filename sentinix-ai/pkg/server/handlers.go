@@ -1,11 +1,19 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"sentinix/pkg/auth"
@@ -61,54 +69,154 @@ func (a *App) updateProject(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	var in struct {
-		Branch, Schedule, TZ, ModelPolicy, Enforcement, FailOn *string
-		AI                                                     *bool
-		PackPins                                               map[string]string
-	}
-	if !readJSON(w, r, &in) {
+	var raw map[string]any
+	if !readJSON(w, r, &raw) {
 		return
 	}
-	set := func(dst *string, v *string) {
-		if v != nil {
-			*dst = *v
-		}
+	user := who(r).Email
+
+	allowedKeys := map[string]bool{
+		"branch": true, "schedule": true, "tz": true, "pack_pins": true,
+		"enforcement": true, "fail_on": true, "model_policy": true, "ai": true,
+		"false_positive": true,
 	}
-	set(&p.Branch, in.Branch)
-	set(&p.Schedule, in.Schedule)
-	set(&p.TZ, in.TZ)
-	set(&p.ModelPolicy, in.ModelPolicy)
-	set(&p.Enforcement, in.Enforcement)
-	set(&p.FailOn, in.FailOn)
-	if in.AI != nil {
-		p.AI = *in.AI
-	}
-	if in.PackPins != nil {
-		p.PackPins = in.PackPins
-	}
-	if p.Schedule != "" { // reject bad specs now, not at 2 a.m.
-		if _, err := dueFn(p.Schedule, p.TZ, time.Now()); err != nil {
-			fail(w, err, 400)
+	for k := range raw {
+		if !allowedKeys[k] {
+			http.Error(w, "unknown key: "+k, 400)
 			return
 		}
 	}
-	if p.ModelPolicy != "local-only" && p.ModelPolicy != "cloud-redacted" && p.ModelPolicy != "cloud" {
-		http.Error(w, "bad model_policy", 400)
+
+	getString := func(key string) *string {
+		if v, ok := raw[key].(string); ok {
+			return &v
+		}
+		return nil
+	}
+	getBool := func(key string) *bool {
+		if v, ok := raw[key].(bool); ok {
+			return &v
+		}
+		return nil
+	}
+
+	var approvalIDs []string
+
+	// Security fields (enforcement, fail_on, model_policy, ai, false_positive, branch, schedule, pack_pins)
+	// must create an approval and change nothing until approved.
+	if enf := getString("enforcement"); enf != nil && *enf != p.Enforcement {
+		if *enf != "block" && *enf != "report" {
+			http.Error(w, "enforcement must be block or report", 400)
+			return
+		}
+		appID, err := a.Store.Propose("enforcement", map[string]any{"project": p.ID, "enforcement": *enf}, user)
+		if err != nil {
+			fail(w, err, 500)
+			return
+		}
+		approvalIDs = append(approvalIDs, appID)
+	}
+	if fo := getString("fail_on"); fo != nil && *fo != p.FailOn {
+		if _, err := engines.ParseSeverity(*fo); *fo != "" && err != nil {
+			http.Error(w, "bad fail_on", 400)
+			return
+		}
+		appID, err := a.Store.Propose("fail_on", map[string]any{"project": p.ID, "fail_on": *fo}, user)
+		if err != nil {
+			fail(w, err, 500)
+			return
+		}
+		approvalIDs = append(approvalIDs, appID)
+	}
+	if mp := getString("model_policy"); mp != nil && *mp != p.ModelPolicy {
+		if *mp != "local-only" && *mp != "cloud-redacted" && *mp != "cloud" {
+			http.Error(w, "bad model_policy", 400)
+			return
+		}
+		appID, err := a.Store.Propose("model_policy", map[string]any{"project": p.ID, "model_policy": *mp}, user)
+		if err != nil {
+			fail(w, err, 500)
+			return
+		}
+		approvalIDs = append(approvalIDs, appID)
+	}
+	if aiVal := getBool("ai"); aiVal != nil && *aiVal != p.AI {
+		appID, err := a.Store.Propose("ai", map[string]any{"project": p.ID, "ai": *aiVal}, user)
+		if err != nil {
+			fail(w, err, 500)
+			return
+		}
+		approvalIDs = append(approvalIDs, appID)
+	}
+	if b := getString("branch"); b != nil && *b != p.Branch {
+		appID, err := a.Store.Propose("branch", map[string]any{"project": p.ID, "branch": *b}, user)
+		if err != nil {
+			fail(w, err, 500)
+			return
+		}
+		approvalIDs = append(approvalIDs, appID)
+	}
+	if s := getString("schedule"); s != nil && *s != p.Schedule {
+		if *s != "" {
+			if _, err := dueFn(*s, p.TZ, time.Now()); err != nil {
+				fail(w, err, 400)
+				return
+			}
+		}
+		appID, err := a.Store.Propose("schedule", map[string]any{"project": p.ID, "schedule": *s}, user)
+		if err != nil {
+			fail(w, err, 500)
+			return
+		}
+		approvalIDs = append(approvalIDs, appID)
+	}
+	if pins, ok := raw["pack_pins"].(map[string]any); ok {
+		m := map[string]string{}
+		for k, v := range pins {
+			if s, ok := v.(string); ok {
+				m[k] = s
+			}
+		}
+		appID, err := a.Store.Propose("pack_pins", map[string]any{"project": p.ID, "pack_pins": m}, user)
+		if err != nil {
+			fail(w, err, 500)
+			return
+		}
+		approvalIDs = append(approvalIDs, appID)
+	}
+	if fp := getString("false_positive"); fp != nil {
+		appID, err := a.Store.Propose("false_positive", map[string]any{"project": p.ID, "false_positive": *fp}, user)
+		if err != nil {
+			fail(w, err, 500)
+			return
+		}
+		approvalIDs = append(approvalIDs, appID)
+	}
+
+	hasNonSec := false
+	if t := getString("tz"); t != nil && *t != p.TZ {
+		p.TZ = *t
+		hasNonSec = true
+	}
+
+	if hasNonSec {
+		if err := a.Store.UpdateProject(p); err != nil {
+			fail(w, err, 500)
+			return
+		}
+		a.audit_(r, "project:update", p.Name)
+	}
+
+	if len(approvalIDs) > 0 {
+		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, map[string]any{
+			"approval_id":  approvalIDs[0],
+			"approval_ids": approvalIDs,
+			"status":       "approval_required",
+		})
 		return
 	}
-	if p.Enforcement != "block" && p.Enforcement != "report" {
-		http.Error(w, "enforcement must be block or report", 400)
-		return
-	}
-	if _, err := engines.ParseSeverity(p.FailOn); p.FailOn != "" && err != nil {
-		http.Error(w, "bad fail_on", 400)
-		return
-	}
-	if err := a.Store.UpdateProject(p); err != nil {
-		fail(w, err, 500)
-		return
-	}
-	a.audit_(r, "project:update", p.Name)
+
 	writeJSON(w, p)
 }
 
@@ -144,7 +252,10 @@ func (a *App) surface(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) createToken(w http.ResponseWriter, r *http.Request) {
-	var in struct{ Name string }
+	var in struct {
+		Name      string
+		ExpiresAt int64
+	}
 	if !readJSON(w, r, &in) {
 		return
 	}
@@ -153,13 +264,53 @@ func (a *App) createToken(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	tok, err := a.Store.CreateToken(id, in.Name)
+	tok, err := a.Store.CreateToken(id, in.Name, in.ExpiresAt)
 	if err != nil {
 		fail(w, err, 500)
 		return
 	}
 	a.audit_(r, "token:create", id)
 	writeJSON(w, map[string]string{"token": tok}) // shown once
+}
+
+func (a *App) revokeToken(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	tok := r.PathValue("token")
+	if tok == "" {
+		var in struct{ Token string }
+		readJSON(w, r, &in)
+		tok = in.Token
+	}
+	if tok == "" {
+		http.Error(w, "token required", 400)
+		return
+	}
+	if err := a.Store.RevokeToken(id, tok); err != nil {
+		fail(w, err, 500)
+		return
+	}
+	a.audit_(r, "token:revoke", id, "active", "revoked")
+	w.WriteHeader(http.StatusOK)
+}
+
+func (a *App) deleteToken(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	tok := r.PathValue("token")
+	if tok == "" {
+		var in struct{ Token string }
+		readJSON(w, r, &in)
+		tok = in.Token
+	}
+	if tok == "" {
+		http.Error(w, "token required", 400)
+		return
+	}
+	if err := a.Store.DeleteToken(id, tok); err != nil {
+		fail(w, err, 500)
+		return
+	}
+	a.audit_(r, "token:delete", id, "active", "deleted")
+	w.WriteHeader(http.StatusOK)
 }
 
 // ingest takes a CI scan from the CLI. Only a token for the same project may post.
@@ -170,24 +321,97 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Commit   string
-		Ran      []string
-		Findings []engines.Finding
+		Commit   string            `json:"commit"`
+		Ran      []string          `json:"ran"`
+		Findings []engines.Finding `json:"findings"`
 	}
-	if !readJSON(w, r, &in) {
+	bodyBytes, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4<<20))
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) || strings.Contains(err.Error(), "request body too large") {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	dec := json.NewDecoder(bytes.NewReader(bodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	knownEngines := map[string]bool{
+		"secrets": true, "semgrep": true, "gitleaks": true,
+		"osv-scanner": true, "packs": true, "advisories": true,
+	}
+
+	var signedUpload bool
+	if sigHeader := r.Header.Get("X-Signature"); sigHeader != "" && len(a.TrustedKeys) > 0 {
+		if sigBytes, err := base64.StdEncoding.DecodeString(sigHeader); err == nil {
+			for _, k := range a.TrustedKeys {
+				if ed25519.Verify(k, bodyBytes, sigBytes) {
+					signedUpload = true
+					break
+				}
+			}
+		}
+	}
+
+	for i := range in.Findings {
+		f := &in.Findings[i]
+		if !signedUpload && !knownEngines[f.Engine] && !strings.HasPrefix(f.Engine, "pack:") {
+			http.Error(w, fmt.Sprintf("unattested engine %q", f.Engine), http.StatusBadRequest)
+			return
+		}
+
+		if f.Severity < engines.Info || f.Severity > engines.Critical {
+			http.Error(w, "invalid severity", http.StatusBadRequest)
+			return
+		}
+
+		// Ensure Match is hashed (no raw match on wire or stored)
+		if f.Match != "" && len(f.Match) != 64 {
+			h := sha256.Sum256([]byte(f.Match))
+			f.Match = hex.EncodeToString(h[:])
+		}
+
+		// Truncate all free-text fields
+		if len(f.Message) > 500 {
+			f.Message = f.Message[:500]
+		}
+		if len(f.Evidence) > 200 {
+			f.Evidence = f.Evidence[:200]
+		}
+		f.Evidence = engines.Redact(f.Evidence)
+		if len(f.Fix) > 500 {
+			f.Fix = f.Fix[:500]
+		}
+		if len(f.CWE) > 50 {
+			f.CWE = f.CWE[:50]
+		}
+		if len(f.Rule) > 100 {
+			f.Rule = f.Rule[:100]
+		}
+		if len(f.File) > 255 {
+			f.File = f.File[:255]
+		}
+	}
+
 	proj, err := a.Store.Project(p.Project)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	sc, err := a.Store.RecordScan(store.Scan{ProjectID: proj.ID, Mode: "ci", Commit: in.Commit}, in.Ran, in.Findings)
+	// Coverage ("ran") is never taken from the client and dummy findings must not close other findings: pass nil for ran
+	sc, err := a.Store.RecordScan(store.Scan{ProjectID: proj.ID, Mode: "ci", Commit: in.Commit}, nil, in.Findings)
 	if err != nil {
 		fail(w, err, 500)
 		return
 	}
-	a.Store.AddAudit(store.Audit{Actor: p.Email, Action: "scan:ci", Target: proj.Name, Commit: in.Commit})
+	src := a.clientIP(r)
+	a.Store.AddAudit(store.Audit{Actor: p.Email, Action: "scan:ci", Target: proj.Name, Commit: in.Commit, Source: src})
 	writeJSON(w, sc)
 }
 
@@ -242,6 +466,16 @@ func (a *App) triage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if in.Status == "false_positive" {
+		aid, err := a.Store.Propose("false_positive", map[string]any{"finding": id, "owner": in.Owner, "reason": in.Reason}, who(r).Email)
+		if err != nil {
+			fail(w, err, 500)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, map[string]string{"status": "approval_required", "approval": aid, "approval_id": aid})
+		return
+	}
 	if in.Status == "accepted" {
 		if in.Reason == "" || in.Until <= time.Now().Unix() {
 			http.Error(w, "accepted risk needs a reason and a future expiry", 400)
@@ -282,16 +516,73 @@ func (a *App) approvals(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) propose(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Kind    string
-		Payload map[string]any
+		Kind    string         `json:"kind"`
+		Payload map[string]any `json:"payload"`
 	}
-	if !readJSON(w, r, &in) {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		http.Error(w, "bad json: "+err.Error(), 400)
 		return
 	}
+
+	var allowedPayloadKeys map[string]bool
 	switch in.Kind {
 	case "disable_rule":
-		if _, ok := in.Payload["rule"].(string); !ok {
+		allowedPayloadKeys = map[string]bool{"rule": true, "scope": true, "until": true}
+	case "loosen_severity":
+		allowedPayloadKeys = map[string]bool{"rule": true, "severity": true}
+	case "demote_rule", "rule_demotion":
+		allowedPayloadKeys = map[string]bool{"rule": true}
+	case "enforcement":
+		allowedPayloadKeys = map[string]bool{"project": true, "enforcement": true}
+	case "fail_on":
+		allowedPayloadKeys = map[string]bool{"project": true, "fail_on": true}
+	case "model_policy":
+		allowedPayloadKeys = map[string]bool{"project": true, "model_policy": true}
+	case "ai":
+		allowedPayloadKeys = map[string]bool{"project": true, "ai": true}
+	case "ignore", "sentinix:ignore":
+		allowedPayloadKeys = map[string]bool{"project": true, "file": true, "line": true, "rule": true, "fingerprint": true, "until": true}
+	default:
+		http.Error(w, "invalid approval kind", 400)
+		return
+	}
+	for k := range in.Payload {
+		if !allowedPayloadKeys[k] {
+			http.Error(w, "unknown payload key: "+k, 400)
+			return
+		}
+	}
+
+	switch in.Kind {
+	case "disable_rule":
+		rule, rok := in.Payload["rule"].(string)
+		if !rok || rule == "" {
 			http.Error(w, "payload.rule required", 400)
+			return
+		}
+		scope, sok := in.Payload["scope"].(string)
+		untilVal, uok := in.Payload["until"]
+		var until int64
+		switch v := untilVal.(type) {
+		case float64:
+			until = int64(v)
+		case int64:
+			until = v
+		case int:
+			until = int64(v)
+		case json.Number:
+			until, _ = v.Int64()
+		case string:
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				until = t.Unix()
+			} else if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				until = n
+			}
+		}
+		if !sok || strings.TrimSpace(scope) == "" || !uok || until <= time.Now().Unix() {
+			http.Error(w, "disable_rule requires payload.rule, payload.scope and future payload.until", 400)
 			return
 		}
 	case "loosen_severity":
@@ -301,9 +592,93 @@ func (a *App) propose(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "payload.rule and payload.severity required", 400)
 			return
 		}
-	default:
-		http.Error(w, "kind must be disable_rule or loosen_severity", 400)
-		return
+	case "demote_rule", "rule_demotion":
+		if _, ok := in.Payload["rule"].(string); !ok {
+			http.Error(w, "payload.rule required", 400)
+			return
+		}
+	case "enforcement":
+		proj, pok := in.Payload["project"].(string)
+		enf, eok := in.Payload["enforcement"].(string)
+		if !pok || !eok || (enf != "block" && enf != "report") {
+			http.Error(w, "payload.project and valid payload.enforcement (block|report) required", 400)
+			return
+		}
+		if _, err := a.Store.Project(proj); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+	case "fail_on":
+		proj, pok := in.Payload["project"].(string)
+		fo, fok := in.Payload["fail_on"].(string)
+		if !pok || !fok {
+			http.Error(w, "payload.project and payload.fail_on required", 400)
+			return
+		}
+		if _, err := engines.ParseSeverity(fo); fo != "" && err != nil {
+			http.Error(w, "invalid payload.fail_on", 400)
+			return
+		}
+		if _, err := a.Store.Project(proj); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+	case "model_policy":
+		proj, pok := in.Payload["project"].(string)
+		mp, mok := in.Payload["model_policy"].(string)
+		if !pok || !mok || (mp != "local-only" && mp != "cloud-redacted" && mp != "cloud") {
+			http.Error(w, "payload.project and valid payload.model_policy required", 400)
+			return
+		}
+		if _, err := a.Store.Project(proj); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+	case "ai":
+		proj, pok := in.Payload["project"].(string)
+		if !pok || proj == "" {
+			http.Error(w, "payload.project required", 400)
+			return
+		}
+		if _, err := a.Store.Project(proj); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+	case "ignore", "sentinix:ignore":
+		proj, pok := in.Payload["project"].(string)
+		if !pok || strings.TrimSpace(proj) == "" {
+			http.Error(w, "payload.project required", 400)
+			return
+		}
+		file, fok := in.Payload["file"].(string)
+		rule, rok := in.Payload["rule"].(string)
+		fp, fpok := in.Payload["fingerprint"].(string)
+		_, lok := in.Payload["line"]
+		if !fok || file == "" || !rok || rule == "" || !fpok || fp == "" || !lok {
+			http.Error(w, "payload must carry project, file, line, rule and fingerprint", 400)
+			return
+		}
+		var until int64
+		switch v := in.Payload["until"].(type) {
+		case float64:
+			until = int64(v)
+		case int64:
+			until = v
+		case int:
+			until = int64(v)
+		case json.Number:
+			until, _ = v.Int64()
+		case string:
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				until = t.Unix()
+			} else if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				until = n
+			}
+		}
+		if until <= time.Now().Unix() {
+			http.Error(w, "future payload.until expiry required", 400)
+			return
+		}
 	}
 	id, err := a.Store.Propose(in.Kind, in.Payload, who(r).Email)
 	if err != nil {
@@ -324,32 +699,84 @@ func (a *App) decide(w http.ResponseWriter, r *http.Request) {
 		fail(w, err, 409)
 		return
 	}
-	if ap.Status == "approved" {
-		if err := a.apply(ap); err != nil {
-			fail(w, err, 500)
-			return
-		}
-	}
 	writeJSON(w, ap)
 }
 
 // apply performs an approved change. Kinds are validated when proposed.
 func (a *App) apply(ap store.Approval) error {
-	var p struct {
-		Finding, Owner, Reason, Rule, Severity string
-		Until                                  int64
-	}
-	if err := json.Unmarshal(ap.Payload, &p); err != nil {
+	var raw map[string]any
+	if err := json.Unmarshal(ap.Payload, &raw); err != nil {
 		return err
 	}
+	getString := func(k string) string {
+		v, _ := raw[k].(string)
+		return v
+	}
+	getInt64 := func(k string) int64 {
+		switch v := raw[k].(type) {
+		case float64:
+			return int64(v)
+		case int64:
+			return v
+		case int:
+			return int64(v)
+		case json.Number:
+			n, _ := v.Int64()
+			return n
+		case string:
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				return t.Unix()
+			} else if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				return n
+			}
+		}
+		return 0
+	}
+	getBool := func(k string) bool {
+		b, _ := raw[k].(bool)
+		return b
+	}
+
 	switch ap.Kind {
 	case "accept_risk":
-		return a.Store.Triage(p.Finding, "accepted", p.Owner, p.Reason, p.Until)
+		return a.Store.Triage(getString("finding"), "accepted", getString("owner"), getString("reason"), getInt64("until"))
 	case "disable_rule":
-		return a.Store.SetRuleOverride(p.Rule, true, -1)
+		return a.Store.SetRuleOverrideScoped(getString("rule"), true, -1, getString("scope"), getInt64("until"))
 	case "loosen_severity":
-		s, _ := engines.ParseSeverity(p.Severity)
-		return a.Store.SetRuleOverride(p.Rule, false, int(s))
+		s, _ := engines.ParseSeverity(getString("severity"))
+		return a.Store.SetRuleOverride(getString("rule"), false, int(s))
+	case "demote_rule", "rule_demotion":
+		return a.Store.SetRuleOverride(getString("rule"), false, int(engines.Info))
+	case "enforcement":
+		proj, err := a.Store.Project(getString("project"))
+		if err != nil {
+			return err
+		}
+		proj.Enforcement = getString("enforcement")
+		return a.Store.UpdateProject(proj)
+	case "fail_on":
+		proj, err := a.Store.Project(getString("project"))
+		if err != nil {
+			return err
+		}
+		proj.FailOn = getString("fail_on")
+		return a.Store.UpdateProject(proj)
+	case "model_policy":
+		proj, err := a.Store.Project(getString("project"))
+		if err != nil {
+			return err
+		}
+		proj.ModelPolicy = getString("model_policy")
+		return a.Store.UpdateProject(proj)
+	case "ai":
+		proj, err := a.Store.Project(getString("project"))
+		if err != nil {
+			return err
+		}
+		proj.AI = getBool("ai")
+		return a.Store.UpdateProject(proj)
+	case "ignore", "sentinix:ignore":
+		return nil
 	}
 	return fmt.Errorf("unknown approval kind %q", ap.Kind)
 }
@@ -401,12 +828,19 @@ func (a *App) setRole(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "only an owner can change owner roles", 403)
 		return
 	}
-	if err := a.Store.SetRole(in.Email, in.Role); err != nil {
+	// All role changes (including Owner role changes) require a second person's approval
+	aid, err := a.Store.Propose("role_change", map[string]any{"email": in.Email, "role": in.Role, "current": cur}, who(r).Email)
+	if err != nil {
 		fail(w, err, 500)
 		return
 	}
-	a.audit_(r, "role:"+in.Role, in.Email)
-	w.WriteHeader(http.StatusNoContent)
+	a.audit_(r, "role:propose:"+in.Role, in.Email, cur, in.Role)
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, map[string]any{
+		"status":      "approval_required",
+		"id":          aid,
+		"approval_id": aid,
+	})
 }
 
 func (a *App) packList(w http.ResponseWriter, r *http.Request) {

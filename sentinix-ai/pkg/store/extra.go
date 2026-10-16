@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"sentinix/pkg/advisories"
 	"sentinix/pkg/diffmap"
@@ -10,8 +11,8 @@ import (
 // RecordPRScan stores a PR/MR scan run. PR scans never change project finding state.
 func (s *Store) RecordPRScan(sc Scan) error {
 	sc.ID, sc.Started = id(), now()
-	_, err := s.db.Exec("insert into scans(id,project_id,mode,commit_sha,pr,started,duration_ms,new_count,fixed_count,unchanged_count,packs,engines) values($1,$2,$3,$4,$5,$6,$7,$8,0,0,$9,$10)",
-		sc.ID, sc.ProjectID, sc.Mode, sc.Commit, sc.PR, sc.Started, sc.DurationMS, sc.New, sc.Packs, sc.Engines)
+	_, err := s.db.Exec("insert into scans(id,project_id,mode,commit_sha,pr,started,duration_ms,new_count,fixed_count,unchanged_count,packs,engines,gate_decision,reason,skipped) values($1,$2,$3,$4,$5,$6,$7,$8,0,0,$9,$10,$11,$12,$13)",
+		sc.ID, sc.ProjectID, sc.Mode, sc.Commit, sc.PR, sc.Started, sc.DurationMS, sc.New, sc.Packs, sc.Engines, sc.GateDecision, sc.Reason, sc.Skipped)
 	return err
 }
 
@@ -48,29 +49,67 @@ func (s *Store) Surface(project string, limit int) ([]SurfaceRow, error) {
 	return out, rows.Err()
 }
 
-// Rule overrides are global. Loosening one is applied only after an approval.
-func (s *Store) SetRuleOverride(rule string, disabled bool, sev int) error {
+// SetRuleOverrideScoped sets a rule override with a project scope and expiry timestamp.
+func (s *Store) SetRuleOverrideScoped(rule string, disabled bool, sev int, scope string, expiresAt int64) error {
 	d := 0
 	if disabled {
 		d = 1
 	}
-	_, err := s.db.Exec("insert into rule_overrides(rule,disabled,severity) values($1,$2,$3) on conflict(rule) do update set disabled=excluded.disabled, severity=excluded.severity", rule, d, sev)
+	if scope == "" {
+		scope = "*"
+	}
+	_, err := s.db.Exec("insert into rule_overrides(rule,disabled,severity,scope,expires_at) values($1,$2,$3,$4,$5) on conflict(rule, scope) do update set disabled=excluded.disabled, severity=excluded.severity, expires_at=excluded.expires_at", rule, d, sev, scope, expiresAt)
 	return err
+}
+
+// Rule overrides are global. Loosening one is applied only after an approval.
+func (s *Store) SetRuleOverride(rule string, disabled bool, sev int) error {
+	return s.SetRuleOverrideScoped(rule, disabled, sev, "*", 0)
 }
 
 // RuleOverrides returns disabled rules and severity overrides (-1 means none).
 func (s *Store) RuleOverrides() (map[string]bool, map[string]engines.Severity, error) {
-	rows, err := s.db.Query("select rule,disabled,severity from rule_overrides")
+	return s.RuleOverridesFor("")
+}
+
+// RuleOverridesFor returns active disabled rules and severity overrides for a project.
+func (s *Store) RuleOverridesFor(project string) (map[string]bool, map[string]engines.Severity, error) {
+	var altProject string
+	if project != "" {
+		var id, name string
+		if err := s.db.QueryRow("select id, name from projects where id=$1 or name=$1", project).Scan(&id, &name); err == nil {
+			if project == id {
+				altProject = name
+			} else {
+				altProject = id
+			}
+		}
+	}
+	rows, err := s.db.Query("select rule,disabled,severity,scope,expires_at from rule_overrides")
 	if err != nil {
 		return nil, nil, err
 	}
 	defer rows.Close()
 	dis, sev := map[string]bool{}, map[string]engines.Severity{}
+	currentTime := now()
 	for rows.Next() {
-		var r string
+		var r, sc string
 		var d, v int
-		if err := rows.Scan(&r, &d, &v); err != nil {
+		var exp int64
+		if err := rows.Scan(&r, &d, &v, &sc, &exp); err != nil {
 			return nil, nil, err
+		}
+		if exp > 0 && currentTime > exp {
+			continue
+		}
+		if project == "" {
+			if sc != "*" {
+				continue
+			}
+		} else {
+			if sc != "*" && sc != project && (altProject == "" || sc != altProject) {
+				continue
+			}
 		}
 		if d == 1 {
 			dis[r] = true
@@ -218,4 +257,95 @@ func (s *Store) Verdict(findingID string) (json.RawMessage, error) {
 	var b string
 	err := s.db.QueryRow("select body from verdicts where finding_id=$1", findingID).Scan(&b)
 	return json.RawMessage(b), err
+}
+
+// CheckAndRecordDelivery checks if delivery id was already seen within ttlSeconds, persists it, and bounds the set (TTL + size).
+func (s *Store) CheckAndRecordDelivery(id string, ttlSeconds int64, maxSize int) (bool, error) {
+	currentTime := now()
+	// Prune expired
+	if ttlSeconds > 0 {
+		s.db.Exec("delete from webhook_deliveries where ts < $1", currentTime-ttlSeconds)
+	}
+	// Check if already seen
+	var exists int
+	err := s.db.QueryRow("select 1 from webhook_deliveries where id=$1", id).Scan(&exists)
+	if err == nil {
+		return true, nil
+	}
+	if err != sql.ErrNoRows {
+		return false, err
+	}
+	// Bound by size
+	if maxSize > 0 {
+		var count int
+		if err := s.db.QueryRow("select count(*) from webhook_deliveries").Scan(&count); err == nil && count >= maxSize {
+			s.db.Exec("delete from webhook_deliveries where id in (select id from webhook_deliveries order by ts asc limit 100)")
+		}
+	}
+	// Persist
+	_, err = s.db.Exec("insert into webhook_deliveries(id, ts) values($1, $2)", id, currentTime)
+	return false, err
+}
+
+func (s *Store) EnqueueJob(host string, payload string) (string, error) {
+	jobID := id()
+	_, err := s.db.Exec("insert into durable_queue(id, host, payload, status, created) values($1, $2, $3, 'pending', $4)",
+		jobID, host, payload, now())
+	return jobID, err
+}
+
+func (s *Store) DequeueJob() (string, string, string, error) {
+	var jobID, host, payload string
+
+	// 1. Try atomic Postgres UPDATE ... RETURNING with FOR UPDATE SKIP LOCKED
+	qPostgres := `
+		update durable_queue
+		set status = 'running'
+		where id = (
+			select id
+			from durable_queue
+			where status = 'pending'
+			order by created asc
+			for update skip locked
+			limit 1
+		)
+		returning id, host, payload
+	`
+	err := s.db.QueryRow(qPostgres).Scan(&jobID, &host, &payload)
+	if err == nil {
+		return jobID, host, payload, nil
+	}
+
+	// 2. Fallback for SQLite: use an immediate transaction
+	tx, txErr := s.db.Begin()
+	if txErr != nil {
+		return "", "", "", txErr
+	}
+	defer tx.Rollback()
+
+	err = tx.QueryRow("select id, host, payload from durable_queue where status='pending' order by created asc limit 1").Scan(&jobID, &host, &payload)
+	if err != nil {
+		return "", "", "", err
+	}
+	res, err := tx.Exec("update durable_queue set status='running' where id=$1 and status='pending'", jobID)
+	if err != nil {
+		return "", "", "", err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return "", "", "", sql.ErrNoRows
+	}
+	if err := tx.Commit(); err != nil {
+		return "", "", "", err
+	}
+	return jobID, host, payload, nil
+}
+
+func (s *Store) FinishJob(jobID string) error {
+	_, err := s.db.Exec("delete from durable_queue where id=$1", jobID)
+	return err
+}
+
+func (s *Store) ReclaimStaleJobs() error {
+	_, err := s.db.Exec("update durable_queue set status='pending' where status='running'")
+	return err
 }

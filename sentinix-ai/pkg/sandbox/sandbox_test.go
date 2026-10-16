@@ -17,3 +17,18 @@ func TestScanCmdIsLockedDown(t *testing.T) {
 		t.Error("docker socket mounted")
 	}
 }
+
+func TestInContainerSandbox(t *testing.T) {
+	s := InContainer{}
+	c := s.ScanCmd("/tmp/wt", "semgrep", []string{"scan", "--sarif"})
+	line := strings.Join(c.Args, " ")
+	if c.Dir != "/tmp/wt" {
+		t.Errorf("expected working directory /tmp/wt, got %s", c.Dir)
+	}
+	if !strings.HasPrefix(line, "semgrep scan --sarif") {
+		t.Errorf("unexpected command line: %s", line)
+	}
+	if strings.Contains(line, "docker") || strings.Contains(line, "docker.sock") {
+		t.Errorf("in-container sandbox must not reference docker or docker.sock: %s", line)
+	}
+}

@@ -46,3 +46,23 @@ func (d Docker) Run(ctx context.Context, dir string, cmd []string) error {
 	a = append(a, cmd...)
 	return exec.CommandContext(ctx, a[0], a[1:]...).Run()
 }
+
+// InContainer runs external engines and test commands within the shipped container
+// process without requiring Docker or a mounted container socket.
+type InContainer struct{}
+
+// ScanCmd builds a command that runs bin on root with restricted environment and no socket access.
+func (InContainer) ScanCmd(root, bin string, args []string) *exec.Cmd {
+	cmd := exec.Command(bin, append(append([]string{}, args...), root)...)
+	cmd.Dir = root
+	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/tmp", "TMPDIR=/tmp"}
+	return cmd
+}
+
+// Run executes cmd in dir inside the container without mounting a container socket.
+func (InContainer) Run(ctx context.Context, dir string, cmd []string) error {
+	c := exec.CommandContext(ctx, cmd[0], cmd[1:]...)
+	c.Dir = dir
+	c.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/tmp", "TMPDIR=/tmp"}
+	return c.Run()
+}

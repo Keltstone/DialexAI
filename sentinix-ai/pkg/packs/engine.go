@@ -1,9 +1,13 @@
 package packs
 
 import (
+	"bytes"
+	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,27 +16,78 @@ import (
 	"sentinix/pkg/engines"
 )
 
+var binaryExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".ico": true,
+	".webp": true, ".pdf": true, ".zip": true, ".tar": true, ".gz": true,
+	".7z": true, ".rar": true, ".exe": true, ".dll": true, ".so": true,
+	".dylib": true, ".class": true, ".jar": true, ".war": true, ".ear": true,
+	".aar": true, ".bin": true, ".iso": true, ".dmg": true, ".mp3": true,
+	".mp4": true, ".mov": true, ".avi": true, ".wasm": true, ".pyc": true,
+	".o": true, ".a": true, ".keystore": true, ".jks": true,
+}
+
+func isBinaryFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return binaryExts[ext]
+}
+
 // Engine runs the packs whose stacks match what the repo contains.
 type Engine struct {
-	Packs    []*Pack
-	Disabled map[string]bool             // full rule ids, e.g. "android/webview-js"; changes go through the approval queue
-	Override map[string]engines.Severity // per-rule severity
+	Packs        []*Pack
+	Disabled     map[string]bool             // full rule ids, e.g. "android/webview-js"; changes go through the approval queue
+	Override     map[string]engines.Severity // per-rule severity
+	SkippedFiles []string
 }
 
 func (Engine) Name() string { return "packs" }
 
+func (e Engine) Skipped() []string {
+	if len(e.SkippedFiles) > 0 {
+		return e.SkippedFiles
+	}
+	return nil
+}
+
 func skipDir(n string) bool { return n == ".git" || n == "node_modules" || n == "build" }
 
+func isBinary(data []byte) bool {
+	n := len(data)
+	if n > 8000 {
+		n = 8000
+	}
+	return bytes.IndexByte(data[:n], 0) != -1
+}
+
 // DetectStacks looks at file names and build files only.
-func DetectStacks(root string) map[string]bool {
+func DetectStacks(root string) (map[string]bool, []string) {
 	st := map[string]bool{}
+	var skipped []string
 	filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
+		rel, _ := filepath.Rel(root, p)
+		if rel == "." {
+			return nil
+		}
+		info, err := os.Lstat(p)
+		if err != nil {
+			return nil
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			skipped = append(skipped, rel)
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		n := d.Name()
 		if d.IsDir() {
-			if skipDir(n) {
+			if n == ".git" {
+				return filepath.SkipDir
+			}
+			if n == "node_modules" || n == "build" {
+				skipped = append(skipped, rel)
 				return filepath.SkipDir
 			}
 			if n == "commonMain" {
@@ -40,6 +95,27 @@ func DetectStacks(root string) map[string]bool {
 			}
 			return nil
 		}
+		if !info.Mode().IsRegular() {
+			skipped = append(skipped, rel)
+			return nil
+		}
+		if info.Size() > 1<<20 {
+			skipped = append(skipped, rel)
+			return nil
+		}
+
+		// Check binary
+		f, err := os.Open(p)
+		if err == nil {
+			head := make([]byte, 8000)
+			nR, _ := io.ReadFull(f, head)
+			f.Close()
+			if nR > 0 && isBinary(head[:nR]) {
+				skipped = append(skipped, rel)
+				return nil
+			}
+		}
+
 		switch {
 		case n == "AndroidManifest.xml":
 			st["android"] = true
@@ -58,7 +134,7 @@ func DetectStacks(root string) map[string]bool {
 		}
 		return nil
 	})
-	return st
+	return st, skipped
 }
 
 func (e Engine) active(st map[string]bool) []*Pack {
@@ -75,29 +151,83 @@ func (e Engine) active(st map[string]bool) []*Pack {
 	return out
 }
 
-func (e Engine) Scan(root string) ([]engines.Finding, error) {
-	active := e.active(DetectStacks(root))
+func (e Engine) Scan(ctx context.Context, root string) ([]engines.Finding, error) {
+	fs, _, err := e.ScanWithSkipped(ctx, root)
+	return fs, err
+}
+
+func (e Engine) ScanWithSkipped(ctx context.Context, root string) ([]engines.Finding, []string, error) {
+	st, skipped := DetectStacks(root)
+	active := e.active(st)
 	var out []engines.Finding
+	occMap := map[string]int{}
+
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			if skipDir(d.Name()) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		rel, _ := filepath.Rel(root, p)
+		if rel == "." {
+			return nil
+		}
+
+		info, err := os.Lstat(p)
+		if err != nil {
+			return nil
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			skipped = append(skipped, rel)
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if info, e := d.Info(); e != nil || info.Size() > 1<<20 {
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			if d.Name() == "node_modules" || d.Name() == "build" {
+				skipped = append(skipped, rel)
+				return filepath.SkipDir
+			}
 			return nil
 		}
-		rel, _ := filepath.Rel(root, p)
-		var content string
-		for _, pk := range active {
-			if content == "" {
-				b, _ := os.ReadFile(p)
-				content = string(b)
+		if !info.Mode().IsRegular() {
+			skipped = append(skipped, rel)
+			return nil
+		}
+		if info.Size() > 1<<20 {
+			skipped = append(skipped, rel)
+			return nil
+		}
+
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		if isBinary(b) {
+			if !isBinaryFile(rel) {
+				out = append(out, engines.Finding{
+					Rule:     "file/nul-byte",
+					Engine:   "packs",
+					File:     rel,
+					Line:     1,
+					Severity: engines.Info,
+					Message:  "file contains NUL bytes",
+				})
+			} else {
+				skipped = append(skipped, rel)
+				return nil
 			}
+		}
+		content := string(b)
+
+		for _, pk := range active {
 			for _, f := range pk.match(rel, content, "") {
 				if e.Disabled[f.Rule] {
 					continue
@@ -105,12 +235,20 @@ func (e Engine) Scan(root string) ([]engines.Finding, error) {
 				if s, ok := e.Override[f.Rule]; ok {
 					f.Severity = s
 				}
+				m := f.Match
+				if m == "" {
+					m = f.Evidence
+				}
+				mHash := sha256.Sum256([]byte(m))
+				occKey := fmt.Sprintf("%s|%x", f.Rule, mHash)
+				f.Occurrence = occMap[occKey]
+				occMap[occKey]++
 				out = append(out, f)
 			}
 		}
 		return nil
 	})
-	return out, err
+	return out, skipped, err
 }
 
 // ReadKeys reads base64 ed25519 public keys, one per line.

@@ -3,6 +3,7 @@
 package bench
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -34,7 +35,7 @@ func Run(dir string, es []engines.Engine) (*Metrics, error) {
 	}
 	var got []engines.Finding
 	for _, e := range es {
-		fs, err := e.Scan(dir)
+		fs, err := e.Scan(context.Background(), dir)
 		if err != nil {
 			return nil, err
 		}

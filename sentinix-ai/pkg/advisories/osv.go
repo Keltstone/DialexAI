@@ -147,6 +147,6 @@ type Engine struct{ Client Client }
 
 func (Engine) Name() string { return "advisories" }
 
-func (e Engine) Scan(root string) ([]engines.Finding, error) {
-	return e.Client.Match(context.Background(), Components(root))
+func (e Engine) Scan(ctx context.Context, root string) ([]engines.Finding, error) {
+	return e.Client.Match(ctx, Components(root))
 }

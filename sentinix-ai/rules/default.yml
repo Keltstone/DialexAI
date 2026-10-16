@@ -1,0 +1,6 @@
+rules:
+  - id: generic-secret
+    message: Possible hardcoded secret
+    severity: ERROR
+    languages: [generic]
+    pattern-regex: '(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*["''][A-Za-z0-9+/=_\-]{16,}["'']'

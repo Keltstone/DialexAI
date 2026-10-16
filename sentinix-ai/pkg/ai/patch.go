@@ -14,11 +14,12 @@ func DraftPatch(ctx context.Context, m Model, policy string, f engines.Finding, 
 	if !Allowed(policy, m) {
 		return "", fmt.Errorf("model %s is not allowed by the project's model policy", m.Name())
 	}
-	if policy != "local-only" {
+	if policy == "cloud-redacted" {
 		snippet = engines.Redact(snippet)
 	}
-	user := fmt.Sprintf("Fix this %s issue (%s) in %s with the smallest change.\nReply with a unified diff only (--- a/%s, +++ b/%s), no prose.\n%s",
-		f.Rule, f.Message, f.File, f.File, f.File, untrusted(snippet))
+	untrustedData := fmt.Sprintf("Rule: %s (%s)\nFile: %s\nSnippet:\n%s", f.Rule, f.Message, f.File, snippet)
+	user := fmt.Sprintf("Fix the issue described in the untrusted data below with the smallest change.\nReply with a unified diff only (--- a/%s, +++ b/%s), no prose.\n%s",
+		f.File, f.File, untrusted(untrustedData))
 	out, err := m.Complete(ctx, sysRules, user)
 	if err != nil {
 		return "", err

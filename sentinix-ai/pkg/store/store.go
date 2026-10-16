@@ -4,8 +4,10 @@ package store
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 
@@ -13,7 +15,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db       *sql.DB
+	auditKey []byte
+}
+
+func (s *Store) SetAuditKey(k []byte) {
+	s.auditKey = k
+}
 
 const schema = `
 create table if not exists projects(id text primary key, name text not null, host text not null, repo text not null,
@@ -27,18 +36,21 @@ create table if not exists findings(id text primary key, project_id text not nul
   evidence text not null, cwe text not null, fix text not null, status text not null, owner text not null,
   first_commit text not null, first_seen bigint not null, last_seen bigint not null, updated bigint not null,
   accepted_reason text not null, accepted_until bigint not null, ticket text not null, unique(project_id, fingerprint));
-create table if not exists audit(id text primary key, ts bigint not null, actor text not null, action text not null,
+create table if not exists audit(id text primary key, seq bigint not null default 0, ts bigint not null, actor text not null, action text not null,
   target text not null, commit_sha text not null, approver text not null);
 create table if not exists approvals(id text primary key, kind text not null, payload text not null, proposer text not null,
   status text not null, approver text not null, ts bigint not null);
 create table if not exists users(id text primary key, email text not null unique, name text not null, role text not null, created bigint not null);
-create table if not exists rule_overrides(rule text primary key, disabled bigint not null, severity bigint not null);
+create table if not exists rule_overrides(rule text not null, disabled bigint not null, severity bigint not null, scope text not null default '*', expires_at bigint not null default 0, primary key(rule, scope));
 create table if not exists surface(id text primary key, project_id text not null, commit_sha text not null, pr text not null,
   kind text not null, change text not null, file text not null, detail text not null, ts bigint not null);
 create table if not exists components(project_id text not null, ecosystem text not null, name text not null,
   version text not null, file text not null);
 create table if not exists verdicts(finding_id text primary key, body text not null, ts bigint not null);
-create table if not exists tokens(hash text primary key, project_id text not null, name text not null, created bigint not null)`
+create table if not exists tokens(hash text primary key, project_id text not null, name text not null, created bigint not null);
+create table if not exists webhook_deliveries(id text primary key, ts bigint not null);
+create table if not exists durable_queue(id text primary key, host text not null, payload text not null, status text not null, created bigint not null);
+create table if not exists skipped_file_overrides(project_id text not null default '*', file text not null, expires_at bigint not null, reason text not null default '', approver text not null default '', ts bigint not null default 0, primary key(project_id, file))`
 
 // Open takes "postgres://…" or "sqlite:<path>" (":memory:" works for tests).
 func Open(dsn string) (*Store, error) {
@@ -62,15 +74,44 @@ func Open(dsn string) (*Store, error) {
 	for _, q := range []string{
 		"alter table projects add column enforcement text not null default 'block'",
 		"alter table projects add column fail_on text not null default ''",
+		"alter table audit add column seq bigint not null default 0",
+		"alter table audit add column source text not null default ''",
+		"alter table audit add column before_val text not null default ''",
+		"alter table audit add column after_val text not null default ''",
+		"alter table tokens add column expires_at bigint not null default 0",
+		"alter table tokens add column revoked bigint not null default 0",
+		"alter table rule_overrides add column scope text not null default '*'",
+		"alter table rule_overrides add column expires_at bigint not null default 0",
+		"alter table audit add column engines text not null default ''",
+		"alter table audit add column pack_versions text not null default ''",
+		"alter table audit add column skipped_files text not null default ''",
+		"alter table audit add column mode text not null default ''",
+		"alter table audit add column outcome text not null default ''",
+		"alter table audit add column reason text not null default ''",
+		"alter table scans add column gate_decision text not null default ''",
+		"alter table scans add column reason text not null default ''",
+		"alter table scans add column skipped text not null default ''",
+		"alter table audit add column prev_hash text not null default ''",
+		"alter table audit add column hash text not null default ''",
 	} {
 		if _, err := db.Exec(q); err != nil && !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
 			return nil, err
 		}
 	}
-	return &Store{db}, nil
+	db.Exec("update durable_queue set status='pending' where status='running'")
+	st := &Store{db: db}
+	if k := os.Getenv("SENTINIX_AUDIT_KEY"); k != "" {
+		st.auditKey = []byte(k)
+	} else if k := os.Getenv("SENTINIX_SESSION_KEY"); k != "" {
+		st.auditKey = []byte(k)
+	}
+	return st, nil
 }
 
+
 func (s *Store) Close() error { return s.db.Close() }
+
+func (s *Store) DB() *sql.DB { return s.db }
 
 func id() string {
 	b := make([]byte, 8)

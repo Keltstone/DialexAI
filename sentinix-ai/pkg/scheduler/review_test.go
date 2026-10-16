@@ -27,7 +27,7 @@ func TestReviewReportsOnlyNew(t *testing.T) {
 	run("commit", "-qm", "head")
 
 	ev := &githost.Event{HeadSHA: "feat", HeadRef: "feat", BaseRef: "main", CloneURL: d, BaseCloneURL: d, Fork: true}
-	res, err := Review(ev, "", "")
+	res, err := Review(t.Context(), ev, "", "")
 	if err != nil || len(res.New) != 1 || res.New[0].File != "new.txt" {
 		t.Fatalf("got %+v %v", res, err)
 	}
@@ -45,7 +45,7 @@ func TestFullScan(t *testing.T) {
 	os.WriteFile(filepath.Join(d, "x.txt"), []byte("k=\"AKIA"+"ABCDEFGHIJKLMNOP\"\n"), 0o644)
 	run("add", ".")
 	run("commit", "-qm", "c")
-	res, _, err := Full(d, "main", "", "")
+	res, _, err := Full(t.Context(), d, "main", "", "", "")
 	if err != nil || len(res.New) != 1 || res.Commit == "" {
 		t.Fatalf("%+v %v", res, err)
 	}

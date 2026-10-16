@@ -21,6 +21,7 @@ type Scan struct {
 	Started, DurationMS             int64
 	New, Fixed, Unchanged           int
 	Packs, Engines                  string
+	GateDecision, Reason, Skipped   string
 }
 
 const findCols = "id,project_id,fingerprint,rule,engine,file,line,severity,message,evidence,cwe,fix,status,owner,first_commit,first_seen,last_seen,accepted_reason,accepted_until,ticket"

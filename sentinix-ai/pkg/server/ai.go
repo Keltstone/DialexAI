@@ -30,7 +30,7 @@ func (a *App) aiContext(w http.ResponseWriter, r *http.Request) (f store.Finding
 		return
 	}
 	user, token := h.CloneAuth()
-	snippet, err = scheduler.Snippet(h.RepoURL(p.Repo), p.Branch, user, token, f.File, f.Line)
+	snippet, err = scheduler.Snippet(r.Context(), h.RepoURL(p.Repo), p.Branch, user, token, h.ConfiguredHost(), f.File, f.Line)
 	if err != nil {
 		fail(w, err, http.StatusBadGateway)
 		return
@@ -103,7 +103,7 @@ func (a *App) aiTest(w http.ResponseWriter, r *http.Request) {
 	}
 	h := a.Hosts[p.Host]
 	user, token := h.CloneAuth()
-	err = scheduler.WithTree(h.RepoURL(p.Repo), p.Branch, user, token, func(dir string) error {
+	err = scheduler.WithTree(r.Context(), h.RepoURL(p.Repo), p.Branch, user, token, h.ConfiguredHost(), func(dir string) error {
 		return ai.Verify(r.Context(), a.TestRunner, dir, *test, patch, in.Command)
 	})
 	a.audit_(r, "ai:test", f.ID)
@@ -112,4 +112,19 @@ func (a *App) aiTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"verified": true, "patch": patch, "test": test})
+}
+
+func (a *App) models(w http.ResponseWriter, r *http.Request) {
+	type modelInfo struct {
+		Name  string `json:"name"`
+		Local bool   `json:"local"`
+	}
+	out := []modelInfo{}
+	for _, m := range a.AIModels {
+		out = append(out, modelInfo{
+			Name:  m.Name(),
+			Local: m.Local(),
+		})
+	}
+	writeJSON(w, out)
 }

@@ -20,10 +20,13 @@ import (
 	"sentinix/pkg/packs"
 	"sentinix/pkg/report"
 	"sentinix/pkg/sandbox"
+	"sentinix/pkg/scheduler"
 	"sentinix/pkg/server"
 	"sentinix/pkg/store"
 	"sentinix/pkg/web"
 )
+
+var version = "1.0.0"
 
 func main() {
 	cfgPath := flag.String("config", "sentinix.json", "JSON list of git hosts; values like \"$VAR\" are read from the environment")
@@ -39,10 +42,18 @@ func main() {
 	aiCfg := flag.String("ai", "", "JSON list of OpenAI-compatible models for the optional AI add-on")
 	sbImage := flag.String("sandbox-image", "", "container image with scanners; when set, external engines and generated tests run in it with no network")
 	enforce := flag.String("enforcement", "block", "default for repos: block (failing status stops the merge) or report (comment only); projects can override")
+	maxFetchBytes := flag.Int64("max-fetch-bytes", 500<<20, "maximum fetch and working-tree size in bytes")
+	reqEngines := flag.String("required-engines", "secrets,packs,semgrep,gitleaks,osv-scanner", "comma-separated engines required to run on every scan; missing engines fail the PR")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+	if *showVersion {
+		log.Printf("Sentinix AI Daemon (sentinixd) version %s\n", version)
+		return
+	}
 	if *enforce != "block" && *enforce != "report" {
 		log.Fatal("-enforcement must be block or report")
 	}
+	scheduler.MaxFetchBytes = *maxFetchBytes
 
 	min, err := engines.ParseSeverity(*failOn)
 	check(err)
@@ -57,8 +68,18 @@ func main() {
 	if len(key) < 32 {
 		log.Fatal("SENTINIX_SESSION_KEY must be at least 32 characters")
 	}
+	var requiredEngines []string
+	if *reqEngines != "" {
+		for _, e := range strings.Split(*reqEngines, ",") {
+			e = strings.TrimSpace(e)
+			if e != "" {
+				requiredEngines = append(requiredEngines, e)
+			}
+		}
+	}
 	app := &server.App{Static: web.Handler(), Store: st, Hosts: hosts, Packs: pe, FailOn: min, Enforcement: *enforce, Workers: *workers,
-		Sess:       auth.Sessions{Key: []byte(key), Secure: os.Getenv("SENTINIX_INSECURE_COOKIES") == ""},
+		RequiredEngines: requiredEngines,
+		Sess:            auth.Sessions{Key: []byte(key), Secure: os.Getenv("SENTINIX_INSECURE_COOKIES") == ""},
 		OwnerEmail: os.Getenv("SENTINIX_OWNER_EMAIL"),
 		Brand:      report.Brand{Name: os.Getenv("SENTINIX_BRAND_NAME"), Accent: os.Getenv("SENTINIX_BRAND_ACCENT")}}
 	if *integ != "" {
@@ -103,7 +124,14 @@ func main() {
 		}
 	}()
 	log.Printf("listening on %s, %d host(s)", *addr, len(hosts))
-	check(http.ListenAndServe(*addr, app.Handler()))
+	srv := &http.Server{
+		Addr:         *addr,
+		Handler:      app.Handler(),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+	check(srv.ListenAndServe())
 }
 
 func loadHosts(path string) (map[string]githost.Host, error) {

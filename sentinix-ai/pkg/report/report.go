@@ -10,13 +10,60 @@ import (
 	"sentinix/pkg/engines"
 )
 
+// SanitizeField escapes backticks, newlines, and markdown brackets to prevent code fence breakout and injection.
+func SanitizeField(s string) string {
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "```", `\x60\x60\x60`)
+	s = strings.ReplaceAll(s, "`", `\x60`)
+	s = strings.ReplaceAll(s, "[", `\[`)
+	s = strings.ReplaceAll(s, "]", `\]`)
+	s = strings.ReplaceAll(s, "(", `\(`)
+	s = strings.ReplaceAll(s, ")", `\)`)
+	return s
+}
+
 // Text ends with a coverage statement so a clean report is not read as "secure".
-func Text(w io.Writer, fs []engines.Finding, ran []string) {
+func Text(w io.Writer, fs []engines.Finding, ran []string, skipped ...[]string) {
 	for _, f := range fs {
-		fmt.Fprintf(w, "[%s] %s %s:%d %s\n", f.Severity, f.Rule, f.File, f.Line, f.Message)
+		rule := SanitizeField(f.Rule)
+		file := SanitizeField(f.File)
+		msg := SanitizeField(f.Message)
+		fmt.Fprintf(w, "[%s] %s %s:%d %s\n", f.Severity, rule, file, f.Line, msg)
 	}
 	fmt.Fprintf(w, "%d finding(s). Engines run: %s. Not covered: engines not installed, AI triage.\n",
 		len(fs), strings.Join(ran, ", "))
+	if len(skipped) > 0 && len(skipped[0]) > 0 {
+		list := skipped[0]
+		total := len(list)
+		if len(list) > 20 {
+			list = list[:20]
+		}
+		var escaped []string
+		for _, s := range list {
+			escaped = append(escaped, EscapeMarkdown(s))
+		}
+		if total > 20 {
+			fmt.Fprintf(w, "Skipped files (%d): %s, and %d more\n", total, strings.Join(escaped, ", "), total-20)
+		} else {
+			fmt.Fprintf(w, "Skipped files (%d): %s\n", total, strings.Join(escaped, ", "))
+		}
+	}
+}
+
+// EscapeMarkdown escapes markdown special characters.
+func EscapeMarkdown(s string) string {
+	var sb strings.Builder
+	for _, r := range s {
+		switch r {
+		case '\\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '<', '>':
+			sb.WriteRune('\\')
+			sb.WriteRune(r)
+		default:
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
 }
 
 func SARIF(w io.Writer, fs []engines.Finding) error {

@@ -33,15 +33,17 @@ func Triage(ctx context.Context, models []Model, policy string, f engines.Findin
 	if f.Severity < engines.Medium {
 		return nil, fmt.Errorf("triage is for medium and above")
 	}
-	if policy != "local-only" {
+	if policy == "cloud-redacted" {
 		snippet = engines.Redact(snippet)
 	}
 	if len(snippet) > 6000 {
 		snippet = snippet[:6000]
 	}
-	user := fmt.Sprintf("Rule: %s (%s)\nFile: %s line %d\nEngine message: %s\n%s\n\nIs this a real, exploitable issue or a false positive? "+
+	untrustedData := fmt.Sprintf("Rule: %s (%s)\nFile: %s line %d\nEngine message: %s\nSnippet:\n%s",
+		f.Rule, f.CWE, f.File, f.Line, f.Message, snippet)
+	user := fmt.Sprintf("%s\n\nIs this a real, exploitable issue or a false positive? "+
 		`Reply {"real":bool,"severity":"info|low|medium|high|critical","confidence":0..1,"reasoning":"short"}.`,
-		f.Rule, f.CWE, f.File, f.Line, f.Message, untrusted(snippet))
+		untrusted(untrustedData))
 
 	v := &Verdict{}
 	var ans []answer

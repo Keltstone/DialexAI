@@ -22,7 +22,18 @@ const (
 	Pending State = iota
 	Success
 	Failure
+	Neutral
+	Error
 )
+
+var stateNames = []string{"pending", "success", "failure", "neutral", "error"}
+
+func (s State) String() string {
+	if int(s) >= 0 && int(s) < len(stateNames) {
+		return stateNames[s]
+	}
+	return "unknown"
+}
 
 // Event is the provider-neutral view of a PR/MR that needs scanning.
 type Event struct {
@@ -32,9 +43,11 @@ type Event struct {
 	HeadSHA      string // may be short (Bitbucket); HeadRef is the fallback for fetching
 	HeadRef      string
 	BaseRef      string
+	BaseSHA      string // payload base SHA where the host provides it
 	CloneURL     string // head repo
-	BaseCloneURL string
-	Fork         bool
+	BaseCloneURL   string
+	Fork           bool
+	ConfiguredHost string
 }
 
 type Host interface {
@@ -47,6 +60,7 @@ type Host interface {
 	CloneAuth() (user, token string)
 	// RepoURL is the HTTPS clone URL for a repo path.
 	RepoURL(path string) string
+	ConfiguredHost() string
 }
 
 type Config struct {
@@ -74,6 +88,7 @@ func (c Config) web() string {
 }
 
 func (c Config) RepoURL(path string) string { return c.web() + "/" + path + ".git" }
+func (c Config) ConfiguredHost() string      { return c.web() }
 
 func New(c Config) (Host, error) {
 	if c.Secret == "" || c.Token == "" {
@@ -109,12 +124,22 @@ func hmacOK(secret, header string, body []byte) bool {
 }
 
 func (c Config) post(ctx context.Context, url string, hdr map[string]string, payload any) error {
-	b, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(b))
+	return c.request(ctx, "POST", url, hdr, payload)
+}
+
+func (c Config) request(ctx context.Context, method, url string, hdr map[string]string, payload any) error {
+	var body io.Reader
+	if payload != nil {
+		b, _ := json.Marshal(payload)
+		body = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	for k, v := range hdr {
 		req.Header.Set(k, v)
 	}

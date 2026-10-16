@@ -33,6 +33,7 @@ type Data struct {
 	Findings []store.Finding
 	Posture  store.Posture
 	Now      time.Time
+	Skipped  []string
 }
 
 type row struct {
@@ -62,7 +63,8 @@ table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px
 {{if .Posture.AvgFixDays}}Average time to fix: {{printf "%.1f" .Posture.AvgFixDays}} days.{{end}}</p>
 <h2>Coverage</h2>
 <p class="cov">{{if .Scan}}Last scan {{day .Scan.Started}} on commit {{.Scan.Commit}} ({{.Scan.Mode}}). Engines run: {{.Scan.Engines}}. Rule packs: {{.Scan.Packs}}.{{else}}No scan recorded.{{end}}
-A clean report only means these checks found nothing; it is not a statement that the product is secure. Not covered: engines that were not installed, logic flaws, runtime and infrastructure issues.</p>
+A clean report only means these checks found nothing; it is not a statement that the product is secure. Not covered: engines that were not installed, logic flaws, runtime and infrastructure issues.
+{{if .Skipped}}<br>Skipped files: {{range .Skipped}}{{.}} {{end}}{{end}}</p>
 <h2>Findings</h2>
 <table><tr><th>Severity</th><th>Rule</th><th>Where</th><th>Status</th><th>Standards</th><th>Fix</th></tr>
 {{range .Rows}}<tr><td class="sev {{sev .Finding}}">{{sev .Finding}}</td><td>{{.Rule}}<br>{{.Message}}</td><td>{{.File}}:{{.Line}}</td><td>{{.Status}}{{if .Owner}}<br>{{.Owner}}{{end}}{{if .AcceptedReason}}<br>accepted: {{.AcceptedReason}} (until {{day .AcceptedUntil}}){{end}}</td><td>{{.CWE}}{{if .OWASP}}<br>{{.OWASP}}{{end}}</td><td>{{.Fix}}</td></tr>
