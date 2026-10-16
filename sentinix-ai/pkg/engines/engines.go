@@ -292,8 +292,17 @@ func mask(s string) string {
 
 // Redact masks anything the secret rules recognise, for text that may leave the network (model prompts).
 func Redact(s string) string {
+	res, _ := RedactSafe(s)
+	return res
+}
+
+func RedactSafe(s string) (string, error) {
+	if len(secretRules) == 0 {
+		return "", fmt.Errorf("redaction unavailable: no rules loaded")
+	}
 	for _, r := range secretRules {
 		s = r.re.ReplaceAllStringFunc(s, func(m string) string { return mask(m) })
 	}
-	return s
+	return s, nil
 }
+
