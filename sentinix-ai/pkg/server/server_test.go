@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"sentinix/pkg/auth"
+	"sentinix/pkg/policy"
 	"sentinix/pkg/store"
 )
 
@@ -260,8 +261,19 @@ func TestIngestTrust_UnsignedCappedAndRefusesReopen(t *testing.T) {
 		t.Errorf("expected source to be ci-unattested, got %q", f.Source)
 	}
 
+	// Unattested findings must not fail the gate
+	if policy.Fails([]engines.Finding{f.Finding}, engines.Medium) {
+		t.Errorf("expected unattested finding to be excluded from gate, but policy.Fails returned true")
+	}
+
+	// Unattested findings must be excluded from AI context
+	wAI := e.call("rev@example.test", auth.Reviewer, "POST", "/api/findings/"+f.ID+"/ai/triage", "")
+	if wAI.Code != 400 {
+		t.Errorf("expected AI triage on unattested finding to fail with 400, got %d", wAI.Code)
+	}
+
 	// 2. Mark finding as fixed
-	if err := e.st.Triage(f.ID, "fixed", "dev@example.test", "", 0); err != nil {
+	if _, err := e.st.DB().Exec("update findings set status='fixed' where id=$1", f.ID); err != nil {
 		t.Fatal(err)
 	}
 

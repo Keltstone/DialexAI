@@ -34,7 +34,7 @@ create table if not exists findings(id text primary key, project_id text not nul
   engine text not null, file text not null, line bigint not null, severity bigint not null, message text not null,
   evidence text not null, cwe text not null, fix text not null, status text not null, owner text not null,
   first_commit text not null, first_seen bigint not null, last_seen bigint not null, updated bigint not null,
-  accepted_reason text not null, accepted_until bigint not null, ticket text not null, unique(project_id, fingerprint));
+  accepted_reason text not null, accepted_until bigint not null, ticket text not null, source text not null default '', unique(project_id, fingerprint));
 create table if not exists audit(id text primary key, seq bigint not null default 0, ts bigint not null, actor text not null, action text not null,
   target text not null, commit_sha text not null, approver text not null);
 create table if not exists approvals(id text primary key, kind text not null, payload text not null, proposer text not null,
@@ -92,6 +92,7 @@ func Open(dsn string) (*Store, error) {
 		"alter table scans add column skipped text not null default ''",
 		"alter table audit add column prev_hash text not null default ''",
 		"alter table audit add column hash text not null default ''",
+		"alter table findings add column source text not null default ''",
 	} {
 		if _, err := db.Exec(q); err != nil && !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
 			return nil, err

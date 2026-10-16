@@ -50,8 +50,12 @@ func (b Baseline) New(fs []engines.Finding) []engines.Finding {
 }
 
 // Fails reports whether any finding is at or above the threshold.
+// Unattested CI findings are excluded from the gate.
 func Fails(fs []engines.Finding, min engines.Severity) bool {
 	for _, f := range fs {
+		if f.Source == "ci-unattested" {
+			continue
+		}
 		if f.Severity >= min {
 			return true
 		}
