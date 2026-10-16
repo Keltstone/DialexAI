@@ -3,6 +3,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -49,6 +50,7 @@ create table if not exists verdicts(finding_id text primary key, body text not n
 create table if not exists tokens(hash text primary key, project_id text not null, name text not null, created bigint not null);
 create table if not exists webhook_deliveries(id text primary key, ts bigint not null);
 create table if not exists durable_queue(id text primary key, host text not null, payload text not null, status text not null, created bigint not null);
+create table if not exists leader_election(lock_key text primary key, holder text not null, expires_at bigint not null);
 create table if not exists skipped_file_overrides(project_id text not null default '*', file text not null, expires_at bigint not null, reason text not null default '', approver text not null default '', ts bigint not null default 0, primary key(project_id, file))`
 
 // Open takes "postgres://…" or "sqlite:<path>" (":memory:" works for tests).
@@ -120,3 +122,47 @@ func id() string {
 }
 
 func now() int64 { return time.Now().Unix() }
+
+func (s *Store) TryAcquireLeader(ctx context.Context, key, holder string, ttl time.Duration) (bool, error) {
+	nowUnix := time.Now().Unix()
+	expiresUnix := nowUnix + int64(ttl.Seconds())
+
+	// For Postgres, also attempt pg_try_advisory_lock
+	var isPG bool
+	var dummy int
+	if err := s.db.QueryRowContext(ctx, "select 1 from information_schema.tables limit 1").Scan(&dummy); err == nil {
+		isPG = true
+	}
+	if isPG {
+		var acquired bool
+		lockID := int64(777666555)
+		if err := s.db.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", lockID).Scan(&acquired); err == nil && !acquired {
+			return false, nil
+		}
+	}
+
+	// Portable table-based leader lock for both SQLite and Postgres
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	var curHolder string
+	var expiresAt int64
+	err = tx.QueryRowContext(ctx, "select holder, expires_at from leader_election where lock_key=$1", key).Scan(&curHolder, &expiresAt)
+	if err != nil { // not exists
+		if _, err := tx.ExecContext(ctx, "insert into leader_election(lock_key, holder, expires_at) values($1, $2, $3)", key, holder, expiresUnix); err != nil {
+			return false, nil
+		}
+		return tx.Commit() == nil, nil
+	}
+	if curHolder == holder || expiresAt <= nowUnix {
+		if _, err := tx.ExecContext(ctx, "update leader_election set holder=$1, expires_at=$2 where lock_key=$3", holder, expiresUnix, key); err != nil {
+			return false, nil
+		}
+		return tx.Commit() == nil, nil
+	}
+	return false, nil
+}
+
