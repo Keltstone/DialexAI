@@ -91,3 +91,35 @@ func TestVerifyGate(t *testing.T) {
 		t.Fatal("path escape accepted")
 	}
 }
+
+type countingFakeModel struct {
+	m         fake
+	bytesSent *int
+}
+
+func (c countingFakeModel) Name() string { return c.m.Name() }
+func (c countingFakeModel) Local() bool  { return c.m.Local() }
+func (c countingFakeModel) Complete(ctx context.Context, sys, user string) (string, error) {
+	if c.bytesSent != nil {
+		*c.bytesSent += len(sys) + len(user)
+	}
+	return c.m.Complete(ctx, sys, user)
+}
+
+func TestCloudRedacted_CorruptedRedactionSendsZeroBytes(t *testing.T) {
+	var bytesSent int
+	m := fake{"cloud", false, `{}`, nil}
+	cm := countingFakeModel{m: m, bytesSent: &bytesSent}
+
+	engines.CorruptRulesForTest()
+	defer engines.RestoreRulesForTest()
+
+	_, err := Triage(context.Background(), []Model{cm}, "cloud-redacted", finding, "sensitive content")
+	if err == nil || !strings.Contains(err.Error(), "REDACTION_UNAVAILABLE") {
+		t.Fatalf("expected REDACTION_UNAVAILABLE error, got: %v", err)
+	}
+	if bytesSent > 0 {
+		t.Fatalf("expected 0 bytes sent to model when redaction fails, sent %d bytes", bytesSent)
+	}
+}
+

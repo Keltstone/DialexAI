@@ -179,30 +179,67 @@ func (s Secrets) ScanWithSkipped(ctx context.Context, root string) ([]Finding, [
 				}
 
 				for _, rRule := range secretRules {
-					if m := rRule.re.FindString(lineTrimmed); m != "" {
+					if m := rRule.Regex.FindString(lineTrimmed); m != "" {
 						sev := High
 						mHash := sha256.Sum256([]byte(m))
-						occKey := fmt.Sprintf("%s|%x", rRule.id, mHash)
+						occKey := fmt.Sprintf("%s|%x", rRule.ID, mHash)
 						occ := occMap[occKey]
 						fCandidate := Finding{
-							Rule:       rRule.id,
+							Rule:       rRule.ID,
 							Engine:     "secrets",
 							File:       rel,
 							Line:       n,
 							Severity:   sev,
-							Message:    "possible hardcoded secret",
+							Message:    rRule.Description,
 							Evidence:   mask(m),
 							Match:      m,
 							Occurrence: occ,
 						}
 						fp := fCandidate.Fingerprint()
-						if strings.Contains(lineTrimmed, "sentinix:ignore") && ruleIgnored(rRule.id, fp) {
+						if strings.Contains(lineTrimmed, "sentinix:ignore") && ruleIgnored(rRule.ID, fp) {
 							continue
 						}
 						occMap[occKey]++
 						out = append(out, fCandidate)
 					}
 				}
+				// High entropy fallback
+				for _, word := range strings.Fields(lineTrimmed) {
+					word = strings.Trim(word, `"'=;:,()[]{}<>`)
+					if len(word) >= 20 && ShannonEntropy(word) >= 3.6 {
+						// Avoid duplicate if already matched by rule
+						alreadyMatched := false
+						for _, f := range out {
+							if f.Line == n && strings.Contains(f.Match, word) {
+								alreadyMatched = true
+								break
+							}
+						}
+						if !alreadyMatched {
+							mHash := sha256.Sum256([]byte(word))
+							occKey := fmt.Sprintf("high-entropy|%x", mHash)
+							occ := occMap[occKey]
+							fCandidate := Finding{
+								Rule:       "secret.high-entropy",
+								Engine:     "secrets",
+								File:       rel,
+								Line:       n,
+								Severity:   High,
+								Message:    "high-entropy secret token",
+								Evidence:   mask(word),
+								Match:      word,
+								Occurrence: occ,
+							}
+							fp := fCandidate.Fingerprint()
+							if strings.Contains(lineTrimmed, "sentinix:ignore") && ruleIgnored("secret.high-entropy", fp) {
+								continue
+							}
+							occMap[occKey]++
+							out = append(out, fCandidate)
+						}
+					}
+				}
+
 			}
 			if rErr != nil {
 				break

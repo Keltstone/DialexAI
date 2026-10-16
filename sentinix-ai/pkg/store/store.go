@@ -4,10 +4,9 @@ package store
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"fmt"
+	"os"
 	"strings"
 	"time"
 

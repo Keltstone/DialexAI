@@ -229,3 +229,71 @@ func TestStore_ListActive_ExcludesUnratifiedProposedItems(t *testing.T) {
 		t.Fatalf("expected 0 active items for un-ratified proposed KI, got %d (item: %+v)", len(activeItems), activeItems[0])
 	}
 }
+
+func TestT3_SimulatedABEval_SamplesPerArm_DemotionThreshold(t *testing.T) {
+	now := time.Now()
+	expires := now.Add(24 * time.Hour)
+
+	// Case 1: Simulated no-regression KI across N>=3 samples per arm
+	noRegressKI := &KnowledgeItem{
+		ID:        "ki-no-regress",
+		Title:     "Efficient Caching Pattern",
+		Status:    "active",
+		CreatedAt: now,
+		ExpiresAt: &expires,
+	}
+
+	baselineCalls := 0
+	kiCalls := 0
+	resPass, err := RunABEval(t.Context(), noRegressKI, func(ctx context.Context, item any) (int, bool, error) {
+		if item == nil {
+			baselineCalls++
+			return 2, true, nil // baseline: 2 rounds
+		}
+		kiCalls++
+		return 2, true, nil // with KI: 2 rounds (no regression)
+	}, ABEvalOptions{SamplesPerArm: 3, Threshold: 1.0})
+
+	if err != nil {
+		t.Fatalf("RunABEval failed: %v", err)
+	}
+	if baselineCalls < 3 || kiCalls < 3 {
+		t.Fatalf("expected N>=3 samples per arm, got baseline=%d, ki=%d", baselineCalls, kiCalls)
+	}
+	if resPass.Regression {
+		t.Fatalf("expected no regression for equal performance across N>=3 samples")
+	}
+	if noRegressKI.Status == "demoted" {
+		t.Fatalf("simulated no-regression KI must NOT be demoted across N>=3 samples per arm")
+	}
+
+	// Case 2: Clearly regressing KI across N>=3 samples per arm
+	regressKI := &KnowledgeItem{
+		ID:        "ki-regress",
+		Title:     "Harmful Recursive Loop Rule",
+		Status:    "active",
+		CreatedAt: now,
+		ExpiresAt: &expires,
+	}
+
+	resRegress, err := RunABEval(t.Context(), regressKI, func(ctx context.Context, item any) (int, bool, error) {
+		if item == nil {
+			return 2, true, nil // baseline: 2 rounds
+		}
+		return 6, true, nil // with KI: 6 rounds (clearly regressing)
+	}, ABEvalOptions{SamplesPerArm: 3, Threshold: 1.0})
+
+	if err != nil {
+		t.Fatalf("RunABEval failed: %v", err)
+	}
+	if !resRegress.Regression {
+		t.Fatalf("expected regression=true for clearly regressing KI")
+	}
+	if regressKI.Status != "demoted" {
+		t.Fatalf("clearly regressing KI MUST be demoted across N>=3 samples per arm, got %q", regressKI.Status)
+	}
+	if regressKI.IsActive() {
+		t.Fatalf("demoted KI must not be active")
+	}
+}
+

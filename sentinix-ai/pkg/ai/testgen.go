@@ -24,8 +24,13 @@ func ProposeTest(ctx context.Context, m Model, policy string, f engines.Finding,
 		return nil, fmt.Errorf("model %s is not allowed by the project's model policy", m.Name())
 	}
 	if policy == "cloud-redacted" {
-		snippet = engines.Redact(snippet)
+		redacted, err := engines.RedactSafe(snippet)
+		if err != nil {
+			return nil, fmt.Errorf("REDACTION_UNAVAILABLE: %w", err)
+		}
+		snippet = redacted
 	}
+
 	untrustedData := fmt.Sprintf("Rule: %s (%s)\nFile: %s\nSnippet:\n%s", f.Rule, f.Message, f.File, snippet)
 	user := fmt.Sprintf("Write one %s test proving the issue in the untrusted data below: it must FAIL while the issue exists and PASS once fixed.\n"+
 		`Reply {"path":"relative/path/to/test","content":"full test file"}.`+"\n%s", framework, untrusted(untrustedData))

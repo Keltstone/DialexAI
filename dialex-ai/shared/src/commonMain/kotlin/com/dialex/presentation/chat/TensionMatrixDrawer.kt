@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.dialex.domain.model.AgentAssertion
 import com.dialex.domain.model.TensionFilter
 import com.dialex.domain.model.TensionPair
 import com.dialex.domain.model.TensionStatus
@@ -315,27 +316,6 @@ private fun TensionFilterTab(
 private fun TensionCard(tension: TensionPair) {
     val cc = LocalCcColors.current
 
-    val statusColor = when (tension.status) {
-        TensionStatus.OPEN -> Color(0xFFD97706)
-        TensionStatus.EXPLORED -> Color(0xFF2563EB)
-        TensionStatus.RESOLVED -> Color(0xFF059669)
-        TensionStatus.ACCEPTED_TRADE_OFF -> Color(0xFF7C3AED)
-    }
-
-    val statusBg = when (tension.status) {
-        TensionStatus.OPEN -> Color(0xFFFEF3C7)
-        TensionStatus.EXPLORED -> Color(0xFFDBEAFE)
-        TensionStatus.RESOLVED -> Color(0xFFD1FAE5)
-        TensionStatus.ACCEPTED_TRADE_OFF -> Color(0xFFEDE9FE)
-    }
-
-    val statusLabel = when (tension.status) {
-        TensionStatus.OPEN -> "OPEN CONTRADICTION"
-        TensionStatus.EXPLORED -> "EXPLORED"
-        TensionStatus.RESOLVED -> "RESOLVED & SYNTHESIZED"
-        TensionStatus.ACCEPTED_TRADE_OFF -> "ACCEPTED TRADE-OFF"
-    }
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -345,249 +325,286 @@ private fun TensionCard(tension: TensionPair) {
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Top Row: Conflict & Status Badges
+        TensionCardHeader(
+            underlyingConflict = tension.underlyingConflict,
+            detectedInRound = tension.detectedInRound,
+            status = tension.status
+        )
+
+        TensionDialecticSplit(
+            thesis = tension.thesis,
+            antithesis = tension.antithesis
+        )
+
+        TensionStatusCallout(tension = tension)
+    }
+}
+
+@Composable
+private fun TensionCardHeader(
+    underlyingConflict: String,
+    detectedInRound: Int,
+    status: TensionStatus
+) {
+    val cc = LocalCcColors.current
+
+    val statusColor = when (status) {
+        TensionStatus.OPEN -> Color(0xFFD97706)
+        TensionStatus.EXPLORED -> Color(0xFF2563EB)
+        TensionStatus.RESOLVED -> Color(0xFF059669)
+        TensionStatus.ACCEPTED_TRADE_OFF -> Color(0xFF7C3AED)
+    }
+
+    val statusBg = when (status) {
+        TensionStatus.OPEN -> Color(0xFFFEF3C7)
+        TensionStatus.EXPLORED -> Color(0xFFDBEAFE)
+        TensionStatus.RESOLVED -> Color(0xFFD1FAE5)
+        TensionStatus.ACCEPTED_TRADE_OFF -> Color(0xFFEDE9FE)
+    }
+
+    val statusLabel = when (status) {
+        TensionStatus.OPEN -> "OPEN CONTRADICTION"
+        TensionStatus.EXPLORED -> "EXPLORED"
+        TensionStatus.RESOLVED -> "RESOLVED & SYNTHESIZED"
+        TensionStatus.ACCEPTED_TRADE_OFF -> "ACCEPTED TRADE-OFF"
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(cc.accent.copy(alpha = 0.12f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = underlyingConflict,
+                    color = cc.accent,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = "Detected Round $detectedInRound",
+                color = cc.textMuted,
+                fontSize = 11.sp
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(statusBg)
+                .padding(horizontal = 9.dp, vertical = 4.dp)
+        ) {
+            Text(
+                text = statusLabel,
+                color = statusColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun TensionDialecticSplit(
+    thesis: AgentAssertion,
+    antithesis: AgentAssertion
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        DialecticAssertionCard(
+            label = "THESIS • ${thesis.authorDisplayName}",
+            assertion = thesis,
+            modifier = Modifier.weight(1f)
+        )
+        DialecticAssertionCard(
+            label = "ANTITHESIS • ${antithesis.authorDisplayName}",
+            assertion = antithesis,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun DialecticAssertionCard(
+    label: String,
+    assertion: AgentAssertion,
+    modifier: Modifier = Modifier
+) {
+    val cc = LocalCcColors.current
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(cc.panelAlt)
+            .border(1.dp, cc.border.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(cc.accent.copy(alpha = 0.12f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = tension.underlyingConflict,
-                        color = cc.accent,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = "Detected Round ${tension.detectedInRound}",
-                    color = cc.textMuted,
-                    fontSize = 11.sp
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(statusBg)
-                    .padding(horizontal = 9.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = statusLabel,
-                    color = statusColor,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
-                )
-            }
+            Text(
+                text = label,
+                color = cc.textPrimary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.3.sp
+            )
+            Text(
+                text = assertion.provider.name,
+                color = cc.textMuted,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace
+            )
         }
-
-        // Two-Column Dialectic Split (Thesis vs Antithesis)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            // Left: Thesis
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(cc.panelAlt)
-                    .border(1.dp, cc.border.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "THESIS • ${tension.thesis.authorDisplayName}",
-                        color = cc.textPrimary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.3.sp
-                    )
-                    Text(
-                        text = tension.thesis.provider.name,
-                        color = cc.textMuted,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-                Text(
-                    text = tension.thesis.statement,
-                    color = cc.textPrimary.copy(alpha = 0.92f),
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                )
-                if (!tension.thesis.quote.isNullOrBlank()) {
-                    Text(
-                        text = "\"${tension.thesis.quote}\"",
-                        color = cc.textMuted,
-                        fontSize = 11.sp,
-                        fontStyle = FontStyle.Italic,
-                        lineHeight = 15.sp
-                    )
-                }
-            }
-
-            // Right: Antithesis
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(cc.panelAlt)
-                    .border(1.dp, cc.border.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "ANTITHESIS • ${tension.antithesis.authorDisplayName}",
-                        color = cc.textPrimary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.3.sp
-                    )
-                    Text(
-                        text = tension.antithesis.provider.name,
-                        color = cc.textMuted,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-                Text(
-                    text = tension.antithesis.statement,
-                    color = cc.textPrimary.copy(alpha = 0.92f),
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                )
-                if (!tension.antithesis.quote.isNullOrBlank()) {
-                    Text(
-                        text = "\"${tension.antithesis.quote}\"",
-                        color = cc.textMuted,
-                        fontSize = 11.sp,
-                        fontStyle = FontStyle.Italic,
-                        lineHeight = 15.sp
-                    )
-                }
-            }
+        Text(
+            text = assertion.statement,
+            color = cc.textPrimary.copy(alpha = 0.92f),
+            fontSize = 13.sp,
+            lineHeight = 18.sp
+        )
+        if (!assertion.quote.isNullOrBlank()) {
+            Text(
+                text = "\"${assertion.quote}\"",
+                color = cc.textMuted,
+                fontSize = 11.sp,
+                fontStyle = FontStyle.Italic,
+                lineHeight = 15.sp
+            )
         }
+    }
+}
 
-        // Bottom Callout: Synthesis / Trade-off / Open Alert
-        when (tension.status) {
-            TensionStatus.RESOLVED -> {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFD1FAE5).copy(alpha = 0.35f))
-                        .border(1.dp, Color(0xFF059669).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.CheckCircle,
-                        contentDescription = null,
-                        tint = Color(0xFF059669),
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Column {
-                        Text(
-                            text = "Synthesized in Round ${tension.resolvedInRound ?: tension.detectedInRound + 1}",
-                            color = Color(0xFF059669),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = tension.synthesis ?: "Contradiction resolved by convergence on hybrid architectural pattern.",
-                            color = cc.textPrimary.copy(alpha = 0.9f),
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp
-                        )
-                    }
-                }
-            }
-            TensionStatus.ACCEPTED_TRADE_OFF -> {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFEDE9FE).copy(alpha = 0.35f))
-                        .border(1.dp, Color(0xFF7C3AED).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Scale,
-                        contentDescription = null,
-                        tint = Color(0xFF7C3AED),
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Column {
-                        Text(
-                            text = "Accepted Architectural Trade-off",
-                            color = Color(0xFF7C3AED),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = tension.tradeOffRationale ?: "The council ratified this trade-off as an irreducible Pareto constraint.",
-                            color = cc.textPrimary.copy(alpha = 0.9f),
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp
-                        )
-                    }
-                }
-            }
-            TensionStatus.OPEN, TensionStatus.EXPLORED -> {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFFEF3C7).copy(alpha = 0.35f))
-                        .border(1.dp, Color(0xFFD97706).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Warning,
-                        contentDescription = null,
-                        tint = Color(0xFFD97706),
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Column {
-                        Text(
-                            text = "Active Dialectic Deadlock",
-                            color = Color(0xFFD97706),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Blocks consensus certification. Opposing models must formulate an architectural synthesis or formally log an accepted trade-off.",
-                            color = cc.textPrimary.copy(alpha = 0.9f),
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp
-                        )
-                    }
-                }
-            }
+@Composable
+private fun TensionStatusCallout(tension: TensionPair) {
+    when (tension.status) {
+        TensionStatus.RESOLVED -> ResolvedCallout(
+            resolvedInRound = tension.resolvedInRound ?: (tension.detectedInRound + 1),
+            synthesis = tension.synthesis
+        )
+        TensionStatus.ACCEPTED_TRADE_OFF -> TradeOffCallout(
+            tradeOffRationale = tension.tradeOffRationale
+        )
+        TensionStatus.OPEN, TensionStatus.EXPLORED -> DeadlockCallout()
+    }
+}
+
+@Composable
+private fun ResolvedCallout(resolvedInRound: Int, synthesis: String?) {
+    val cc = LocalCcColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFFD1FAE5).copy(alpha = 0.35f))
+            .border(1.dp, Color(0xFF059669).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.CheckCircle,
+            contentDescription = null,
+            tint = Color(0xFF059669),
+            modifier = Modifier.size(18.dp)
+        )
+        Column {
+            Text(
+                text = "Synthesized in Round $resolvedInRound",
+                color = Color(0xFF059669),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = synthesis ?: "Contradiction resolved by convergence on hybrid architectural pattern.",
+                color = cc.textPrimary.copy(alpha = 0.9f),
+                fontSize = 12.sp,
+                lineHeight = 16.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun TradeOffCallout(tradeOffRationale: String?) {
+    val cc = LocalCcColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFFEDE9FE).copy(alpha = 0.35f))
+            .border(1.dp, Color(0xFF7C3AED).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Scale,
+            contentDescription = null,
+            tint = Color(0xFF7C3AED),
+            modifier = Modifier.size(18.dp)
+        )
+        Column {
+            Text(
+                text = "Accepted Architectural Trade-off",
+                color = Color(0xFF7C3AED),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = tradeOffRationale ?: "The council ratified this trade-off as an irreducible Pareto constraint.",
+                color = cc.textPrimary.copy(alpha = 0.9f),
+                fontSize = 12.sp,
+                lineHeight = 16.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun DeadlockCallout() {
+    val cc = LocalCcColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFFFEF3C7).copy(alpha = 0.35f))
+            .border(1.dp, Color(0xFFD97706).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Warning,
+            contentDescription = null,
+            tint = Color(0xFFD97706),
+            modifier = Modifier.size(18.dp)
+        )
+        Column {
+            Text(
+                text = "Active Dialectic Deadlock",
+                color = Color(0xFFD97706),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Blocks consensus certification. Opposing models must formulate an architectural synthesis or formally log an accepted trade-off.",
+                color = cc.textPrimary.copy(alpha = 0.9f),
+                fontSize = 12.sp,
+                lineHeight = 16.sp
+            )
         }
     }
 }

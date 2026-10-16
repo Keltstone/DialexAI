@@ -29,7 +29,8 @@ trap 'rm -f "${PREV_TESTS_TMP}" "${CURR_TESTS_TMP}"' EXIT
 git grep -h "^func Test" "${BASELINE_TAG}" -- "*_test.go" | sed -E 's/^func (Test[A-Za-z0-9_]+).*/\1/' | sort -u > "${PREV_TESTS_TMP}"
 
 # Extract Test* functions from current working tree
-git grep -h "^func Test" HEAD -- "*_test.go" | sed -E 's/^func (Test[A-Za-z0-9_]+).*/\1/' | sort -u > "${CURR_TESTS_TMP}"
+git grep -h "^func Test" -- "*_test.go" | sed -E 's/^func (Test[A-Za-z0-9_]+).*/\1/' | sort -u > "${CURR_TESTS_TMP}"
+
 
 TOTAL_PREV=$(wc -l < "${PREV_TESTS_TMP}" | tr -d ' ')
 TOTAL_CURR=$(wc -l < "${CURR_TESTS_TMP}" | tr -d ' ')

@@ -105,6 +105,19 @@ graph TD
 
 ---
 
+### 6. [Sentinix AI Platform Wiki](sentinix-ai/01_CONCEPTUAL_FOUNDATION.md)
+*Continuous security review, PR gating, baseline tracking, and vulnerability posture engine.*
+- [01. Conceptual Foundation & Defensive Principles](sentinix-ai/01_CONCEPTUAL_FOUNDATION.md)  
+  *Change-delta paradigm (head vs. base), content-based fingerprinting, epistemic coverage statements, and separation of duties.*
+- [02. Core Technical Architecture & Security Model](sentinix-ai/02_CORE_TECHNICAL_ARCHITECTURE.md)  
+  *Component topology, multi-engine normalization, database-agnostic persistence (PostgreSQL & SQLite WAL), container sandboxing, and Ed25519 signing.*
+- [03. User Guide & Operational Manual](sentinix-ai/03_USER_GUIDE_AND_OPERATIONS.md)  
+  *Complete CLI reference (`scan`, `surface`, `packs`), baseline workflows, rule pack authoring, web dashboard operations, and audit reporting.*
+- [04. Complete Setup Scenarios & Deployment Guide](sentinix-ai/04_SETUP_SCENARIOS_AND_DEPLOYMENT_GUIDE.md)  
+  *Step-by-step guides for Serverless GitHub Actions, Serverless GitLab CI, Linux VM with Caddy, Production Docker Compose, and Enterprise Kubernetes (Helm).*
+
+---
+
 ## 🚀 Quick Navigation by Persona
 
 | If You Are A... | Start Here | Primary Documents to Consult |
@@ -113,7 +126,8 @@ graph TD
 | **CTO / VP of Engineering** | [Suite Overview](suite-architecture/01_ECOSYSTEM_OVERVIEW.md) | [Prospective Evaluation](suite-architecture/04_PROSPECTIVE_USERS_TECHNICAL_EVALUATION.md), [Security Vault](suite-architecture/03_SECURITY_VAULT_AND_SOVEREIGNTY.md) |
 | **Software Engineer / Contributor** | [Artix Cockpit Manual](artix-ai/03_USER_GUIDE_AND_COCKPIT.md) | [Artix Dev Guide](artix-ai/04_DEVELOPER_GUIDE_AND_EXTENSIBILITY.md), [Dialex Dev Guide](dialex-ai/04_DEVELOPER_GUIDE_AND_BUILD_PIPELINE.md) |
 | **QA Lead / SDET Architect** | [Kritix Overview](kritix-ai/01_CONCEPTUAL_FOUNDATION.md) | [Kritix Architecture](kritix-ai/02_CORE_TECHNICAL_ARCHITECTURE.md), [Kritix User Guide](kritix-ai/03_USER_GUIDE_AND_STUDIO.md) |
-| **Security & Compliance Auditor** | [Security Vault](suite-architecture/03_SECURITY_VAULT_AND_SOVEREIGNTY.md) | [Kritix Enterprise Guide](kritix-ai/04_DEVELOPER_GUIDE_AND_ENTERPRISE.md), [Artix Security Controls](artix-ai/02_CORE_TECHNICAL_ARCHITECTURE.md#security-model) |
+| **DevSecOps / AppSec Lead** | [Sentinix Conceptual Foundation](sentinix-ai/01_CONCEPTUAL_FOUNDATION.md) | [Sentinix Setup Scenarios](sentinix-ai/04_SETUP_SCENARIOS_AND_DEPLOYMENT_GUIDE.md), [Sentinix Architecture](sentinix-ai/02_CORE_TECHNICAL_ARCHITECTURE.md) |
+| **Security & Compliance Auditor** | [Security Vault](suite-architecture/03_SECURITY_VAULT_AND_SOVEREIGNTY.md) | [Sentinix User Guide](sentinix-ai/03_USER_GUIDE_AND_OPERATIONS.md), [Kritix Enterprise Guide](kritix-ai/04_DEVELOPER_GUIDE_AND_ENTERPRISE.md) |
 
 ---
 *Maintained by Kolta Labs. Licensed under the PolyForm Noncommercial License 1.0.0.*

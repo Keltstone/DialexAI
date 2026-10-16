@@ -39,7 +39,10 @@ jobs:
 
       - name: Run KMP Common & Desktop Tests
         working-directory: DialexAI/dialex-ai
-        run: ./gradlew :shared:allTests :desktopApp:compileKotlinJvm --no-daemon --stacktrace
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m"
+          KOTLIN_COMPILER_VM_OPTIONS: "-Xmx4g -XX:MaxMetaspaceSize=512m"
+        run: ./gradlew :shared:allTests :desktopApp:compileKotlinJvm --no-daemon --max-workers=2 --stacktrace
 
   android-build:
     name: Android Mobile Build Verification
@@ -70,7 +73,10 @@ jobs:
 
       - name: Compile Android Client
         working-directory: DialexAI/dialex-ai
-        run: ./gradlew :androidApp:compileDebugKotlin :androidApp:assembleDebug --no-daemon
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=512m"
+          KOTLIN_COMPILER_VM_OPTIONS: "-Xmx4g -XX:MaxMetaspaceSize=512m"
+        run: ./gradlew :androidApp:compileDebugKotlin :androidApp:assembleDebug --no-daemon --max-workers=2
 
   go-engine:
     name: Go Orchestration Engine Tests

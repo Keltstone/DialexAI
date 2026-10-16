@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # DialexAI Ecosystem Unified Build & Packaging Pipeline
-# Builds Artix AI, Dialex AI, Kritix AI, and Socratix Engine
+# Builds Artix AI, Dialex AI, Kritix AI, Sentinix AI, and Socratix Engine
 # Supports:
 #   - Standalone CLI / Daemon binaries & release archives (Go: macOS, Linux, Windows)
 #   - Desktop Applications (Compose Multiplatform: DMG, MSI, EXE, DEB, RPM)
@@ -21,7 +21,7 @@ BUILD_CLI=true
 BUILD_DESKTOP=false
 CROSS_COMPILE=false
 VARIANT="both" # "both", "with-engine", "without-engine"
-TARGET_APP="all" # "all", "dialex", "artix", "kritix", "socratix"
+TARGET_APP="all" # "all", "dialex", "artix", "kritix", "socratix", "sentinix"
 OS_NAME="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH_NAME="$(uname -m)"
 
@@ -41,7 +41,7 @@ Options:
   --all                 Build both CLI binaries and Desktop application installers
   --cli                 Build CLI binaries only (default: true if --desktop not set)
   --desktop             Build Compose Desktop packages (DMG on macOS, MSI/EXE on Windows, DEB/RPM on Linux)
-  --app <name>          Specify target application: 'all', 'dialex', 'artix', 'kritix', 'socratix' (default: all)
+  --app <name>          Specify target application: 'all', 'dialex', 'artix', 'kritix', 'socratix', 'sentinix' (default: all)
   --cross-compile       Cross-compile Go CLI & Engine binaries for all platforms (macOS, Linux, Windows)
   --with-engine         Build ONLY variants with bundled Socratix engine
   --without-engine      Build ONLY variants without engine (lightweight client)
@@ -160,6 +160,15 @@ build_cli_binaries() {
         echo "    ✓ ${DIST_DIR}/bin/kritix"
     fi
 
+    if [[ "${TARGET_APP}" == "all" || "${TARGET_APP}" == "sentinix" ]]; then
+        echo "  • Compiling Sentinix AI CLI & Daemon..."
+        CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION}" -o "${DIST_DIR}/bin/sentinix" ./sentinix-ai/cmd/sentinix
+        CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION}" -o "${DIST_DIR}/bin/sentinixd" ./sentinix-ai/cmd/sentinixd
+        chmod +x "${DIST_DIR}/bin/sentinix" "${DIST_DIR}/bin/sentinixd"
+        echo "    ✓ ${DIST_DIR}/bin/sentinix"
+        echo "    ✓ ${DIST_DIR}/bin/sentinixd"
+    fi
+
     # Cross-compilation matrix if requested
     if [[ "${CROSS_COMPILE}" == "true" ]]; then
         echo ""
@@ -223,6 +232,21 @@ build_cli_binaries() {
                     (cd "${stage_dir}" && zip -q "${DIST_DIR}/archives/${arc_name}.zip" "kritix${ext}")
                 else
                     tar -czf "${DIST_DIR}/archives/${arc_name}.tar.gz" -C "${stage_dir}" "kritix${ext}"
+                fi
+            fi
+
+            # Sentinix
+            if [[ "${TARGET_APP}" == "all" || "${TARGET_APP}" == "sentinix" ]]; then
+                GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 \
+                    go build -ldflags="-s -w -X main.version=${VERSION}" -o "${stage_dir}/sentinix${ext}" ./sentinix-ai/cmd/sentinix
+                GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 \
+                    go build -ldflags="-s -w -X main.version=${VERSION}" -o "${stage_dir}/sentinixd${ext}" ./sentinix-ai/cmd/sentinixd
+                
+                local arc_name="sentinix-v${VERSION}-${goos}-${goarch}"
+                if [[ "${goos}" == "windows" ]]; then
+                    (cd "${stage_dir}" && zip -q "${DIST_DIR}/archives/${arc_name}.zip" "sentinix${ext}" "sentinixd${ext}")
+                else
+                    tar -czf "${DIST_DIR}/archives/${arc_name}.tar.gz" -C "${stage_dir}" "sentinix${ext}" "sentinixd${ext}"
                 fi
             fi
         done

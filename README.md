@@ -37,7 +37,16 @@ DialexAI/
 │   ├── app/               # Standalone Compose Desktop Cockpit application
 │   └── build.gradle.kts   # Independent Gradle build & wrapper
 │
-├── go.work                # Go Workspace uniting socratix-engine and artix-ai
+├── kritix-ai/             # Kritix Autonomous QA & Testing Studio
+│   ├── cmd/               # kritix CLI binary
+│   └── pkg/               # DOM pruner, vision driver, OWASP DAST, quarantine
+│
+├── sentinix-ai/           # Sentinix Security Review & Vulnerability Posture
+│   ├── cmd/               # sentinix (CLI) & sentinixd (review server daemon)
+│   ├── pkg/               # rule packs, secrets scanner, advisories, AI council
+│   └── deploy/            # Dockerfile, docker-compose, Helm chart, CI templates
+│
+├── go.work                # Go Workspace uniting Go engines
 └── .github/workflows/     # Unified CI/CD pipelines
 ```
 
@@ -48,10 +57,21 @@ DialexAI/
 See the full [**Installation & Packaging Guide**](docs/INSTALLATION_AND_PACKAGING.md) for complete details.
 
 ### 1. Homebrew (macOS & Linux)
+
+Install via shorthand tap (auto-taps on install):
+```bash
+brew install kolta-labs/tap/sentinix # Sentinix security review & PR gate
+brew install kolta-labs/tap/artix    # Artix coding CLI
+brew install kolta-labs/tap/kritix   # Kritix QA studio CLI
+brew install kolta-labs/tap/socratix # Deliberation engine
+```
+
+Alternatively, tap manually:
 ```bash
 brew tap koltalabs/dialexai https://github.com/Kolta-Labs/DialexAI
 
 # CLI Binaries
+brew install sentinix            # Continuous security review & PR gate
 brew install socratix            # Deliberation engine
 brew install artix --with-engine # Artix coding CLI
 brew install kritix              # Kritix QA studio CLI

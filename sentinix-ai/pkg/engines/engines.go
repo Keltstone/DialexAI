@@ -271,17 +271,7 @@ func ParseSARIF(engine string, data []byte) ([]Finding, error) {
 	return fs, nil
 }
 
-var secretRules = []struct {
-	id string
-	re *regexp.Regexp
-}{
-	{"secret.aws-access-key", regexp.MustCompile(`AKIA[0-9A-Z]{16}`)},
-	{"secret.private-key", regexp.MustCompile(`-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----`)},
-	{"secret.github-token", regexp.MustCompile(`(gh[pousr]_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{82})`)},
-	{"secret.db-url", regexp.MustCompile(`(?i)[a-z0-9+.-]+://[^:\s]+:[^@\s]+@[^/\s]+/\S*`)},
-	{"secret.high-entropy", regexp.MustCompile(`(?i)(bearer\s+[A-Za-z0-9_\-\.]{24,}|eyJ[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}|(?:entropy)\s*[:=]\s*["'][A-Za-z0-9+/=_\-\.]{20,}["'])`)},
-	{"secret.generic-assignment", regexp.MustCompile(`(?i)(api[_-]?key|secret|passwd|password|token)\s*[:=]\s*["'][^"'\r\n]{16,}["']`)},
-}
+var secretRules = gitleaksRules
 
 func mask(s string) string {
 	if len(s) <= 8 {
@@ -296,13 +286,41 @@ func Redact(s string) string {
 	return res
 }
 
+var wordRe = regexp.MustCompile(`[A-Za-z0-9+/=_\-]{20,}`)
+
 func RedactSafe(s string) (string, error) {
 	if len(secretRules) == 0 {
 		return "", fmt.Errorf("redaction unavailable: no rules loaded")
 	}
 	for _, r := range secretRules {
-		s = r.re.ReplaceAllStringFunc(s, func(m string) string { return mask(m) })
+		s = r.Regex.ReplaceAllStringFunc(s, func(m string) string { return mask(m) })
 	}
+	// High entropy fallback for remaining unmasked candidate tokens
+	s = wordRe.ReplaceAllStringFunc(s, func(m string) string {
+		if strings.Contains(m, "****") {
+			return m
+		}
+		if len(m) >= 20 && ShannonEntropy(m) >= 3.6 {
+			return mask(m)
+		}
+		return m
+	})
 	return s, nil
 }
+
+var savedRules []SecretRule
+
+func CorruptRulesForTest() {
+	savedRules = secretRules
+	secretRules = nil
+}
+
+func RestoreRulesForTest() {
+	if savedRules != nil {
+		secretRules = savedRules
+		savedRules = nil
+	}
+}
+
+
 

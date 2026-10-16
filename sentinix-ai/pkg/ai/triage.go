@@ -34,8 +34,13 @@ func Triage(ctx context.Context, models []Model, policy string, f engines.Findin
 		return nil, fmt.Errorf("triage is for medium and above")
 	}
 	if policy == "cloud-redacted" {
-		snippet = engines.Redact(snippet)
+		redacted, err := engines.RedactSafe(snippet)
+		if err != nil {
+			return nil, fmt.Errorf("REDACTION_UNAVAILABLE: %w", err)
+		}
+		snippet = redacted
 	}
+
 	if len(snippet) > 6000 {
 		snippet = snippet[:6000]
 	}
