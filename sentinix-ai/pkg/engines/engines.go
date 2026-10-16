@@ -52,6 +52,7 @@ type Finding struct {
 	Fix        string   `json:"fix,omitempty"` // remediation text
 	Match      string   `json:"match,omitempty"`
 	Occurrence int      `json:"occurrence,omitempty"`
+	Source     string   `json:"source,omitempty"`
 }
 
 // Fingerprint ignores the line number so baselines survive unrelated edits.

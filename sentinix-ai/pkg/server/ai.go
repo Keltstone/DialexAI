@@ -15,6 +15,10 @@ func (a *App) aiContext(w http.ResponseWriter, r *http.Request) (f store.Finding
 		http.NotFound(w, r)
 		return
 	}
+	if f.Source == "ci-unattested" {
+		http.Error(w, "unattested findings are excluded from AI context", http.StatusBadRequest)
+		return
+	}
 	p, err = a.Store.Project(f.ProjectID)
 	if err != nil {
 		http.NotFound(w, r)

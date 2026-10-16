@@ -359,6 +359,11 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	source := "ci-unattested"
+	if signedUpload {
+		source = "ci-attested"
+	}
+
 	for i := range in.Findings {
 		f := &in.Findings[i]
 		if !signedUpload && !knownEngines[f.Engine] && !strings.HasPrefix(f.Engine, "pack:") {
@@ -370,6 +375,11 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid severity", http.StatusBadRequest)
 			return
 		}
+
+		if !signedUpload && f.Severity > engines.Medium {
+			f.Severity = engines.Medium
+		}
+		f.Source = source
 
 		// Ensure Match is hashed (no raw match on wire or stored)
 		if f.Match != "" && len(f.Match) != 64 {
@@ -405,7 +415,7 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Coverage ("ran") is never taken from the client and dummy findings must not close other findings: pass nil for ran
-	sc, err := a.Store.RecordScan(store.Scan{ProjectID: proj.ID, Mode: "ci", Commit: in.Commit}, nil, in.Findings)
+	sc, err := a.Store.RecordScan(store.Scan{ProjectID: proj.ID, Mode: "ci", Commit: in.Commit, Source: source}, nil, in.Findings)
 	if err != nil {
 		fail(w, err, 500)
 		return

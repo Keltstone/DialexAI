@@ -22,15 +22,16 @@ type Scan struct {
 	New, Fixed, Unchanged           int
 	Packs, Engines                  string
 	GateDecision, Reason, Skipped   string
+	Source                          string
 }
 
-const findCols = "id,project_id,fingerprint,rule,engine,file,line,severity,message,evidence,cwe,fix,status,owner,first_commit,first_seen,last_seen,accepted_reason,accepted_until,ticket"
+const findCols = "id,project_id,fingerprint,rule,engine,file,line,severity,message,evidence,cwe,fix,status,owner,first_commit,first_seen,last_seen,accepted_reason,accepted_until,ticket,source"
 
 func scanFinding(r interface{ Scan(...any) error }) (Finding, error) {
 	var f Finding
 	var sev int
 	err := r.Scan(&f.ID, &f.ProjectID, &f.Fingerprint, &f.Rule, &f.Engine, &f.File, &f.Line, &sev, &f.Message, &f.Evidence,
-		&f.CWE, &f.Fix, &f.Status, &f.Owner, &f.FirstCommit, &f.FirstSeen, &f.LastSeen, &f.AcceptedReason, &f.AcceptedUntil, &f.Ticket)
+		&f.CWE, &f.Fix, &f.Status, &f.Owner, &f.FirstCommit, &f.FirstSeen, &f.LastSeen, &f.AcceptedReason, &f.AcceptedUntil, &f.Ticket, &f.Source)
 	f.Severity = engines.Severity(sev)
 	return f, err
 }
@@ -62,15 +63,24 @@ func (s *Store) RecordScan(sc Scan, ran []string, fs []engines.Finding) (Scan, e
 	for _, f := range fs {
 		fp := f.Fingerprint()
 		seen[fp] = true
+		src := f.Source
+		if src == "" {
+			src = sc.Source
+		}
 		var st string
 		err := tx.QueryRow("select status from findings where project_id=$1 and fingerprint=$2", sc.ProjectID, fp).Scan(&st)
 		switch {
 		case err != nil: // not found
-			_, err = tx.Exec("insert into findings("+findCols+",updated) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'open','',$13,$14,$14,'',0,'',$14)",
-				id(), sc.ProjectID, fp, f.Rule, f.Engine, f.File, f.Line, int(f.Severity), f.Message, f.Evidence, f.CWE, f.Fix, sc.Commit, t)
+			_, err = tx.Exec("insert into findings("+findCols+",updated) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'open','',$13,$14,$14,'',0,'',$15,$14)",
+				id(), sc.ProjectID, fp, f.Rule, f.Engine, f.File, f.Line, int(f.Severity), f.Message, f.Evidence, f.CWE, f.Fix, sc.Commit, t, src)
 			sc.New++
 		case st == "fixed":
-			_, err = tx.Exec("update findings set status='open',line=$3,last_seen=$4,updated=$4 where project_id=$1 and fingerprint=$2", sc.ProjectID, fp, f.Line, t)
+			if src == "ci-unattested" || sc.Source == "ci-unattested" {
+				// Reopening a fixed finding from an unattested upload is refused.
+				continue
+			}
+			_, err = tx.Exec("update findings set status='open',line=$3,last_seen=$4,updated=$4,severity=$5,source=$6 where project_id=$1 and fingerprint=$2",
+				sc.ProjectID, fp, f.Line, t, int(f.Severity), src)
 			sc.New++
 		default:
 			_, err = tx.Exec("update findings set line=$3,last_seen=$4 where project_id=$1 and fingerprint=$2", sc.ProjectID, fp, f.Line, t)
