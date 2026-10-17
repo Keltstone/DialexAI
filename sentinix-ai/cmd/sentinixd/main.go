@@ -73,6 +73,7 @@ func main() {
 	if len(key) < 32 {
 		log.Fatal("SENTINIX_SESSION_KEY must be at least 32 characters")
 	}
+	st.StartAuditVerifier(15*time.Minute, log.Printf)
 	var requiredEngines []string
 	if *reqEngines != "" {
 		for _, e := range strings.Split(*reqEngines, ",") {

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -18,6 +19,7 @@ import (
 type Store struct {
 	db       *sql.DB
 	auditKey []byte
+	auditBad atomic.Bool
 }
 
 func (s *Store) SetAuditKey(k []byte) {

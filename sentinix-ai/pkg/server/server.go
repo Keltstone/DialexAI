@@ -396,6 +396,11 @@ func (a *App) metrics(w http.ResponseWriter, r *http.Request) {
 		_ = row.Scan(&qDepth)
 	}
 
+	ok := 0
+	if a.Store != nil && a.Store.AuditChainOK() {
+		ok = 1
+	}
+	fmt.Fprintf(w, "# HELP sentinix_audit_chain_ok 1 if the last scheduled audit-chain verification passed.\n# TYPE sentinix_audit_chain_ok gauge\nsentinix_audit_chain_ok %d\n", ok)
 	fmt.Fprintf(w, "# HELP sentinix_queue_depth Current depth of the scan job queue.\n")
 	fmt.Fprintf(w, "# TYPE sentinix_queue_depth gauge\n")
 	fmt.Fprintf(w, "sentinix_queue_depth %d\n", qDepth)

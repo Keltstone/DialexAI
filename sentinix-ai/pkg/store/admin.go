@@ -160,6 +160,26 @@ func (s *Store) AuditLog(limit int) ([]Audit, error) {
 	return out, rows.Err()
 }
 
+// StartAuditVerifier re-verifies the chain every interval; AuditChainOK feeds the metric.
+func (s *Store) StartAuditVerifier(interval time.Duration, logf func(string, ...any)) {
+	run := func() {
+		if err := s.VerifyAuditChain(); err != nil {
+			s.auditBad.Store(true)
+			logf("AUDIT CHAIN VERIFICATION FAILED: %v", err)
+			return
+		}
+		s.auditBad.Store(false)
+	}
+	run()
+	go func() {
+		for range time.Tick(interval) {
+			run()
+		}
+	}()
+}
+
+func (s *Store) AuditChainOK() bool { return !s.auditBad.Load() }
+
 func (s *Store) VerifyAuditChain() error {
 	rows, err := s.db.Query("select id,seq,ts,actor,action,target,commit_sha,approver,source,before_val,after_val,engines,pack_versions,skipped_files,mode,outcome,reason,prev_hash,hash from audit order by seq asc")
 	if err != nil {
