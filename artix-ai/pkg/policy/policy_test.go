@@ -2,6 +2,7 @@ package policy
 
 import (
 	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -522,6 +523,83 @@ func TestEnterpriseBuild_RequiresCompiledPublicKeyInAllEnterpriseBuildSteps(t *t
 		}
 	}
 }
+
+func TestP0_2_AutonomyGateSecurity(t *testing.T) {
+	tempDir := t.TempDir()
+	ResetCache()
+	defer ResetCache()
+
+	// 1. Self-signed policy via env HMAC key (ARTIX_POLICY_SIGNING_KEY)
+	hmacPolicyFile := filepath.Join(tempDir, "hmac_policy.json")
+	_ = os.WriteFile(hmacPolicyFile, []byte(`{
+		"allowAutonomous": true,
+		"enterpriseMode": false,
+		"approverIdentity": "attacker@local",
+		"expiresAt": "2039-12-31T23:59:59Z"
+	}`), 0644)
+	t.Setenv("ARTIX_POLICY_SIGNING_KEY", "attacker-hmac-secret-key-123456")
+	_ = SignPolicyFile(hmacPolicyFile, "attacker-hmac-secret-key-123456")
+	SetDefaultPolicyPath(hmacPolicyFile)
+	ResetCache()
+
+	if err := VerifyAutonomyGate(); err == nil {
+		t.Fatalf("SECURITY VULNERABILITY: VerifyAutonomyGate() succeeded for policy self-signed under env HMAC key! Must error.")
+	}
+
+	// 2. Self-signed policy via env Ed25519 pubkey (ARTIX_POLICY_TRUSTED_PUBKEY)
+	t.Setenv("ARTIX_POLICY_SIGNING_KEY", "")
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("failed to generate ed25519 key: %v", err)
+	}
+	edPolicyFile := filepath.Join(tempDir, "env_ed_policy.json")
+	_ = os.WriteFile(edPolicyFile, []byte(`{
+		"allowAutonomous": true,
+		"enterpriseMode": false,
+		"approverIdentity": "attacker@local",
+		"expiresAt": "2039-12-31T23:59:59Z"
+	}`), 0644)
+	if err := SignPolicyFileEd25519(edPolicyFile, priv); err != nil {
+		t.Fatalf("failed to sign policy: %v", err)
+	}
+	t.Setenv("ARTIX_POLICY_TRUSTED_PUBKEY", hex.EncodeToString(pub))
+	SetDefaultPolicyPath(edPolicyFile)
+	ResetCache()
+
+	if err := VerifyAutonomyGate(); err == nil {
+		t.Fatalf("SECURITY VULNERABILITY: VerifyAutonomyGate() succeeded for policy signed under env Ed25519 pubkey! Must error.")
+	}
+
+	// 3. Root-owned unsigned file must NOT grant autonomy
+	t.Setenv("ARTIX_POLICY_TRUSTED_PUBKEY", "")
+	unsignedPolicyFile := filepath.Join(tempDir, "unsigned_root_policy.json")
+	_ = os.WriteFile(unsignedPolicyFile, []byte(`{
+		"allowAutonomous": true,
+		"enterpriseMode": false,
+		"approverIdentity": "admin@local",
+		"expiresAt": "2039-12-31T23:59:59Z"
+	}`), 0644)
+	SetDefaultPolicyPath(unsignedPolicyFile)
+	ResetCache()
+
+	if err := VerifyAutonomyGate(); err == nil {
+		t.Fatalf("SECURITY VULNERABILITY: VerifyAutonomyGate() succeeded for unsigned file! Must error.")
+	}
+
+	// 4. Release ldflags with NO compiled key must error
+	RequireSignedPolicyFlag = "true"
+	CompiledTrustedPublicKeyHex = ""
+	ResetCache()
+	defer func() {
+		RequireSignedPolicyFlag = "false"
+		ResetCache()
+	}()
+
+	if err := VerifyAutonomyGate(); err == nil {
+		t.Fatalf("SECURITY VULNERABILITY: VerifyAutonomyGate() succeeded in release build with no compiled key! Must error.")
+	}
+}
+
 
 
 
