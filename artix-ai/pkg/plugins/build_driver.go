@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"artix/pkg/metrics"
 	"artix/pkg/policy"
 	"artix/pkg/sandbox"
 )
@@ -508,25 +509,49 @@ func (gr *GradleDriver) ValidateWrapper(rootDir string) error {
 }
 
 func (gr *GradleDriver) ResolveTasksToWarm(ctx context.Context, rootDir string) []string {
-	tasks := []string{"testClasses"}
+	var tasks []string
 	allTasks, err := gr.fetchAllTasks(ctx, rootDir)
+	taskMap := make(map[string]bool)
 	if err == nil {
-		taskMap := make(map[string]bool)
 		for _, t := range allTasks {
 			taskMap[t] = true
 		}
-		if taskMap["downloadKotlinNativeDistribution"] {
-			tasks = append(tasks, "downloadKotlinNativeDistribution")
+	}
+
+	if taskMap["downloadKotlinNativeDistribution"] {
+		tasks = append(tasks, "downloadKotlinNativeDistribution")
+	}
+
+	if gr.IsKMP(rootDir) {
+		selected, _, _ := gr.ResolveKMPTasks(ctx, rootDir)
+		for _, t := range selected {
+			tasks = append(tasks, t)
+			tLower := strings.ToLower(t)
+			if strings.HasPrefix(tLower, "ios") || strings.Contains(tLower, "native") {
+				if taskMap["compileTestKotlinIosSimulatorArm64"] {
+					tasks = append(tasks, "compileTestKotlinIosSimulatorArm64")
+				}
+				if taskMap["linkDebugTestIosSimulatorArm64"] {
+					tasks = append(tasks, "linkDebugTestIosSimulatorArm64")
+				}
+			}
 		}
-		if taskMap["iosSimulatorArm64TestClasses"] {
-			tasks = append(tasks, "iosSimulatorArm64TestClasses")
-		} else if taskMap["linkDebugTestIosSimulatorArm64"] {
-			tasks = append(tasks, "linkDebugTestIosSimulatorArm64")
-		} else if taskMap["iosSimulatorArm64Test"] {
-			tasks = append(tasks, "iosSimulatorArm64TestClasses")
+		if len(tasks) == 0 || (len(tasks) == 1 && taskMap["downloadKotlinNativeDistribution"]) {
+			tasks = append(tasks, "testClasses")
+		}
+	} else {
+		tasks = append(tasks, "testClasses")
+	}
+
+	seen := make(map[string]bool)
+	var deduped []string
+	for _, t := range tasks {
+		if !seen[t] && t != "" {
+			seen[t] = true
+			deduped = append(deduped, t)
 		}
 	}
-	return tasks
+	return deduped
 }
 
 func (gr *GradleDriver) Warm(ctx context.Context, rootDir string) error {
@@ -548,6 +573,12 @@ func (gr *GradleDriver) Warm(ctx context.Context, rootDir string) error {
 		AllowLoopback: true,
 	})
 	if !res.Success() {
+		combinedErr := res.Stderr + "\n" + res.Stdout
+		if artifact, ok := DetectOfflineCacheMiss(combinedErr); ok {
+			metrics.RecordOfflineCacheMiss()
+			policy.BlockAutonomy(fmt.Sprintf("OFFLINE_CACHE_MISS: %s", artifact))
+			return fmt.Errorf("OFFLINE_CACHE_MISS: %s", artifact)
+		}
 		return fmt.Errorf("gradle pre-warm failed: %s (%s)", res.Error, strings.TrimSpace(res.Stderr))
 	}
 	return nil

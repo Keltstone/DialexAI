@@ -586,10 +586,43 @@ func Active() *Policy {
 	}
 }
 
+var (
+	autonomyBlockedMu     sync.RWMutex
+	autonomyBlockedReason string
+)
+
+// BlockAutonomy explicitly blocks the autonomy gate (e.g. following OFFLINE_CACHE_MISS).
+func BlockAutonomy(reason string) {
+	autonomyBlockedMu.Lock()
+	defer autonomyBlockedMu.Unlock()
+	autonomyBlockedReason = reason
+}
+
+// ResetAutonomyBlock clears any active autonomy block.
+func ResetAutonomyBlock() {
+	autonomyBlockedMu.Lock()
+	defer autonomyBlockedMu.Unlock()
+	autonomyBlockedReason = ""
+}
+
+// AutonomyBlockReason returns any active autonomy block reason.
+func AutonomyBlockReason() string {
+	autonomyBlockedMu.RLock()
+	defer autonomyBlockedMu.RUnlock()
+	return autonomyBlockedReason
+}
+
 // VerifyAutonomyGate validates that autonomous operations are permitted by a cryptographically signed, unexpired policy.
 // It fails closed if the signature is absent, invalid, or expired, or if not verified by an Ed25519 key compiled in
 // or loaded from a root-owned, mode-0644, non-env location.
 func VerifyAutonomyGate() error {
+	autonomyBlockedMu.RLock()
+	blockedReason := autonomyBlockedReason
+	autonomyBlockedMu.RUnlock()
+	if blockedReason != "" {
+		return fmt.Errorf("autonomy gate blocked: %s", blockedReason)
+	}
+
 	pol := Active()
 	if pol == nil {
 		return errors.New("autonomy gate failed: no policy loaded")
