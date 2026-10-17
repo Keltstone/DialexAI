@@ -383,6 +383,14 @@ func (gr *GradleDriver) FormatTargetStatusSummary(passedTasks []string, skippedT
 	return "All targets green"
 }
 
+func (gr *GradleDriver) ValidateWrapper(rootDir string) error {
+	return nil
+}
+
+func (gr *GradleDriver) ResolveTasksToWarm(ctx context.Context, rootDir string) []string {
+	return []string{"testClasses"}
+}
+
 func (gr *GradleDriver) Warm(ctx context.Context, rootDir string) error {
 	gradlew := gr.gradlewCmd(rootDir)
 	cmd := exec.CommandContext(ctx, "sh", "-c", gradlew+" --refresh-dependencies dependencies testClasses")
@@ -798,6 +806,9 @@ func (x *XcodeDriver) getDestination() string {
 
 func (x *XcodeDriver) derivedDataPath(rootDir string) string {
 	return filepath.Join(rootDir, ".derivedData")
+}
+
+func (x *XcodeDriver) EnsureDerivedDataExcluded(rootDir string) {
 }
 
 func (x *XcodeDriver) CompileCmd(rootDir string) string {
