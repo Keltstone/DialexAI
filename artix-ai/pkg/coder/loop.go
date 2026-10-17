@@ -697,6 +697,7 @@ func (c *ConvergenceCoordinator) Run(
 					combinedErr := tRes.Stderr + "\n" + tRes.Stdout
 					if artifact, ok := plugins.DetectOfflineCacheMiss(combinedErr); ok {
 						metrics.RecordOfflineCacheMiss()
+						policy.BlockAutonomy(fmt.Sprintf("OFFLINE_CACHE_MISS: %s", artifact))
 						res.Error = fmt.Sprintf("OFFLINE_CACHE_MISS: %s", artifact)
 						_ = AppendRoundTrace(repoCtx.RootDir, &RoundTrace{
 							TaskID:          s.ID,
