@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"artix/pkg/sandbox"
 )
 
 // Client is the interface to an MCP server.
@@ -39,6 +42,11 @@ type StdioClient struct {
 // NewStdioClient starts a sub-process (e.g. `npx -y @modelcontextprotocol/server-postgres ...`) as an MCP server.
 func NewStdioClient(command string, args ...string) (*StdioClient, error) {
 	cmd := exec.Command(command, args...)
+	extraEnv := make(map[string]string)
+	if v := os.Getenv("GO_WANT_HELPER_PROCESS"); v != "" {
+		extraEnv["GO_WANT_HELPER_PROCESS"] = v
+	}
+	cmd.Env = sandbox.BuildSanitizedChildEnv("", extraEnv)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to open stdin pipe: %w", err)

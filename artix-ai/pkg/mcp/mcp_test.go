@@ -3,6 +3,7 @@ package mcp
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -390,7 +391,7 @@ func TestP2_JiraConnector_Base64Auth(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *HTTPClient, got %T", client)
 	}
-	expectedAuth := "Basic dXNlckBleGFtcGxlLmNvbXpteS1zZWNyZXQtdG9rZW4="
+	expectedAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("user@example.com:my-secret-token"))
 	actualAuth := httpCli.headers["Authorization"]
 	if actualAuth != expectedAuth {
 		t.Fatalf("Jira Authorization header not base64 encoded! expected %q, got %q", expectedAuth, actualAuth)
