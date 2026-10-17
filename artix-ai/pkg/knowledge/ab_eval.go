@@ -38,6 +38,11 @@ type ABEvalResult struct {
 	BaselineSamples []int     `json:"baselineSamples,omitempty"`
 	KISamples       []int     `json:"kiSamples,omitempty"`
 	PValue          float64   `json:"pValue"`
+	PRound          float64   `json:"pRound,omitempty"`
+	PFailure        float64   `json:"pFailure,omitempty"`
+	MDE             float64   `json:"mde,omitempty"`
+	KIFailures      int       `json:"kiFailures,omitempty"`
+	BaseFailures    int       `json:"baseFailures,omitempty"`
 	Alpha           float64   `json:"alpha"`
 	Regression      bool      `json:"regression"`
 	Status          string    `json:"status,omitempty"` // "pass", "regression", "unmeasured"
