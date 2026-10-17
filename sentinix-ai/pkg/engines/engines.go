@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -237,7 +238,31 @@ func copyTreeForScan(src, dst string) error {
 		".gitleaksignore":  true,
 		"osv-scanner.toml": true,
 	}
-	return filepath.Walk(src, func(p string, fi os.FileInfo, err error) error {
+	// ponytail: 16 workers is a guess; tune if copy still dominates on slow disks
+	jobs := make(chan copyJob, 256)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				data, err := os.ReadFile(j.src)
+				if err == nil {
+					err = os.WriteFile(j.dst, data, j.mode)
+				}
+				if err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = err
+					}
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+	err := filepath.Walk(src, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -262,12 +287,38 @@ func copyTreeForScan(src, dst string) error {
 			}
 			return os.Symlink(linkTarget, target)
 		}
-		data, err := os.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, fi.Mode())
+		jobs <- copyJob{p, target, fi.Mode()}
+		return nil
 	})
+	close(jobs)
+	wg.Wait()
+	if err == nil {
+		err = firstErr
+	}
+	return err
+}
+
+type copyJob struct {
+	src, dst string
+	mode     os.FileMode
+}
+
+// removeAllParallel deletes top-level entries concurrently; unlink-heavy trees are syscall-bound.
+func removeAllParallel(dir string) {
+	ents, _ := os.ReadDir(dir)
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 16)
+	for _, e := range ents {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(p string) {
+			defer wg.Done()
+			os.RemoveAll(p)
+			<-sem
+		}(filepath.Join(dir, e.Name()))
+	}
+	wg.Wait()
+	os.RemoveAll(dir)
 }
 
 func (e External) ScanContext(ctx context.Context, root string) ([]Finding, error) {
@@ -279,7 +330,7 @@ func (e External) ScanContext(ctx context.Context, root string) ([]Finding, erro
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(isoDir)
+	defer removeAllParallel(isoDir)
 
 	if err := copyTreeForScan(root, isoDir); err != nil {
 		return nil, err
@@ -320,7 +371,6 @@ func (e External) ScanContext(ctx context.Context, root string) ([]Finding, erro
 	}
 	return fs, nil
 }
-
 
 func ParseSARIF(engine string, data []byte) ([]Finding, error) {
 	type notification struct {
@@ -463,6 +513,3 @@ func RestoreRulesForTest() {
 		savedRules = nil
 	}
 }
-
-
-

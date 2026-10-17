@@ -20,6 +20,7 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           args: ["-db", "$(SENTINIX_DB)"{{ range .Values.args }}, {{ . | quote }}{{ end }}]
           envFrom: [{ secretRef: { name: {{ .Values.existingSecret }} } }]
+          resources: {{ toYaml .Values.resources | nindent 12 }}
           ports: [{ containerPort: 8080 }]
           readinessProbe: { httpGet: { path: /healthz, port: 8080 } }
           livenessProbe: { httpGet: { path: /healthz, port: 8080 }, initialDelaySeconds: 10 }
@@ -37,3 +38,21 @@ metadata: { name: {{ .Release.Name }} }
 spec:
   selector: { app: {{ .Release.Name }} }
   ports: [{ port: {{ .Values.service.port }}, targetPort: 8080 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: {{ .Release.Name }} }
+spec:
+  podSelector: { matchLabels: { app: {{ .Release.Name }} } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports: [{ port: 8080 }]
+      {{- with .Values.networkPolicy.ingressFrom }}
+      from: {{ toYaml . | nindent 8 }}
+      {{- end }}
+  egress:
+    - ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - ports: [{ port: 443 }, { port: 5432 }]
+      {{- with .Values.networkPolicy.egressTo }}
+      to: {{ toYaml . | nindent 8 }}
+      {{- end }}

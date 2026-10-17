@@ -7,9 +7,9 @@ import (
 	"sentinix/pkg/githost"
 )
 
-// TestProbe2SelfHosted tests that PR review and full scan on a configured GHE host
+// TestSelfHostedHostCheck tests that PR review and full scan on a configured GHE host
 // proceed past the host check, and a forged host is still rejected.
-func TestProbe2SelfHosted(t *testing.T) {
+func TestSelfHostedHostCheck(t *testing.T) {
 	// 1. Configured GHE host: Review proceeds past the host check (fails at fetch, not host check)
 	ev := &githost.Event{
 		HeadSHA:        strings.Repeat("a", 40),
