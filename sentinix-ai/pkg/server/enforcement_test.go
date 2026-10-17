@@ -80,3 +80,27 @@ func TestBlockOrReportPerProject(t *testing.T) {
 	e.ok(e.call("adm@example.test", auth.Admin, "PATCH", "/api/projects/"+p.ID, `{"fail_on":"huge"}`), 400)
 	e.ok(e.call("rev@example.test", auth.Reviewer, "PATCH", "/api/projects/"+p.ID, `{"enforcement":"report"}`), 403)
 }
+
+func TestCleanPRInBlockModeYieldsSuccessWithRequiredEngines(t *testing.T) {
+	e := setup(t)
+	required := []string{"packs", "secrets", "osv-scanner", "semgrep", "gitleaks"}
+	e.app.RequiredEngines = required
+	e.app.Enforcement = "block"
+	e.app.FailOn = engines.High
+
+	h := &fakeHost{state: -1}
+	res := &scheduler.Result{
+		New:     nil, // clean PR
+		Ran:     required,
+		Skipped: nil,
+		Commit:  "1111111111111111111111111111111111111111",
+	}
+
+	e.app.finishReview(context.Background(), h, &githost.Event{RepoPath: "o/r", PR: "10"}, res, time.Second)
+
+	if h.state != githost.Success {
+		t.Fatalf("expected Success status in block mode for clean PR, got: %v (desc: %s)", h.state, h.desc)
+	}
+	t.Logf("Clean PR in block mode status: %v (desc: %q)", h.state, h.desc)
+	t.Logf("Ran lists all required engines: %v", res.Ran)
+}
