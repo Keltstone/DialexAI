@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"artix/pkg/audit"
+	"artix/pkg/gate"
 	"artix/pkg/knowledge"
 	"artix/pkg/pilot"
 	"artix/pkg/policy"
@@ -197,6 +198,19 @@ func (s *WebhookServer) handleGitHubWebhook(w http.ResponseWriter, r *http.Reque
 			http.Error(w, "invalid signature", http.StatusUnauthorized)
 			return
 		}
+	}
+
+	projDir := ""
+	if s.cfg.StoragePath != "" {
+		projDir = filepath.Dir(s.cfg.StoragePath)
+	}
+	if _, err := gate.Pass(r.Context(), gate.Request{
+		EntryPoint: gate.EntryPointDaemonWebhook,
+		Actor:      "github-webhook",
+		ProjectDir: projDir,
+	}); err != nil {
+		http.Error(w, fmt.Sprintf("gate blocked webhook: %v", err), http.StatusForbidden)
+		return
 	}
 
 	// Delivery ID deduplication (check only, not consumed yet!)
@@ -1156,6 +1170,20 @@ func (s *WebhookServer) handleTasks(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			http.Error(w, "invalid json payload", http.StatusBadRequest)
+			return
+		}
+
+		projDir := ""
+		if s.cfg.StoragePath != "" {
+			projDir = filepath.Dir(s.cfg.StoragePath)
+		}
+		if _, err := gate.Pass(r.Context(), gate.Request{
+			EntryPoint: gate.EntryPointDaemonTasks,
+			Actor:      "daemon-client",
+			ProjectDir: projDir,
+			Prompt:     sub.Prompt,
+		}); err != nil {
+			http.Error(w, fmt.Sprintf("gate blocked task: %v", err), http.StatusForbidden)
 			return
 		}
 

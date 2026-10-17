@@ -16,6 +16,7 @@ import (
 
 	"artix/pkg/audit"
 	"artix/pkg/coder"
+	"artix/pkg/gate"
 	"artix/pkg/git"
 	"artix/pkg/persona"
 	"artix/pkg/policy"
@@ -490,6 +491,16 @@ func (s *Server) resolveBudget(sess *sessionState, params SessionPromptParams) *
 }
 
 func (s *Server) handlePlanPrompt(ctx context.Context, reqID any, sess *sessionState, params SessionPromptParams) {
+	if _, err := gate.Pass(ctx, gate.Request{
+		EntryPoint: gate.EntryPointACPSession,
+		Actor:      "acp-client",
+		ProjectDir: sess.rootDir,
+		Prompt:     params.Prompt,
+	}); err != nil {
+		s.sendError(reqID, -32000, fmt.Sprintf("gate rejected session: %v", err), nil)
+		return
+	}
+
 	s.sendNotification("session/progress", SessionProgressNotification{
 		SessionID: sess.id,
 		Phase:     "PLANNING",

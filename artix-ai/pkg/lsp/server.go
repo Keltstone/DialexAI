@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"artix/pkg/gate"
 	"artix/pkg/steering"
 )
 
@@ -182,6 +183,9 @@ func (s *Server) handleRequest(req *LSPRequest) {
 				"codeLensProvider": map[string]interface{}{
 					"resolveProvider": false,
 				},
+				"executeCommandProvider": map[string]interface{}{
+					"commands": []string{"artix.fixTaboo", "artix.deliberate", "artix.plan"},
+				},
 			},
 			"serverInfo": map[string]string{
 				"name":    "artix-lsp",
@@ -264,6 +268,9 @@ func (s *Server) handleRequest(req *LSPRequest) {
 		}
 		s.sendResponse(req.ID, lenses, nil)
 
+	case "workspace/executeCommand":
+		s.handleExecuteCommand(req)
+
 	default:
 		if req.ID != nil {
 			s.sendResponse(req.ID, nil, &LSPError{Code: -32601, Message: "Method not found"})
@@ -317,4 +324,32 @@ func (s *Server) validateDocument(uri, text string) {
 		URI:         uri,
 		Diagnostics: diags,
 	})
+}
+
+func (s *Server) handleExecuteCommand(req *LSPRequest) {
+	var p struct {
+		Command   string `json:"command"`
+		Arguments []any  `json:"arguments"`
+	}
+	_ = json.Unmarshal(req.Params, &p)
+
+	if _, err := gate.Pass(context.Background(), gate.Request{
+		EntryPoint: gate.EntryPointLSPCommand,
+		Actor:      "lsp-client",
+		ProjectDir: s.rootDir,
+		Prompt:     p.Command,
+	}); err != nil {
+		s.sendResponse(req.ID, nil, &LSPError{
+			Code:    CodeRequestCancelled,
+			Message: fmt.Sprintf("Gate rejected LSP command %s: %v", p.Command, err),
+		})
+		return
+	}
+
+	switch p.Command {
+	case "artix.fixTaboo", "artix.deliberate", "artix.plan":
+		s.sendResponse(req.ID, map[string]any{"ok": true, "command": p.Command, "governed": true}, nil)
+	default:
+		s.sendResponse(req.ID, nil, &LSPError{Code: -32601, Message: fmt.Sprintf("Unknown command: %s", p.Command)})
+	}
 }

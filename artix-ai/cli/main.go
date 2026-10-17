@@ -21,6 +21,7 @@ import (
 	"artix/pkg/audit"
 	"artix/pkg/coder"
 	"artix/pkg/forge"
+	"artix/pkg/gate"
 	"artix/pkg/git"
 	"artix/pkg/knowledge"
 	"artix/pkg/lsp"
@@ -233,6 +234,24 @@ func RunCLIWithIO(cwd string, reg *persona.Registry, rawArgs []string, stdin io.
 	}
 }
 
+func runREPL(cwd string, reg *persona.Registry, stdin io.Reader, stdout, stderr io.Writer) int {
+	actor := os.Getenv("USER")
+	if actor == "" {
+		actor = "local-developer"
+	}
+	if _, err := gate.Pass(context.Background(), gate.Request{
+		EntryPoint: gate.EntryPointCLIRepl,
+		Actor:      actor,
+		ProjectDir: cwd,
+	}); err != nil {
+		fmt.Fprintf(stderr, "Error: gate blocked repl: %v\n", err)
+		return 1
+	}
+	repl := tui.NewREPL(cwd, reg, stdin, stdout)
+	_ = repl.Run(context.Background())
+	return 0
+}
+
 func main() {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -242,15 +261,8 @@ func main() {
 
 	registry := persona.NewRegistry(cwd)
 
-	if len(os.Args) < 2 {
-		repl := tui.NewREPL(cwd, registry, os.Stdin, os.Stdout)
-		_ = repl.Run(context.Background())
-		return
-	}
-
-	if os.Args[1] == "repl" {
-		repl := tui.NewREPL(cwd, registry, os.Stdin, os.Stdout)
-		_ = repl.Run(context.Background())
+	if len(os.Args) < 2 || os.Args[1] == "repl" {
+		os.Exit(runREPL(cwd, registry, os.Stdin, os.Stdout, os.Stderr))
 		return
 	}
 
@@ -303,6 +315,23 @@ func runPlan(cwd string, reg *persona.Registry, args []string, human io.Writer, 
 		return 1
 	}
 	prompt := strings.Join(remaining, " ")
+
+	actor := os.Getenv("USER")
+	if actor == "" {
+		actor = "local-developer"
+	}
+	if _, err := gate.Pass(context.Background(), gate.Request{
+		EntryPoint: gate.EntryPointCLIPlan,
+		Actor:      actor,
+		ProjectDir: cwd,
+		Prompt:     prompt,
+	}); err != nil {
+		if isJSON {
+			sendJSON(map[string]any{"ok": false, "status": "error", "error": err.Error()})
+		}
+		fmt.Fprintf(stderr, "Error: gate blocked plan: %v\n", err)
+		return 1
+	}
 
 	repoCtx, err := repo.DetectContext(cwd)
 	if err != nil {
@@ -440,12 +469,29 @@ func runCode(cwd string, reg *persona.Registry, args []string, stdin io.Reader, 
 	}
 
 	// Enterprise Safety Gate
+	actor := os.Getenv("USER")
+	if actor == "" {
+		actor = "local-developer"
+	}
 	if *autonomyFlag == "autonomous" && !policy.IsAutonomousAllowed() {
 		errStr := "Error: Enterprise safety violation: --autonomy autonomous is disabled by default in enterprise/CI environments or disallowed by policy.\nA verified, cryptographically signed policy with allowAutonomous=true is required to permit unattended autonomous commits."
 		if isJSON {
 			sendJSON(map[string]any{"ok": false, "status": "error", "error": errStr})
 		}
 		fmt.Fprintf(stderr, "%s\n", errStr)
+		return 1
+	}
+
+	if _, err := gate.Pass(context.Background(), gate.Request{
+		EntryPoint: gate.EntryPointCLICode,
+		Actor:      actor,
+		Autonomy:   *autonomyFlag,
+		ProjectDir: cwd,
+	}); err != nil {
+		if isJSON {
+			sendJSON(map[string]any{"ok": false, "status": "error", "error": err.Error()})
+		}
+		fmt.Fprintf(stderr, "Error: gate blocked code: %v\n", err)
 		return 1
 	}
 
@@ -968,6 +1014,22 @@ func runReview(cwd string, reg *persona.Registry, args []string, human io.Writer
 			fmt.Fprintf(stderr, "Error reading git diff: %v\n", err)
 			return 1
 		}
+	}
+
+	actor := os.Getenv("USER")
+	if actor == "" {
+		actor = "local-developer"
+	}
+	if _, err := gate.Pass(context.Background(), gate.Request{
+		EntryPoint: gate.EntryPointCLIReview,
+		Actor:      actor,
+		ProjectDir: cwd,
+	}); err != nil {
+		if isJSON {
+			sendJSON(map[string]any{"ok": false, "status": "error", "error": err.Error()})
+		}
+		fmt.Fprintf(stderr, "Error: gate blocked review: %v\n", err)
+		return 1
 	}
 
 	if strings.TrimSpace(diff) == "" {
