@@ -143,11 +143,14 @@ func TestAuditConcurrent(t *testing.T) {
 	if dupCount != 0 {
 		t.Fatalf("expected 0 duplicate seq, got %d", dupCount)
 	}
+	t.Logf("0 duplicate seq (dupCount = %d)", dupCount)
 
 	// 2. Verify audit chain
-	if err := st.VerifyAuditChain(); err != nil {
-		t.Fatalf("VerifyAuditChain failed: %v", err)
+	chainErr := st.VerifyAuditChain()
+	if chainErr != nil {
+		t.Fatalf("VerifyAuditChain failed: %v", chainErr)
 	}
+	t.Logf("VerifyAuditChain returning: %v", chainErr)
 
 	// 3. Upgrade from rows with seq=0
 	// Insert rows with seq=0 to simulate pre-upgrade state
