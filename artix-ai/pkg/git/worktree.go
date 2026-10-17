@@ -186,12 +186,7 @@ func (m *WorktreeManager) MergeIntoContext(ctx context.Context, sw *ShadowWorktr
 	}
 	preCommit := strings.TrimSpace(string(preOut))
 
-	cleanupOnFailure := func() {
-		_ = m.runGit("merge", "--abort")
-		if preCommit != "" {
-			_ = m.runGit("update-ref", "HEAD", preCommit)
-		}
-	}
+
 
 	// Re-verification: Check if target branch has advanced since worktree was branched
 	if sw.BaseCommit != "" {
@@ -211,9 +206,25 @@ func (m *WorktreeManager) MergeIntoContext(ctx context.Context, sw *ShadowWorktr
 	}
 
 	if err := ctx.Err(); err != nil {
-		cleanupOnFailure()
 		return "", err
 	}
+
+	// Create ephemeral integration worktree so user's main checkout is never touched during merge
+	intDir := filepath.Join(m.worktreeDir, fmt.Sprintf("int-%s-%d", sw.TaskID, time.Now().UnixNano()))
+	addCmd := exec.CommandContext(ctx, "git", "worktree", "add", "--detach", intDir, preCommit)
+	addCmd.Dir = m.repoRoot
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to create integration worktree: %v\nOutput: %s", err, string(out))
+	}
+	defer func() {
+		removeCmd := exec.Command("git", "worktree", "remove", "--force", intDir)
+		removeCmd.Dir = m.repoRoot
+		_ = removeCmd.Run()
+		_ = os.RemoveAll(intDir)
+		pruneCmd := exec.Command("git", "worktree", "prune")
+		pruneCmd.Dir = m.repoRoot
+		_ = pruneCmd.Run()
+	}()
 
 	args := []string{"merge"}
 	if squash {
@@ -222,39 +233,44 @@ func (m *WorktreeManager) MergeIntoContext(ctx context.Context, sw *ShadowWorktr
 	args = append(args, sw.Branch)
 
 	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = m.repoRoot
+	cmd.Dir = intDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		cleanupOnFailure()
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
 		return "", fmt.Errorf("failed to merge shadow branch %s: %v\nOutput: %s", sw.Branch, err, string(out))
 	}
 
 	if squash {
 		if err := ctx.Err(); err != nil {
-			cleanupOnFailure()
 			return "", err
 		}
 		commitCmd := exec.CommandContext(ctx, "git", "commit", "-m", fmt.Sprintf("feat: merge shadow worktree %s", sw.TaskID))
-		commitCmd.Dir = m.repoRoot
-		if err := commitCmd.Run(); err != nil {
-			cleanupOnFailure()
-			return "", err
+		commitCmd.Dir = intDir
+		if out, err := commitCmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("failed to commit squashed merge: %v\nOutput: %s", err, string(out))
 		}
 	}
 
 	if err := ctx.Err(); err != nil {
-		cleanupOnFailure()
 		return "", err
 	}
 
-	// Get latest commit hash
+	// Get latest commit hash from integration worktree
 	revCmdPost := exec.Command("git", "rev-parse", "HEAD")
-	revCmdPost.Dir = m.repoRoot
-	hashBytes, _ := revCmdPost.Output()
-	return strings.TrimSpace(string(hashBytes)), nil
+	revCmdPost.Dir = intDir
+	hashBytes, err := revCmdPost.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get merged commit hash: %w", err)
+	}
+	mergedHash := strings.TrimSpace(string(hashBytes))
+
+	// Fast-forward target in m.repoRoot
+	ffCmd := exec.CommandContext(ctx, "git", "merge", "--ff-only", mergedHash)
+	ffCmd.Dir = m.repoRoot
+	if out, err := ffCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to fast-forward target to %s: %v\nOutput: %s", mergedHash, err, string(out))
+	}
+
+	return mergedHash, nil
 }
 
 // MergeIntoWithVerification merges the shadow branch, executes verifyCmds against the post-merge
@@ -263,8 +279,20 @@ func (m *WorktreeManager) MergeIntoWithVerification(sw *ShadowWorktree, targetBr
 	if m.IsDirty() {
 		return "", fmt.Errorf("refusing to merge: working tree %s contains uncommitted changes or untracked files", m.repoRoot)
 	}
+	if targetBranch == "" {
+		targetBranch = "HEAD"
+	}
 
-	// Remember pre-merge commit hash for rollback if tests fail
+	lockPath := filepath.Join(m.repoRoot, ".artix", "merge.lock")
+	_ = os.MkdirAll(filepath.Dir(lockPath), 0755)
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return "", fmt.Errorf("failed to open merge lock at %s: %w", lockPath, err)
+	}
+	unlock := lockFile(lf)
+	defer unlock()
+
+	// Remember pre-merge commit hash
 	revCmd := exec.Command("git", "rev-parse", "HEAD")
 	revCmd.Dir = m.repoRoot
 	preOut, err := revCmd.Output()
@@ -273,24 +301,69 @@ func (m *WorktreeManager) MergeIntoWithVerification(sw *ShadowWorktree, targetBr
 	}
 	preCommit := strings.TrimSpace(string(preOut))
 
-	// Perform merge with file-lock coordination and pre-merge collision checks
-	mergedHash, err := m.MergeInto(sw, targetBranch, squash)
-	if err != nil {
-		return "", err
+	// Create ephemeral integration worktree
+	intDir := filepath.Join(m.worktreeDir, fmt.Sprintf("int-verify-%s-%d", sw.TaskID, time.Now().UnixNano()))
+	addCmd := exec.Command("git", "worktree", "add", "--detach", intDir, preCommit)
+	addCmd.Dir = m.repoRoot
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to create integration worktree: %v\nOutput: %s", err, string(out))
+	}
+	defer func() {
+		removeCmd := exec.Command("git", "worktree", "remove", "--force", intDir)
+		removeCmd.Dir = m.repoRoot
+		_ = removeCmd.Run()
+		_ = os.RemoveAll(intDir)
+		pruneCmd := exec.Command("git", "worktree", "prune")
+		pruneCmd.Dir = m.repoRoot
+		_ = pruneCmd.Run()
+	}()
+
+	args := []string{"merge"}
+	if squash {
+		args = append(args, "--squash")
+	}
+	args = append(args, sw.Branch)
+
+	mergeCmd := exec.Command("git", args...)
+	mergeCmd.Dir = intDir
+	if out, err := mergeCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to merge shadow branch %s: %v\nOutput: %s", sw.Branch, err, string(out))
 	}
 
-	// Execute post-merge verification suite
+	if squash {
+		commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("feat: merge shadow worktree %s", sw.TaskID))
+		commitCmd.Dir = intDir
+		if out, err := commitCmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("failed to commit squashed merge: %v\nOutput: %s", err, string(out))
+		}
+	}
+
+	revCmdPost := exec.Command("git", "rev-parse", "HEAD")
+	revCmdPost.Dir = intDir
+	hashBytes, err := revCmdPost.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get merged commit hash: %w", err)
+	}
+	mergedHash := strings.TrimSpace(string(hashBytes))
+
+	// Execute post-merge verification suite against integration worktree or via runner
 	if runner != nil && len(verifyCmds) > 0 {
 		for _, cmdStr := range verifyCmds {
 			if vErr := runner(cmdStr); vErr != nil {
-				// Post-merge tests failed: rollback to preCommit without reset --hard or clean -fd
-				_ = m.runGit("merge", "--abort")
-				_ = m.runGit("update-ref", "HEAD", preCommit)
-				_ = m.runGit("update-ref", fmt.Sprintf("refs/heads/%s", targetBranch), preCommit)
-				_ = m.runGit("checkout", "-f", preCommit)
+				// Integration worktree is deleted by defer; main checkout was NEVER touched!
 				return "", fmt.Errorf("post-merge test verification failed for %q: %w (merge rolled back to %s)", cmdStr, vErr, preCommit)
 			}
 		}
+	}
+
+	// Verification passed: Fast-forward target in m.repoRoot
+	if m.IsDirty() {
+		return "", fmt.Errorf("refusing to update checkout: working tree %s became dirty during verification", m.repoRoot)
+	}
+	ffCmd := exec.Command("git", "merge", "--ff-only", mergedHash)
+	ffCmd.Dir = m.repoRoot
+	if out, err := ffCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("failed to fast-forward target to %s: %v\nOutput: %s", mergedHash, err, string(out))
 	}
 
 	return mergedHash, nil
