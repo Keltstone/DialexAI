@@ -44,9 +44,10 @@ type Result struct {
 	Commit     string
 	// Components is the SBOM of a full scan.
 	Components []advisories.Component
-	Skipped    []string
-	Gaps       []string
-	EngineMeta map[string]engines.EngineMetadata
+	Skipped      []string
+	Gaps         []string
+	EngineMeta   map[string]engines.EngineMetadata
+	Suppressions []engines.InlineSuppression
 }
 
 var (
@@ -548,6 +549,9 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 		Skipped:    skipped,
 		Gaps:       gaps,
 		EngineMeta: meta,
+	}
+	if sups, err := engines.FindInlineSuppressions(head); err == nil {
+		res.Suppressions = sups
 	}
 	if d, err := r.gitContext(ctx, "diff", "-U0", baseCommit, headSHA); err == nil {
 		res.Surface, _ = diffmap.Parse(strings.NewReader(d))

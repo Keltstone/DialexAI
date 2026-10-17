@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -399,6 +400,80 @@ func (a *App) metrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP sentinix_redaction_fallback_total Redaction fallback count.\n")
 	fmt.Fprintf(w, "# TYPE sentinix_redaction_fallback_total counter\n")
 	fmt.Fprintf(w, "sentinix_redaction_fallback_total %d\n", redactionFallbacks.Load())
+
+	var revQueueDepth int
+	var oldestSec float64
+	var slaBreaches int
+	nowUnix := time.Now().Unix()
+	if a.Store != nil && a.Store.DB() != nil {
+		rows, err := a.Store.DB().QueryContext(r.Context(), "select ts from approvals where status='pending' order by ts asc")
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var ts int64
+				if rows.Scan(&ts) == nil {
+					revQueueDepth++
+					age := float64(nowUnix - ts)
+					if age > oldestSec {
+						oldestSec = age
+					}
+					if age > 86400 { // 24h SLA
+						slaBreaches++
+					}
+				}
+			}
+		}
+	}
+
+	fmt.Fprintf(w, "# HELP sentinix_reviewer_queue_depth Depth of pending approvals in the reviewer queue.\n")
+	fmt.Fprintf(w, "# TYPE sentinix_reviewer_queue_depth gauge\n")
+	fmt.Fprintf(w, "sentinix_reviewer_queue_depth %d\n", revQueueDepth)
+
+	fmt.Fprintf(w, "# HELP sentinix_reviewer_queue_oldest_seconds Age of oldest pending approval in seconds.\n")
+	fmt.Fprintf(w, "# TYPE sentinix_reviewer_queue_oldest_seconds gauge\n")
+	fmt.Fprintf(w, "sentinix_reviewer_queue_oldest_seconds %f\n", oldestSec)
+
+	fmt.Fprintf(w, "# HELP sentinix_reviewer_queue_sla_breaches_total Number of pending approvals exceeding SLA.\n")
+	fmt.Fprintf(w, "# TYPE sentinix_reviewer_queue_sla_breaches_total counter\n")
+	fmt.Fprintf(w, "sentinix_reviewer_queue_sla_breaches_total %d\n", slaBreaches)
+}
+
+func (a *App) ProposeInlineSuppression(projectID string, s engines.InlineSuppression) (string, error) {
+	if a.Store == nil {
+		return "", errors.New("no store configured")
+	}
+	s.Project = projectID
+	payload := map[string]any{
+		"project":     s.Project,
+		"file":        s.File,
+		"line":        s.Line,
+		"rule":        s.Rule,
+		"until":       s.Until,
+		"owner":       s.Owner,
+		"reason":      s.Reason,
+		"fingerprint": s.Fingerprint,
+	}
+
+	// Check if an approval already exists for this exact suppression
+	if apps, err := a.Store.Approvals("pending"); err == nil {
+		for _, ap := range apps {
+			if ap.Kind == "sentinix:ignore" || ap.Kind == "ignore" {
+				var p struct {
+					Project string `json:"project"`
+					File    string `json:"file"`
+					Line    int    `json:"line"`
+					Rule    string `json:"rule"`
+				}
+				if json.Unmarshal(ap.Payload, &p) == nil {
+					if p.Project == s.Project && p.File == s.File && p.Line == s.Line && (p.Rule == s.Rule || s.Rule == "*") {
+						return ap.ID, nil
+					}
+				}
+			}
+		}
+	}
+
+	return a.Store.Propose("sentinix:ignore", payload, s.Owner)
 }
 
 func randID() string {

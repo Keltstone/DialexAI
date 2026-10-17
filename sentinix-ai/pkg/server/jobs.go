@@ -333,6 +333,9 @@ func (a *App) finishReview(ctx context.Context, h githost.Host, ev *githost.Even
 		}
 		a.Store.RecordPRScan(sc)
 		a.Store.AddSurface(proj.ID, res.Commit, ev.PR, res.Surface)
+		for _, s := range res.Suppressions {
+			a.ProposeInlineSuppression(proj.ID, s)
+		}
 	}
 }
 
