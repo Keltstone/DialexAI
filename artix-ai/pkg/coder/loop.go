@@ -66,6 +66,7 @@ type LoopOptions struct {
 	MaxTokens                          int                 `json:"maxTokens,omitempty"`
 	MaxUSD                             float64             `json:"maxUsd,omitempty"`
 	MaxWall                            time.Duration       `json:"maxWall,omitempty"`
+	RequireProviderUsage               bool                `json:"requireProviderUsage,omitempty"`
 	CoderUsageTracker                  func() *ProviderUsage
 	ReviewerUsageTracker               func() *ProviderUsage
 	TriggerABEval                      bool                                  `json:"triggerAbEval,omitempty"`
@@ -424,7 +425,7 @@ func (c *ConvergenceCoordinator) Run(
 			if opts != nil && opts.Model != "" {
 				modelKey = opts.Model
 			}
-			costPer1k, err := budget.GetModelPrice(modelKey)
+			_, err := budget.GetModelPrice(modelKey)
 			if err != nil {
 				res.Error = err.Error()
 				res.CostReport = costReport
@@ -443,10 +444,23 @@ func (c *ConvergenceCoordinator) Run(
 				})
 				return res
 			}
-			coderCostUSD := (float64(totalCoderTokens) / 1000.0) * costPer1k
+			coderCostUSD, _ := budget.CalculateModelCost(modelKey, coderPromptTokens, coderPatchTokens)
 			var coderUsage *ProviderUsage
 			if opts != nil && opts.CoderUsageTracker != nil {
 				coderUsage = opts.CoderUsageTracker()
+			}
+			if budget != nil && (budget.HasFinancialCap() || budget.MaxStoryTokens > 0) && coderUsage == nil && opts != nil && opts.RequireProviderUsage {
+				res.Error = "budget error: provider usage tracking required when budget cap is set"
+				res.CostReport = costReport
+				return res
+			}
+			if coderUsage != nil && len(budget.ModelPricingTable) > 0 {
+				outputTokens := coderUsage.CompletionTokens + coderUsage.ThinkingTokens
+				if reconciled, err := budget.CalculateModelCost(modelKey, coderUsage.PromptTokens, outputTokens); err == nil {
+					coderCostUSD = reconciled
+					totalCoderTokens = coderUsage.TotalTokens
+					coderUsage = nil
+				}
 			}
 			budget.RecordRoundUsage(totalCoderTokens, coderCostUSD, coderUsage)
 			costReport.TotalTokens += totalCoderTokens

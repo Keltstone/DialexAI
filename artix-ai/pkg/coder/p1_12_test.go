@@ -67,11 +67,12 @@ func TestP1_12_TokenAccounting_RequireProviderUsageWhenCapSet(t *testing.T) {
 
 	rc, _ := repo.DetectContext(tempDir)
 
-	// Set a story financial cap
-	t.Setenv("ARTIX_BUDGET_STORY_USD", "1.00")
+	// Set a story financial cap and pricing
+	t.Setenv("ARTIX_BUDGET_PRICE_PER_1K", "0.01")
 
 	opts := &LoopOptions{
 		MaxRounds:             1,
+		MaxUSD:                1.00,
 		Autonomy:              AutonomySupervised,
 		TestCommandsConfirmed: true,
 		RequireProviderUsage:  true,
