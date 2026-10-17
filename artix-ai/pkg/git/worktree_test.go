@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -198,4 +199,195 @@ func TestWorktreeManager_MergeWithVerificationRollback(t *testing.T) {
 		t.Fatal("broken.txt should not exist in working directory after rollback")
 	}
 }
+
+func TestWorktreeManager_DirtyCheckoutPreservationAcrossFailures(t *testing.T) {
+	cases := []struct {
+		name        string
+		setupShadow func(t *testing.T, mgr *WorktreeManager, mainRepo string) *ShadowWorktree
+		runMerge    func(ctx context.Context, mgr *WorktreeManager, sw *ShadowWorktree) error
+	}{
+		{
+			name: "conflict",
+			setupShadow: func(t *testing.T, mgr *WorktreeManager, mainRepo string) *ShadowWorktree {
+				sw, err := mgr.CreateShadow("task-conflict", "main")
+				if err != nil {
+					t.Fatalf("CreateShadow failed: %v", err)
+				}
+				// Commit conflicting change on shadow branch
+				_ = os.WriteFile(filepath.Join(sw.Path, "conflict_file.txt"), []byte("shadow version conflict\n"), 0644)
+				_, _ = sw.RecordCheckpoint(1, "shadow conflict commit", true)
+
+				// Commit conflicting change to main branch
+				_ = os.WriteFile(filepath.Join(mainRepo, "conflict_file.txt"), []byte("main version conflicting edit\n"), 0644)
+				cmdAdd := exec.Command("git", "add", "conflict_file.txt")
+				cmdAdd.Dir = mainRepo
+				_ = cmdAdd.Run()
+				cmdCommit := exec.Command("git", "commit", "-m", "advance main with conflict")
+				cmdCommit.Dir = mainRepo
+				_ = cmdCommit.Run()
+				return sw
+			},
+			runMerge: func(ctx context.Context, mgr *WorktreeManager, sw *ShadowWorktree) error {
+				_, err := mgr.MergeIntoContext(ctx, sw, "main", false)
+				return err
+			},
+		},
+		{
+			name: "context_cancel",
+			setupShadow: func(t *testing.T, mgr *WorktreeManager, mainRepo string) *ShadowWorktree {
+				sw, err := mgr.CreateShadow("task-cancel", "main")
+				if err != nil {
+					t.Fatalf("CreateShadow failed: %v", err)
+				}
+				_ = os.WriteFile(filepath.Join(sw.Path, "file.txt"), []byte("some content\n"), 0644)
+				_, _ = sw.RecordCheckpoint(1, "checkpoint", true)
+				return sw
+			},
+			runMerge: func(ctx context.Context, mgr *WorktreeManager, sw *ShadowWorktree) error {
+				cancelCtx, cancel := context.WithCancel(ctx)
+				cancel() // already cancelled
+				_, err := mgr.MergeIntoContext(cancelCtx, sw, "main", false)
+				return err
+			},
+		},
+		{
+			name: "squash_commit_failure",
+			setupShadow: func(t *testing.T, mgr *WorktreeManager, mainRepo string) *ShadowWorktree {
+				sw, err := mgr.CreateShadow("task-squash-fail", "main")
+				if err != nil {
+					t.Fatalf("CreateShadow failed: %v", err)
+				}
+				_ = os.WriteFile(filepath.Join(sw.Path, "squash_file.txt"), []byte("squash content\n"), 0644)
+				_, _ = sw.RecordCheckpoint(1, "squash commit", true)
+				// Install a failing pre-commit hook in repoRoot to force commit failure
+				hooksDir := filepath.Join(mainRepo, ".git", "hooks")
+				_ = os.MkdirAll(hooksDir, 0755)
+				hookFile := filepath.Join(hooksDir, "pre-commit")
+				_ = os.WriteFile(hookFile, []byte("#!/bin/sh\nexit 1\n"), 0755)
+				return sw
+			},
+			runMerge: func(ctx context.Context, mgr *WorktreeManager, sw *ShadowWorktree) error {
+				_, err := mgr.MergeIntoContext(ctx, sw, "main", true)
+				return err
+			},
+		},
+		{
+			name: "post_merge_test_failure",
+			setupShadow: func(t *testing.T, mgr *WorktreeManager, mainRepo string) *ShadowWorktree {
+				sw, err := mgr.CreateShadow("task-postfail", "main")
+				if err != nil {
+					t.Fatalf("CreateShadow failed: %v", err)
+				}
+				_ = os.WriteFile(filepath.Join(sw.Path, "new_feature.txt"), []byte("feature code\n"), 0644)
+				_, _ = sw.RecordCheckpoint(1, "feature", true)
+				return sw
+			},
+			runMerge: func(ctx context.Context, mgr *WorktreeManager, sw *ShadowWorktree) error {
+				failingRunner := func(cmdStr string) error {
+					return fmt.Errorf("post-merge test failure")
+				}
+				_, err := mgr.MergeIntoWithVerification(sw, "main", true, []string{"test-suite"}, failingRunner)
+				return err
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tempRepo := t.TempDir()
+
+			runCmd := func(dir string, name string, args ...string) {
+				cmd := exec.Command(name, args...)
+				cmd.Dir = dir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("cmd %s %v failed: %v\nOutput: %s", name, args, err, string(out))
+				}
+			}
+
+			runCmd(tempRepo, "git", "init", "-b", "main")
+			runCmd(tempRepo, "git", "config", "user.name", "Test Admin")
+			runCmd(tempRepo, "git", "config", "user.email", "admin@test.local")
+			_ = os.WriteFile(filepath.Join(tempRepo, "README.md"), []byte("# Original Readme\n"), 0644)
+			_ = os.WriteFile(filepath.Join(tempRepo, "conflict_file.txt"), []byte("main version\n"), 0644)
+			runCmd(tempRepo, "git", "add", ".")
+			runCmd(tempRepo, "git", "commit", "-m", "initial commit")
+
+			mgr := NewWorktreeManager(tempRepo)
+			sw := tc.setupShadow(t, mgr, tempRepo)
+
+			// Now dirty the user's checkout with:
+			// 1. Uncommitted edit on tracked file
+			// 2. Untracked file
+			modifiedContent := "# Developer uncommitted work in README\n"
+			_ = os.WriteFile(filepath.Join(tempRepo, "README.md"), []byte(modifiedContent), 0644)
+
+			untrackedContent := "Developer uncommitted untracked file\n"
+			untrackedPath := filepath.Join(tempRepo, "untracked.txt")
+			_ = os.WriteFile(untrackedPath, []byte(untrackedContent), 0644)
+
+			// Attempt merge
+			err := tc.runMerge(context.Background(), mgr, sw)
+			if err == nil {
+				t.Fatalf("expected merge to fail for case %s, but got nil", tc.name)
+			}
+
+			// Verify tracked modified file was NOT reverted
+			readmeBytes, readErr := os.ReadFile(filepath.Join(tempRepo, "README.md"))
+			if readErr != nil {
+				t.Fatalf("failed to read README.md: %v", readErr)
+			}
+			if string(readmeBytes) != modifiedContent {
+				t.Fatalf("DATA LOSS DETECTED: modified tracked file was clobbered! expected %q, got %q", modifiedContent, string(readmeBytes))
+			}
+
+			// Verify untracked file was NOT deleted by git clean -fd
+			untrackedBytes, readUntrackedErr := os.ReadFile(untrackedPath)
+			if readUntrackedErr != nil {
+				t.Fatalf("DATA LOSS DETECTED: untracked file was deleted! error: %v", readUntrackedErr)
+			}
+			if string(untrackedBytes) != untrackedContent {
+				t.Fatalf("untracked file content mismatch: expected %q, got %q", untrackedContent, string(untrackedBytes))
+			}
+		})
+	}
+}
+
+func TestWorktreeManager_MergeLockFailure(t *testing.T) {
+	tempRepo := t.TempDir()
+
+	runCmd := func(dir string, name string, args ...string) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("cmd %s %v failed: %v\nOutput: %s", name, args, err, string(out))
+		}
+	}
+
+	runCmd(tempRepo, "git", "init", "-b", "main")
+	runCmd(tempRepo, "git", "config", "user.name", "Test Admin")
+	runCmd(tempRepo, "git", "config", "user.email", "admin@test.local")
+	_ = os.WriteFile(filepath.Join(tempRepo, "README.md"), []byte("# Root\n"), 0644)
+	runCmd(tempRepo, "git", "add", ".")
+	runCmd(tempRepo, "git", "commit", "-m", "initial commit")
+
+	mgr := NewWorktreeManager(tempRepo)
+	sw, err := mgr.CreateShadow("task-lock-fail", "main")
+	if err != nil {
+		t.Fatalf("CreateShadow failed: %v", err)
+	}
+
+	// Make lock file uncreatable / unopenable by creating .artix/merge.lock as a directory with no permissions,
+	// or making .artix read-only
+	artixDir := filepath.Join(tempRepo, ".artix")
+	_ = os.MkdirAll(artixDir, 0755)
+	lockFileAsDir := filepath.Join(artixDir, "merge.lock")
+	_ = os.MkdirAll(lockFileAsDir, 0555) // directory, so os.OpenFile will fail
+	defer os.RemoveAll(lockFileAsDir)
+
+	_, err = mgr.MergeIntoContext(context.Background(), sw, "main", false)
+	if err == nil {
+		t.Fatalf("expected MergeIntoContext to fail when merge.lock cannot be opened, but got nil")
+	}
+}
+
 
