@@ -1231,6 +1231,60 @@ func TestR13_5_Phase1_CandidateAuditRecord_StatusAwaitingApproval_NotFailed(t *t
 	}
 }
 
+func TestP2_IDEPlugin_BinaryExecutionHardening(t *testing.T) {
+	// 1. VS Code: plugins/vscode/package.json must restrict artix.binary scope to machine and restrict untrusted workspaces
+	pkgPath := "../plugins/vscode/package.json"
+	data, err := os.ReadFile(pkgPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", pkgPath, err)
+	}
+	var pkg map[string]any
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		t.Fatalf("failed to unmarshal %s: %v", pkgPath, err)
+	}
+
+	contributes, _ := pkg["contributes"].(map[string]any)
+	config, _ := contributes["configuration"].(map[string]any)
+	props, _ := config["properties"].(map[string]any)
+	artixBin, _ := props["artix.binary"].(map[string]any)
+
+	if artixBin["scope"] != "machine" {
+		t.Errorf("SECURITY FLAW: VS Code artix.binary lacks \"scope\": \"machine\" (got %v). Repository .vscode/settings.json can point it at an attacker binary!", artixBin["scope"])
+	}
+
+	capabilities, _ := pkg["capabilities"].(map[string]any)
+	untrusted, _ := capabilities["untrustedWorkspaces"].(map[string]any)
+	if untrusted == nil {
+		t.Errorf("SECURITY FLAW: VS Code lacks capabilities.untrustedWorkspaces restricting artix.binary execution!")
+	} else {
+		supported := untrusted["supported"]
+		if supported != false && supported != "limited" {
+			t.Errorf("SECURITY FLAW: untrustedWorkspaces supported must be false or limited, got %v", supported)
+		}
+	}
+
+	// 2. IntelliJ: plugins/intellij/src/main/kotlin/ai/artix/ide must not blindly trust ARTIX_BIN from environment
+	actionsPath := "../plugins/intellij/src/main/kotlin/ai/artix/ide/Actions.kt"
+	actData, err := os.ReadFile(actionsPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", actionsPath, err)
+	}
+	actContent := string(actData)
+	if strings.Contains(actContent, `env["ARTIX_BIN"] ?: "artix"`) || strings.Contains(actContent, `System.getenv("ARTIX_BIN") ?: "artix"`) {
+		t.Errorf("SECURITY FLAW: IntelliJ Actions.kt blindly trusts ARTIX_BIN from environment without checking workspace locality!")
+	}
+
+	toolWinPath := "../plugins/intellij/src/main/kotlin/ai/artix/ide/ArtixToolWindow.kt"
+	twData, err := os.ReadFile(toolWinPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", toolWinPath, err)
+	}
+	twContent := string(twData)
+	if strings.Contains(twContent, `env["ARTIX_BIN"] ?: "artix"`) || strings.Contains(twContent, `System.getenv("ARTIX_BIN") ?: "artix"`) {
+		t.Errorf("SECURITY FLAW: IntelliJ ArtixToolWindow.kt blindly trusts ARTIX_BIN from environment without checking workspace locality!")
+	}
+}
+
 
 
 
