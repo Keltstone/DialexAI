@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -25,6 +26,9 @@ type ExecOptions struct {
 	Timeout        time.Duration     `json:"timeout"`
 	MaxOutputBytes int               `json:"maxOutputBytes"`
 	Env            map[string]string `json:"env,omitempty"`
+	AllowNetwork   bool              `json:"allowNetwork,omitempty"`
+	AllowLoopback  bool              `json:"allowLoopback,omitempty"`
+	Toolchain      string            `json:"toolchain,omitempty"`
 }
 
 // ExecResult contains the deterministic result of running a command.
@@ -68,35 +72,41 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 // audit, and secret variables.
 func BuildSanitizedChildEnv(cwd string, extraEnv map[string]string) []string {
 	allowlistKeys := map[string]bool{
-		"PATH":             true,
-		"LANG":             true,
-		"LC_ALL":           true,
-		"LC_CTYPE":         true,
-		"TERM":             true,
-		"TZ":               true,
-		"USER":             true,
-		"LOGNAME":          true,
-		"SHELL":            true,
-		"GOPATH":           true,
-		"GOROOT":           true,
-		"GOCACHE":          true,
-		"GOPROXY":          true,
-		"GONOSUMDB":        true,
-		"GOPRIVATE":        true,
-		"GOFLAGS":          true,
-		"CGO_ENABLED":      true,
-		"GO111MODULE":      true,
-		"GOMODCACHE":       true,
-		"GOTMPDIR":         true,
-		"TMPDIR":           true,
-		"TEMP":             true,
-		"TMP":              true,
-		"NODE_PATH":        true,
-		"PYTHONPATH":       true,
-		"CARGO_HOME":       true,
-		"RUSTUP_HOME":      true,
-		"GRADLE_USER_HOME": true,
-		"M2_HOME":          true,
+		"PATH":                true,
+		"LANG":                true,
+		"LC_ALL":              true,
+		"LC_CTYPE":            true,
+		"TERM":                true,
+		"TZ":                  true,
+		"USER":                true,
+		"LOGNAME":             true,
+		"SHELL":               true,
+		"GOPATH":              true,
+		"GOROOT":              true,
+		"GOCACHE":             true,
+		"GOPROXY":             true,
+		"GONOSUMDB":           true,
+		"GOPRIVATE":           true,
+		"GOFLAGS":             true,
+		"CGO_ENABLED":         true,
+		"GO111MODULE":         true,
+		"GOMODCACHE":          true,
+		"GOTMPDIR":            true,
+		"TMPDIR":              true,
+		"TEMP":                true,
+		"TMP":                 true,
+		"NODE_PATH":           true,
+		"PYTHONPATH":          true,
+		"CARGO_HOME":          true,
+		"RUSTUP_HOME":         true,
+		"GRADLE_USER_HOME":    true,
+		"M2_HOME":             true,
+		"DEVELOPER_DIR":       true,
+		"JAVA_HOME":           true,
+		"ANDROID_HOME":        true,
+		"ANDROID_SDK_ROOT":    true,
+		"KONAN_DATA_DIR":      true,
+		"GRADLE_RO_DEP_CACHE": true,
 	}
 
 	isDeniedKey := func(key string) bool {
@@ -150,6 +160,13 @@ func BuildSanitizedChildEnv(cwd string, extraEnv map[string]string) []string {
 	_ = os.MkdirAll(sandboxHome, 0700)
 	childEnv = append(childEnv, fmt.Sprintf("HOME=%s", sandboxHome))
 
+	// On macOS, fallback to installed Xcode if DEVELOPER_DIR was not explicitly passed
+	if runtime.GOOS == "darwin" && os.Getenv("DEVELOPER_DIR") == "" {
+		if _, err := os.Stat("/Applications/Xcode.app/Contents/Developer"); err == nil {
+			childEnv = append(childEnv, "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer")
+		}
+	}
+
 	// Merge extraEnv (filtering out denied keys)
 	if extraEnv != nil {
 		for k, v := range extraEnv {
@@ -172,6 +189,16 @@ func NewSandbox(workspaceDir string) *Sandbox {
 	return &Sandbox{
 		defaultCwd: workspaceDir,
 	}
+}
+
+// RunWithNetwork executes a command with network access allowed (for dedicated fetch/warm operations).
+func (s *Sandbox) RunWithNetwork(ctx context.Context, cmdStr string, opts *ExecOptions) *ExecResult {
+	if opts == nil {
+		opts = &ExecOptions{}
+	}
+	optsCopy := *opts
+	optsCopy.AllowNetwork = true
+	return s.Run(ctx, cmdStr, &optsCopy)
 }
 
 // Run executes a shell command line string with safety boundaries.
@@ -197,7 +224,19 @@ func (s *Sandbox) Run(ctx context.Context, cmdStr string, opts *ExecOptions) *Ex
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd, isolation := confine(cwd, cmdStr)
+	net := false
+	if opts != nil {
+		net = opts.AllowNetwork || (opts.Env != nil && opts.Env["ARTIX_SANDBOX_NETWORK"] == "1")
+	}
+	if !net {
+		net = os.Getenv("ARTIX_SANDBOX_NETWORK") == "1" || os.Getenv("KRITIX_SANDBOX_NETWORK") == "1"
+	}
+	loopback := false
+	if opts != nil {
+		loopback = opts.AllowLoopback || strings.EqualFold(opts.Toolchain, "gradle") || strings.EqualFold(opts.Toolchain, "kmp")
+	}
+
+	cmd, isolation := confine(cwd, cmdStr, net, loopback)
 	if cmd == nil || isolation == IsolationRefused {
 		return &ExecResult{
 			Command:    cmdStr,

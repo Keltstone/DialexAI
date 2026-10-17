@@ -30,13 +30,66 @@ var SensitiveReadDenyPaths = []string{
 	".netrc",
 	".artix",
 	".kritix",
+	".config/gh",
+	".git-credentials",
+	".docker",
+	".npmrc",
+	".pypirc",
+	".config/git",
+	"Library/Keychains",
+	".mozilla",
+	".config/google-chrome",
+	"Library/Application Support/Google/Chrome",
+	"Library/Application Support/Firefox",
+	"Library/Application Support/BraveSoftware",
+}
+
+// IsConfinementAvailable returns whether kernel-level sandbox tooling is available on this host.
+func IsConfinementAvailable() bool {
+	switch runtime.GOOS {
+	case "darwin":
+		_, err := exec.LookPath("sandbox-exec")
+		return err == nil
+	case "linux":
+		_, err := exec.LookPath("bwrap")
+		return err == nil
+	default:
+		return false
+	}
 }
 
 // BuildBwrapArgs builds the bubblewrap execution arguments for Linux environments.
 func BuildBwrapArgs(writable []string, net bool, cmdStr string) []string {
-	args := []string{"--unshare-user-try", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--die-with-parent"}
+	args := []string{
+		"--unshare-user-try",
+		"--unshare-pid",
+		"--unshare-ipc",
+		"--new-session",
+		"--clearenv",
+		"--cap-drop", "ALL",
+		"--ro-bind", "/", "/",
+		"--dev", "/dev",
+		"--proc", "/proc",
+		"--die-with-parent",
+	}
 
+	// 1. Bind /tmp first so specific worktree/repo binds within /tmp are layered on top
+	hasTmp := false
 	for _, w := range writable {
+		if w == "/tmp" || w == "/var/tmp" {
+			hasTmp = true
+			break
+		}
+	}
+	if hasTmp {
+		args = append(args, "--bind", "/tmp", "/tmp")
+	}
+
+	// 2. Bind specific writable directories and their .git as read-only on top
+	for _, w := range writable {
+		if w == "/tmp" || w == "/var/tmp" {
+			continue
+		}
 		if _, err := os.Stat(w); err == nil {
 			args = append(args, "--bind", w, w)
 			gitDir := filepath.Join(w, ".git")
@@ -46,8 +99,7 @@ func BuildBwrapArgs(writable []string, net bool, cmdStr string) []string {
 		}
 	}
 
-	// Hide sensitive credential directories from reads via empty tmpfs mounts and deny writes via remount-ro
-	// Note: Placed after writable binds so tmpfs shadows any parent directory binds (e.g. in /tmp)
+	// 3. Hide sensitive credential directories from reads via empty tmpfs mounts and deny writes via remount-ro
 	home, _ := os.UserHomeDir()
 	if home != "" {
 		for _, denyRel := range SensitiveReadDenyPaths {
@@ -65,13 +117,13 @@ func BuildBwrapArgs(writable []string, net bool, cmdStr string) []string {
 	return args
 }
 
-// Confinement: writes are limited to the workspace, temp dirs and common tool caches; network
-// is denied unless ARTIX_SANDBOX_NETWORK=1. Reads are restricted to exclude sensitive user credentials.
+// Confinement: writes are limited to the workspace, temp dirs and isolated per-job caches; network
+// is denied (except localhost/loopback) unless net is true. Reads are restricted to exclude sensitive user credentials.
 //
 // In Enterprise Mode (ARTIX_ENTERPRISE=1):
 // 1. ARTIX_SANDBOX=off is strictly disallowed and ignored.
 // 2. Fail-Closed: If no confinement tool exists (sandbox-exec or bwrap), execution is REFUSED.
-func confine(cwd, cmdStr string) (*exec.Cmd, string) {
+func confine(cwd, cmdStr string, net bool, loopback bool) (*exec.Cmd, string) {
 	plain := func() (*exec.Cmd, string) { return exec.Command("sh", "-c", cmdStr), IsolationProcessGroup }
 
 	isEnterprise := policy.IsEnterprise()
@@ -81,7 +133,6 @@ func confine(cwd, cmdStr string) (*exec.Cmd, string) {
 		return plain()
 	}
 
-	net := os.Getenv("ARTIX_SANDBOX_NETWORK") == "1" || os.Getenv("KRITIX_SANDBOX_NETWORK") == "1"
 	home, _ := os.UserHomeDir()
 	real := func(p string) string {
 		if r, err := filepath.EvalSymlinks(p); err == nil {
@@ -89,10 +140,10 @@ func confine(cwd, cmdStr string) (*exec.Cmd, string) {
 		}
 		return p
 	}
-	writable := []string{real(cwd), real(os.TempDir()), "/tmp", "/private/tmp", "/private/var/folders"}
-	for _, c := range []string{"Library/Caches", ".cache", "go/pkg", ".gradle", ".m2", ".npm", ".cargo"} {
-		writable = append(writable, filepath.Join(home, c))
-	}
+
+	jobCacheDir := filepath.Join(os.TempDir(), "artix-job-caches")
+	_ = os.MkdirAll(jobCacheDir, 0700)
+	writable := []string{real(cwd), real(os.TempDir()), "/tmp", "/private/tmp", "/private/var/folders", jobCacheDir}
 
 	switch runtime.GOOS {
 	case "darwin":
@@ -104,7 +155,19 @@ func confine(cwd, cmdStr string) (*exec.Cmd, string) {
 		}
 		var p strings.Builder
 		p.WriteString("(version 1)(allow default)")
-		if !net {
+		if net {
+			p.WriteString("(allow network*)")
+		} else if loopback {
+			// Per P0-5: loopback allowed for Gradle FileLockContentionHandler, outbound denied
+			p.WriteString("(deny network*)")
+			p.WriteString("(allow network-bind (local ip \"localhost:*\"))")
+			p.WriteString("(allow network-inbound (local ip \"localhost:*\"))")
+			p.WriteString("(allow network-outbound (to ip \"localhost:*\"))")
+			p.WriteString("(allow network-bind (local unix-socket))")
+			p.WriteString("(allow network-inbound (local unix-socket))")
+			p.WriteString("(allow network-outbound (literal \"/private/var/run/mDNSResponder\"))")
+			p.WriteString("(allow network-outbound (literal \"/private/var/run/syslog\"))")
+		} else {
 			p.WriteString("(deny network*)")
 		}
 
@@ -135,6 +198,14 @@ func confine(cwd, cmdStr string) (*exec.Cmd, string) {
 				denyPath := filepath.Join(home, denyRel)
 				fmt.Fprintf(&p, " (subpath %q)", denyPath)
 				if resolved := real(denyPath); resolved != denyPath {
+					fmt.Fprintf(&p, " (subpath %q)", resolved)
+				}
+			}
+			// Per P0-3 b: Host caches are read-only; deny writing to host persistence directories
+			for _, cacheRel := range []string{".gradle", ".cargo", ".npm", ".m2", ".cache", "go/pkg", ".konan", "Library/Caches"} {
+				cachePath := filepath.Join(home, cacheRel)
+				fmt.Fprintf(&p, " (subpath %q)", cachePath)
+				if resolved := real(cachePath); resolved != cachePath {
 					fmt.Fprintf(&p, " (subpath %q)", resolved)
 				}
 			}

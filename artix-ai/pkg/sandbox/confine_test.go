@@ -85,7 +85,7 @@ func TestEnterpriseModeBlocksSandboxEscape(t *testing.T) {
 
 	// Even with ARTIX_SANDBOX=off, enterprise mode must prevent plain unconfined fallback
 	// on platforms where os sandbox exists
-	_, iso := confine(t.TempDir(), "echo hi")
+	_, iso := confine(t.TempDir(), "echo hi", false, false)
 	if runtime.GOOS == "darwin" {
 		if iso != IsolationOSSandbox {
 			t.Errorf("enterprise mode must ignore ARTIX_SANDBOX=off on darwin, got isolation: %s", iso)
@@ -109,7 +109,7 @@ func TestR13_6_EnterpriseMode_ViaPolicyIsEnterprise_BlocksSandboxEscape(t *testi
 		t.Fatalf("policy.IsEnterprise() must be true when RequireSignedPolicyFlag is active")
 	}
 
-	_, iso := confine(t.TempDir(), "echo hi")
+	_, iso := confine(t.TempDir(), "echo hi", false, false)
 	if runtime.GOOS == "darwin" {
 		if iso != IsolationOSSandbox {
 			t.Errorf("R13-6 VIOLATION: policy.IsEnterprise() must ignore ARTIX_SANDBOX=off on darwin, got isolation: %s", iso)
@@ -417,16 +417,16 @@ func TestP0_5_LoopbackAllowed_OutboundDenied(t *testing.T) {
 	box := NewSandbox(t.TempDir())
 	ctx := context.Background()
 
-	// 1. Loopback bind & connect MUST succeed without ARTIX_SANDBOX_NETWORK=1
+	// 1. Loopback bind & connect MUST succeed under gradle toolchain profile without ARTIX_SANDBOX_NETWORK=1
 	loopbackScript := `python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen(1); port = s.getsockname()[1]; c = socket.socket(); c.connect(("127.0.0.1", port)); print("OK")'`
-	resLoop := box.Run(ctx, loopbackScript, nil)
+	resLoop := box.Run(ctx, loopbackScript, &ExecOptions{Toolchain: "gradle"})
 	if !resLoop.Success() || !strings.Contains(resLoop.Stdout, "OK") {
-		t.Fatalf("expected loopback socket bind/connect to succeed under sandbox, got: %+v", resLoop)
+		t.Fatalf("expected loopback socket bind/connect to succeed under gradle sandbox profile, got: %+v", resLoop)
 	}
 
 	// 2. Outbound connect MUST fail without ARTIX_SANDBOX_NETWORK=1
 	outboundScript := `python3 -c 'import socket; s = socket.socket(); s.settimeout(1); s.connect(("1.1.1.1", 80))'`
-	resOut := box.Run(ctx, outboundScript, nil)
+	resOut := box.Run(ctx, outboundScript, &ExecOptions{Toolchain: "gradle"})
 	if resOut.Success() {
 		t.Fatalf("expected outbound network connection to fail without ARTIX_SANDBOX_NETWORK=1, but succeeded!")
 	}
