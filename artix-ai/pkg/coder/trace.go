@@ -46,17 +46,23 @@ func HashContent(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// ComputeTraceHash deterministically calculates the SHA-256 hash of the round trace record.
+// ComputeTraceHash deterministically calculates the hash of the round trace record.
 func ComputeTraceHash(t *RoundTrace) string {
-	payload := fmt.Sprintf("%s|%s|%d|%s|%s|%s|%d|%s|%d|%.6f|%s|%s",
+	testCmdsStr := strings.Join(t.TestCommands, ";")
+	blockingStr := strings.Join(t.BlockingIssues, ",")
+	payload := fmt.Sprintf("%s|%s|%d|%s|%s|%s|%s|%s|%d|%s|%s|%s|%d|%.6f|%s|%s",
 		t.PrevHash,
 		t.TaskID,
 		t.Round,
 		t.PromptHash,
 		t.PatchHash,
+		t.Patch,
 		t.SandboxCommand,
+		testCmdsStr,
 		t.ExitCode,
 		t.ReviewerVerdict,
+		blockingStr,
+		t.PolicyHash,
 		t.Tokens,
 		t.Cost,
 		t.Phase,
@@ -77,6 +83,12 @@ func AppendRoundTrace(workspaceDir string, trace *RoundTrace) error {
 
 	if trace.Timestamp.IsZero() {
 		trace.Timestamp = time.Now().UTC()
+	}
+	if trace.Patch != "" {
+		trace.PatchHash = HashContent(trace.Patch)
+	}
+	if trace.PolicyHash == "" {
+		trace.PolicyHash = policy.GetPolicyHash()
 	}
 
 	// Chaining: find previous record's hash
@@ -148,6 +160,13 @@ func VerifyRoundTraces(workspaceDir string) ([]RoundTrace, error) {
 		var tr RoundTrace
 		if err := json.Unmarshal([]byte(line), &tr); err != nil {
 			return nil, fmt.Errorf("tampering detected in trace.jsonl at record #%d: invalid JSON: %w", i+1, err)
+		}
+
+		if tr.Patch != "" {
+			computedPatchHash := HashContent(tr.Patch)
+			if tr.PatchHash != "" && tr.PatchHash != computedPatchHash {
+				return nil, fmt.Errorf("tampering detected in trace.jsonl at record #%d: patch content does not match patchHash (expected %s, got %s)", i+1, tr.PatchHash, computedPatchHash)
+			}
 		}
 
 		if tr.PrevHash != expectedPrevHash {
