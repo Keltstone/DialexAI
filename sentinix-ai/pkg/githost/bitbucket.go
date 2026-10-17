@@ -84,7 +84,7 @@ func (b bitbucket) Comment(ctx context.Context, e *Event, body string) error {
 			}
 			if json.NewDecoder(resp.Body).Decode(&p) == nil {
 				for _, c := range p.Values {
-					if strings.HasPrefix(strings.TrimSpace(c.Content.Raw), "### Sentinix") {
+					if strings.Contains(c.Content.Raw, "<!-- sentinix-review-marker -->") || strings.HasPrefix(strings.TrimSpace(c.Content.Raw), "### Sentinix") {
 						putURL := fmt.Sprintf("%s/repositories/%s/pullrequests/%s/comments/%d", b.API, e.Repo, e.PR, c.ID)
 						return b.request(ctx, "PUT", putURL, b.hdr(), map[string]any{"content": map[string]string{"raw": body}})
 					}
