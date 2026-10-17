@@ -28,6 +28,8 @@ type RoundTrace struct {
 	ExitCode        int       `json:"exitCode"`
 	ReviewerVerdict string    `json:"reviewerVerdict"`
 	BlockingIssues  []string  `json:"blockingIssues,omitempty"`
+	TestCommands    []string  `json:"testCommands,omitempty"`
+	PolicyHash      string    `json:"policyHash,omitempty"`
 	Tokens          int       `json:"tokens"`
 	Cost            float64   `json:"cost"`
 	Phase           string    `json:"phase,omitempty"`
