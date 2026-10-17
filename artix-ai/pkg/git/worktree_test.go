@@ -390,4 +390,66 @@ func TestWorktreeManager_MergeLockFailure(t *testing.T) {
 	}
 }
 
+func TestN3_MergeRollbackCorrectness(t *testing.T) {
+	tempRepo := t.TempDir()
+
+	runCmd := func(dir string, name string, args ...string) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("cmd %s %v failed: %v\nOutput: %s", name, args, err, string(out))
+		}
+	}
+
+	runCmd(tempRepo, "git", "init", "-b", "main")
+	runCmd(tempRepo, "git", "config", "user.name", "Test Admin")
+	runCmd(tempRepo, "git", "config", "user.email", "admin@test.local")
+	_ = os.WriteFile(filepath.Join(tempRepo, "README.md"), []byte("# Root\n"), 0644)
+	runCmd(tempRepo, "git", "add", ".")
+	runCmd(tempRepo, "git", "commit", "-m", "initial commit")
+
+	mgr := NewWorktreeManager(tempRepo)
+
+	// 1. TargetBranch="HEAD" must not create refs/heads/HEAD
+	sw1, err := mgr.CreateShadow("task-head-ambig", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(sw1.Path, "f1.txt"), []byte("data\n"), 0644)
+	_, _ = sw1.RecordCheckpoint(1, "feat", true)
+
+	failingRunner := func(cmd string) error { return fmt.Errorf("test failed") }
+	_, _ = mgr.MergeIntoWithVerification(sw1, "HEAD", true, []string{"test"}, failingRunner)
+
+	// Check if refs/heads/HEAD exists
+	checkRef := exec.Command("git", "show-ref", "--verify", "refs/heads/HEAD")
+	checkRef.Dir = tempRepo
+	if err := checkRef.Run(); err == nil {
+		t.Fatalf("SECURITY/CORRECTNESS VIOLATION: refs/heads/HEAD was created! Literal 'HEAD' branch exists.")
+	}
+
+	// 2. Squash merge with failing pre-commit hook must not leave changes staged
+	sw2, err := mgr.CreateShadow("task-squash-hook", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(sw2.Path, "squash_hook.txt"), []byte("staged data\n"), 0644)
+	_, _ = sw2.RecordCheckpoint(1, "feat", true)
+
+	// Failing pre-commit hook
+	hooksDir := filepath.Join(tempRepo, ".git", "hooks")
+	_ = os.MkdirAll(hooksDir, 0755)
+	_ = os.WriteFile(filepath.Join(hooksDir, "pre-commit"), []byte("#!/bin/sh\nexit 1\n"), 0755)
+
+	_, _ = mgr.MergeInto(sw2, "main", true)
+
+	// Check git status --porcelain: index must be completely clean (no staged files)
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = tempRepo
+	out, _ := statusCmd.Output()
+	if strings.Contains(string(out), "squash_hook.txt") {
+		t.Fatalf("CORRECTNESS VIOLATION: squash merge with failing pre-commit left changes staged: %s", string(out))
+	}
+}
+
 
