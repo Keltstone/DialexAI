@@ -42,6 +42,16 @@ func (a *App) projects(w http.ResponseWriter, r *http.Request) {
 		fail(w, err, 500)
 		return
 	}
+	p := who(r)
+	if p.Role == auth.Developer {
+		var filtered []store.Project
+		for _, proj := range ps {
+			if a.canReadProject(r, proj.ID) {
+				filtered = append(filtered, proj)
+			}
+		}
+		ps = filtered
+	}
 	writeJSON(w, ps)
 }
 
@@ -234,7 +244,12 @@ func (a *App) scanNow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) scans(w http.ResponseWriter, r *http.Request) {
-	ss, err := a.Store.Scans(r.PathValue("id"), 50)
+	id := r.PathValue("id")
+	if !a.canReadProject(r, id) {
+		http.NotFound(w, r)
+		return
+	}
+	ss, err := a.Store.Scans(id, 50)
 	if err != nil {
 		fail(w, err, 500)
 		return
@@ -243,7 +258,12 @@ func (a *App) scans(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) surface(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.Store.Surface(r.PathValue("id"), 200)
+	id := r.PathValue("id")
+	if !a.canReadProject(r, id) {
+		http.NotFound(w, r)
+		return
+	}
+	rows, err := a.Store.Surface(id, 200)
 	if err != nil {
 		fail(w, err, 500)
 		return
@@ -427,7 +447,12 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) findings(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := store.Filter{Project: q.Get("project"), Status: q.Get("status"), Owner: q.Get("owner")}
+	projID := q.Get("project")
+	if projID != "" && !a.canReadProject(r, projID) {
+		http.NotFound(w, r)
+		return
+	}
+	f := store.Filter{Project: projID, Status: q.Get("status"), Owner: q.Get("owner")}
 	if p := who(r); p.Project != "" {
 		f.Project = p.Project // tokens see only their own project
 	}
@@ -450,7 +475,7 @@ func (a *App) findings(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) finding(w http.ResponseWriter, r *http.Request) {
 	f, err := a.Store.Finding(r.PathValue("id"))
-	if err != nil || (who(r).Project != "" && who(r).Project != f.ProjectID) {
+	if err != nil || (who(r).Project != "" && who(r).Project != f.ProjectID) || !a.canReadProject(r, f.ProjectID) {
 		http.NotFound(w, r)
 		return
 	}
@@ -870,7 +895,12 @@ func (a *App) packList(w http.ResponseWriter, r *http.Request) {
 
 // report renders csv, sarif, json, sbom (CycloneDX) or html (print to PDF) for one project.
 func (a *App) report(w http.ResponseWriter, r *http.Request) {
-	p, err := a.Store.Project(r.PathValue("id"))
+	id := r.PathValue("id")
+	if !a.canReadProject(r, id) {
+		http.NotFound(w, r)
+		return
+	}
+	p, err := a.Store.Project(id)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -931,7 +961,12 @@ func (a *App) rescanAdvisories(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) sbom(w http.ResponseWriter, r *http.Request) {
-	cs, err := a.Store.Components(r.PathValue("id"))
+	id := r.PathValue("id")
+	if !a.canReadProject(r, id) {
+		http.NotFound(w, r)
+		return
+	}
+	cs, err := a.Store.Components(id)
 	if err != nil {
 		fail(w, err, 500)
 		return
