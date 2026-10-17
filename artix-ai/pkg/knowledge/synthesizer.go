@@ -9,10 +9,11 @@ import (
 
 // Provenance captures origin metadata for synthesized knowledge items and rules.
 type Provenance struct {
-	SessionID    string        `json:"sessionId,omitempty"`
-	PRCommentURL string        `json:"prCommentUrl,omitempty"`
-	Author       string        `json:"author,omitempty"`
-	TTL          time.Duration `json:"ttl,omitempty"`
+	SessionID         string        `json:"sessionId,omitempty"`
+	PRCommentURL      string        `json:"prCommentUrl,omitempty"`
+	Author            string        `json:"author,omitempty"`
+	AuthorAssociation string        `json:"authorAssociation,omitempty"`
+	TTL               time.Duration `json:"ttl,omitempty"`
 }
 
 var promptInjectionPatterns = []*regexp.Regexp{
