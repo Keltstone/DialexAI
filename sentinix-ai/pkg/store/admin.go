@@ -40,6 +40,10 @@ func computeAuditHash(prevHash string, a Audit, key []byte) string {
 }
 
 func addAuditTx(tx *sql.Tx, a Audit, key []byte) error {
+	var dummy any
+	_ = tx.QueryRow("select pg_advisory_xact_lock(718293)").Scan(&dummy)
+	_, _ = tx.Exec("update audit_counter set last_seq=last_seq where id=1")
+
 	if a.ID == "" {
 		a.ID = id()
 	}
@@ -62,7 +66,69 @@ func addAuditTx(tx *sql.Tx, a Audit, key []byte) error {
 	a.Hash = computeAuditHash(prevHash, a, key)
 	_, err = tx.Exec("insert into audit(id,seq,ts,actor,action,target,commit_sha,approver,source,before_val,after_val,engines,pack_versions,skipped_files,mode,outcome,reason,prev_hash,hash) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)",
 		a.ID, a.Seq, a.TS, a.Actor, a.Action, a.Target, a.Commit, a.Approver, a.Source, a.Before, a.After, a.Engines, a.PackVersions, a.SkippedFiles, a.Mode, a.Outcome, a.Reason, a.PrevHash, a.Hash)
-	return err
+	if err != nil {
+		return err
+	}
+	_, _ = tx.Exec("update audit_counter set last_seq=$1 where id=1", a.Seq)
+	return nil
+}
+
+func (s *Store) UpgradeAuditSeqZero() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var dummy any
+	_ = tx.QueryRow("select pg_advisory_xact_lock(718293)").Scan(&dummy)
+	_, _ = tx.Exec("update audit_counter set last_seq=last_seq where id=1")
+
+	rows, err := tx.Query("select id, ts, actor, action, target, commit_sha, approver, source, before_val, after_val, engines, pack_versions, skipped_files, mode, outcome, reason from audit where seq=0 order by ts asc, id asc")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var toUpgrade []Audit
+	for rows.Next() {
+		var a Audit
+		if err := rows.Scan(&a.ID, &a.TS, &a.Actor, &a.Action, &a.Target, &a.Commit, &a.Approver, &a.Source, &a.Before, &a.After, &a.Engines, &a.PackVersions, &a.SkippedFiles, &a.Mode, &a.Outcome, &a.Reason); err != nil {
+			return err
+		}
+		toUpgrade = append(toUpgrade, a)
+	}
+	rows.Close()
+
+	if len(toUpgrade) == 0 {
+		return nil
+	}
+
+	var maxSeq int64
+	var prevHash string
+	err = tx.QueryRow("select seq, hash from audit where seq > 0 order by seq desc limit 1").Scan(&maxSeq, &prevHash)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		maxSeq = 0
+		prevHash = "0000000000000000000000000000000000000000000000000000000000000000"
+	}
+
+	for _, a := range toUpgrade {
+		maxSeq++
+		a.Seq = maxSeq
+		a.PrevHash = prevHash
+		a.Hash = computeAuditHash(prevHash, a, s.auditKey)
+		_, err = tx.Exec("update audit set seq=$1, prev_hash=$2, hash=$3 where id=$4", a.Seq, a.PrevHash, a.Hash, a.ID)
+		if err != nil {
+			return err
+		}
+		prevHash = a.Hash
+	}
+
+	_, _ = tx.Exec("update audit_counter set last_seq=$1 where id=1", maxSeq)
+	return tx.Commit()
 }
 
 func (s *Store) AddAudit(a Audit) error {
