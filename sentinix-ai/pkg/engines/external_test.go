@@ -3,6 +3,7 @@ package engines
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -54,7 +55,7 @@ func TestExternal_EmptySemgrepignoreInIsolatedCopy(t *testing.T) {
 
 func TestExternal_SemgrepScansTestsBuildVendorDist(t *testing.T) {
 	// If semgrep is not on PATH, skip
-	if _, err := os.Stat("/opt/homebrew/bin/semgrep"); err != nil {
+	if _, err := exec.LookPath("semgrep"); err != nil {
 		t.Skip("semgrep not installed")
 	}
 
