@@ -16,11 +16,12 @@ import (
 
 // DaemonOptions configures the Artix daemon server.
 type DaemonOptions struct {
-	Addr      string
-	GHSecret  string
-	GLToken   string
-	WorkDir   string
-	JobsToken string
+	Addr        string
+	GHSecret    string
+	GLToken     string
+	WorkDir     string
+	JobsToken   string
+	InsecureDev bool
 }
 
 func isLoopbackAddr(addr string) bool {
@@ -39,21 +40,16 @@ func isLoopbackAddr(addr string) bool {
 // It refuses non-loopback binds without authentication regardless of enterprise mode.
 func BuildDaemonServer(opts DaemonOptions) (*forge.WebhookServer, error) {
 	isLoopback := isLoopbackAddr(opts.Addr)
-	if !isLoopback {
-		// Secure by default: non-loopback binds (0.0.0.0, external interfaces) MUST have both webhook authentication and jobs authentication regardless of mode
+	if !opts.InsecureDev {
 		if opts.GHSecret == "" && opts.GLToken == "" {
-			return nil, fmt.Errorf("security violation: artixd refuses non-loopback bind (%s) without webhook secret (gh-secret or gl-token)", opts.Addr)
+			return nil, fmt.Errorf("security violation: artixd requires webhook secret (gh-secret or gl-token) unless --insecure-dev on loopback")
 		}
 		if opts.JobsToken == "" {
-			return nil, fmt.Errorf("security violation: artixd refuses non-loopback bind (%s) without jobs-token authentication", opts.Addr)
+			return nil, fmt.Errorf("security violation: artixd requires jobs-token authentication unless --insecure-dev on loopback")
 		}
-	} else if policy.IsEnterprise() {
-		// Even on loopback, enterprise mode strictly requires webhook secret and jobs token
-		if opts.GHSecret == "" && opts.GLToken == "" {
-			return nil, fmt.Errorf("enterprise mode requires at least one webhook secret (gh-secret or gl-token)")
-		}
-		if opts.JobsToken == "" {
-			return nil, fmt.Errorf("enterprise mode requires jobs-token authentication")
+	} else {
+		if !isLoopback {
+			return nil, fmt.Errorf("security violation: --insecure-dev is strictly prohibited on non-loopback address (%s)", opts.Addr)
 		}
 	}
 
@@ -70,7 +66,9 @@ func BuildDaemonServer(opts DaemonOptions) (*forge.WebhookServer, error) {
 		GitHubSecret:       opts.GHSecret,
 		GitLabToken:        opts.GLToken,
 		JobsAuthToken:      opts.JobsToken,
-		RequireWebhookAuth: policy.IsEnterprise() || !isLoopback,
+		RequireWebhookAuth: !opts.InsecureDev,
+		RequireAuth:        !opts.InsecureDev,
+		InsecureDev:        opts.InsecureDev,
 		Worker:             worker,
 	}
 
@@ -84,14 +82,16 @@ func main() {
 	glToken := fs.String("gl-token", os.Getenv("GITLAB_WEBHOOK_TOKEN"), "GitLab Webhook token")
 	workDir := fs.String("work-dir", filepath.Join(os.TempDir(), "artix-worker"), "Directory for ephemeral git clones")
 	jobsToken := fs.String("jobs-token", os.Getenv("ARTIX_JOBS_TOKEN"), "Bearer token required to query /jobs")
+	insecureDev := fs.Bool("insecure-dev", false, "Allow unauthenticated dev access on loopback only")
 	_ = fs.Parse(os.Args[1:])
 
 	server, err := BuildDaemonServer(DaemonOptions{
-		Addr:      *addr,
-		GHSecret:  *ghSecret,
-		GLToken:   *glToken,
-		WorkDir:   *workDir,
-		JobsToken: *jobsToken,
+		Addr:        *addr,
+		GHSecret:    *ghSecret,
+		GLToken:     *glToken,
+		WorkDir:     *workDir,
+		JobsToken:   *jobsToken,
+		InsecureDev: *insecureDev,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Daemon initialization error: %v\n", err)
@@ -101,7 +101,27 @@ func main() {
 	fmt.Printf("Starting Artix Daemon on %s...\n", *addr)
 	fmt.Printf("Endpoints:\n  - GET  /healthz\n  - GET  /readyz\n  - GET  /metrics\n  - POST /webhook/github\n  - POST /webhook/gitlab\n  - GET  /jobs\n  - GET/POST /tasks\n")
 
-	if err := http.ListenAndServe(*addr, server.Handler()); err != nil {
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           server.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-stop
+		fmt.Println("\nShutting down Artix Daemon gracefully...")
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+		server.Drain(ctx)
+	}()
+
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, "Server fatal error: %v\n", err)
 		os.Exit(1)
 	}

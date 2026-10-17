@@ -137,7 +137,8 @@ func TestP1_7_RestartWedge_RecoversStaleRunningJobs(t *testing.T) {
 
 func TestP1_7_DefaultDaemon_RequiresAuth(t *testing.T) {
 	srv := NewWebhookServer(WebhookServerConfig{
-		// Default config: no auth token set, InsecureDev false
+		RequireAuth:        true,
+		RequireWebhookAuth: true,
 	})
 	handler := srv.Handler()
 

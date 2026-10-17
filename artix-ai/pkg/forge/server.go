@@ -49,6 +49,8 @@ type WebhookServerConfig struct {
 	OfflineCacheDir     string
 	WorkspaceDir        string
 	PilotStopRuleConfig pilot.PilotStopRuleConfig
+	RequireAuth         bool
+	InsecureDev         bool
 }
 
 // JobStatus tracks the state of an asynchronous worker run.
@@ -109,20 +111,21 @@ func NewWebhookServer(cfg WebhookServerConfig) *WebhookServer {
 		if cfg.MaxConcurrentJobs <= 0 {
 			cfg.MaxConcurrentJobs = 4
 		}
+		if cfg.MaxQueuedJobs <= 0 {
+			if envVal := os.Getenv("ARTIX_MAX_QUEUED_JOBS"); envVal != "" {
+				if n, err := strconv.Atoi(envVal); err == nil && n >= 0 {
+					cfg.MaxQueuedJobs = n
+				}
+			} else {
+				cfg.MaxQueuedJobs = 16
+			}
+		}
+	} else if cfg.MaxQueuedJobs < 0 {
+		cfg.MaxQueuedJobs = 0
 	}
 	if cfg.OfflineCacheDir == "" {
 		if envCache := os.Getenv("ARTIX_OFFLINE_CACHE_DIR"); envCache != "" {
 			cfg.OfflineCacheDir = envCache
-		}
-	}
-	if cfg.MaxQueuedJobs <= 0 {
-		if envVal := os.Getenv("ARTIX_MAX_QUEUED_JOBS"); envVal != "" {
-			if n, err := strconv.Atoi(envVal); err == nil && n > 0 {
-				cfg.MaxQueuedJobs = n
-			}
-		}
-		if cfg.MaxQueuedJobs <= 0 {
-			cfg.MaxQueuedJobs = 16
 		}
 	}
 
@@ -164,8 +167,19 @@ func (s *WebhookServer) handleGitHubWebhook(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	maxBodyLen := s.cfg.MaxBodyLength
+	if maxBodyLen <= 0 {
+		maxBodyLen = 10 * 1024 * 1024
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBodyLen))
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) || strings.Contains(strings.ToLower(err.Error()), "too large") {
+			http.Error(w, "request entity too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
@@ -185,9 +199,9 @@ func (s *WebhookServer) handleGitHubWebhook(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Delivery ID deduplication
+	// Delivery ID deduplication (check only, not consumed yet!)
 	deliveryID := r.Header.Get("X-GitHub-Delivery")
-	if deliveryID != "" && s.isDuplicateDelivery(deliveryID) {
+	if deliveryID != "" && s.hasProcessedDelivery(deliveryID) {
 		w.Header().Set("Content-Type", "application/json")
 		status := http.StatusConflict
 		if s.cfg.StoragePath != "" {
@@ -209,9 +223,9 @@ func (s *WebhookServer) handleGitHubWebhook(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	maxBodyLen := s.cfg.MaxBodyLength
-	if maxBodyLen <= 0 {
-		maxBodyLen = 65536
+	maxContentLen := s.cfg.MaxBodyLength
+	if maxContentLen <= 0 {
+		maxContentLen = 65536
 	}
 
 	if eventType == "pull_request_review_comment" || eventType == "pull_request_review" {
@@ -283,8 +297,8 @@ func (s *WebhookServer) handleGitHubWebhook(w http.ResponseWriter, r *http.Reque
 			return
 		}
 
-		if len(commentBody) > maxBodyLen {
-			http.Error(w, fmt.Sprintf("rejected: comment body length %d exceeds maximum cap of %d bytes", len(commentBody), maxBodyLen), http.StatusRequestEntityTooLarge)
+		if len(commentBody) > maxContentLen {
+			http.Error(w, fmt.Sprintf("rejected: comment body length %d exceeds maximum cap of %d bytes", len(commentBody), maxContentLen), http.StatusRequestEntityTooLarge)
 			return
 		}
 
@@ -396,8 +410,8 @@ func (s *WebhookServer) handleGitHubWebhook(w http.ResponseWriter, r *http.Reque
 			return
 		}
 
-		if len(commentEvent.Comment.Body) > maxBodyLen || len(commentEvent.Issue.Title) > 1024 {
-			http.Error(w, fmt.Sprintf("rejected: comment body length %d exceeds maximum cap of %d bytes", len(commentEvent.Comment.Body), maxBodyLen), http.StatusRequestEntityTooLarge)
+		if len(commentEvent.Comment.Body) > maxContentLen || len(commentEvent.Issue.Title) > 1024 {
+			http.Error(w, fmt.Sprintf("rejected: comment body length %d exceeds maximum cap of %d bytes", len(commentEvent.Comment.Body), maxContentLen), http.StatusRequestEntityTooLarge)
 			return
 		}
 
@@ -425,16 +439,6 @@ func (s *WebhookServer) handleGitHubWebhook(w http.ResponseWriter, r *http.Reque
 			return
 		}
 
-		if !s.canAcceptJob() {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusTooManyRequests)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"error":  "concurrency cap or queue limit exceeded",
-				"status": "rate_limited",
-			})
-			return
-		}
-
 		jobID := fmt.Sprintf("gh-comment-%d", time.Now().UnixNano())
 		target := RemoteRepoTarget{
 			CloneURL: commentEvent.Repository.CloneURL,
@@ -448,7 +452,22 @@ func (s *WebhookServer) handleGitHubWebhook(w http.ResponseWriter, r *http.Reque
 			Prompt: fmt.Sprintf("%s\n\n%s\n\nCommand: %s", commentEvent.Issue.Title, commentEvent.Issue.Body, commentEvent.Comment.Body),
 			Domain: s.cfg.DefaultDomain,
 		}
-		s.startJob(jobID, "github", target.Owner, task)
+
+		jobStatus, ok := s.tryEnqueueJob(jobID, "github", target.Owner, task)
+		if !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error":  "concurrency cap or queue limit exceeded",
+				"status": "rate_limited",
+			})
+			return
+		}
+
+		if deliveryID != "" {
+			s.recordDelivery(deliveryID)
+		}
+		s.startJob(jobStatus, task)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
@@ -498,8 +517,8 @@ func (s *WebhookServer) handleGitHubWebhook(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if len(event.Issue.Body) > maxBodyLen || len(event.Issue.Title) > 1024 {
-		http.Error(w, fmt.Sprintf("rejected: issue body length %d exceeds maximum cap of %d bytes", len(event.Issue.Body), maxBodyLen), http.StatusRequestEntityTooLarge)
+	if len(event.Issue.Body) > maxContentLen || len(event.Issue.Title) > 1024 {
+		http.Error(w, fmt.Sprintf("rejected: issue body length %d exceeds maximum cap of %d bytes", len(event.Issue.Body), maxContentLen), http.StatusRequestEntityTooLarge)
 		return
 	}
 
@@ -554,16 +573,6 @@ func (s *WebhookServer) handleGitHubWebhook(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if !s.canAcceptJob() {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusTooManyRequests)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error":  "concurrency cap or queue limit exceeded",
-			"status": "rate_limited",
-		})
-		return
-	}
-
 	jobID := fmt.Sprintf("gh-%d", time.Now().UnixNano())
 	target := RemoteRepoTarget{
 		CloneURL: event.Repository.CloneURL,
@@ -581,7 +590,21 @@ func (s *WebhookServer) handleGitHubWebhook(w http.ResponseWriter, r *http.Reque
 		Domain: s.cfg.DefaultDomain,
 	}
 
-	s.startJob(jobID, "github", target.Owner, task)
+	jobStatus, ok := s.tryEnqueueJob(jobID, "github", target.Owner, task)
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":  "concurrency cap or queue limit exceeded",
+			"status": "rate_limited",
+		})
+		return
+	}
+
+	if deliveryID != "" {
+		s.recordDelivery(deliveryID)
+	}
+	s.startJob(jobStatus, task)
 
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]string{
@@ -593,6 +616,23 @@ func (s *WebhookServer) handleGitHubWebhook(w http.ResponseWriter, r *http.Reque
 func (s *WebhookServer) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	maxBodyLen := s.cfg.MaxBodyLength
+	if maxBodyLen <= 0 {
+		maxBodyLen = 10 * 1024 * 1024
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBodyLen))
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) || strings.Contains(strings.ToLower(err.Error()), "too large") {
+			http.Error(w, "request entity too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
 
@@ -611,9 +651,9 @@ func (s *WebhookServer) handleGitLabWebhook(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Delivery ID deduplication for GitLab
+	// Delivery ID deduplication for GitLab (check only, not consumed yet!)
 	deliveryID := r.Header.Get("X-Gitlab-Event-UUID")
-	if deliveryID != "" && s.isDuplicateDelivery(deliveryID) {
+	if deliveryID != "" && s.hasProcessedDelivery(deliveryID) {
 		w.Header().Set("Content-Type", "application/json")
 		status := http.StatusConflict
 		if s.cfg.StoragePath != "" {
@@ -625,12 +665,6 @@ func (s *WebhookServer) handleGitLabWebhook(w http.ResponseWriter, r *http.Reque
 			"error":  "duplicate delivery ID",
 			"msg":    "duplicate delivery ID",
 		})
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
 
@@ -666,12 +700,12 @@ func (s *WebhookServer) handleGitLabWebhook(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Cap issue description and title length
-	maxBodyLen := s.cfg.MaxBodyLength
-	if maxBodyLen <= 0 {
-		maxBodyLen = 65536
+	maxContentLen := s.cfg.MaxBodyLength
+	if maxContentLen <= 0 {
+		maxContentLen = 65536
 	}
-	if len(event.ObjectAttributes.Description) > maxBodyLen || len(event.ObjectAttributes.Title) > 1024 {
-		http.Error(w, fmt.Sprintf("rejected: issue description length %d exceeds maximum cap of %d bytes", len(event.ObjectAttributes.Description), maxBodyLen), http.StatusRequestEntityTooLarge)
+	if len(event.ObjectAttributes.Description) > maxContentLen || len(event.ObjectAttributes.Title) > 1024 {
+		http.Error(w, fmt.Sprintf("rejected: issue description length %d exceeds maximum cap of %d bytes", len(event.ObjectAttributes.Description), maxContentLen), http.StatusRequestEntityTooLarge)
 		return
 	}
 
@@ -720,16 +754,6 @@ func (s *WebhookServer) handleGitLabWebhook(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if !s.canAcceptJob() {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusTooManyRequests)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error":  "concurrency cap or queue limit exceeded",
-			"status": "rate_limited",
-		})
-		return
-	}
-
 	parts := strings.Split(event.Project.PathWithNamespace, "/")
 	owner := ""
 	repo := ""
@@ -755,7 +779,21 @@ func (s *WebhookServer) handleGitLabWebhook(w http.ResponseWriter, r *http.Reque
 		Domain: s.cfg.DefaultDomain,
 	}
 
-	s.startJob(jobID, "gitlab", owner, task)
+	jobStatus, ok := s.tryEnqueueJob(jobID, "gitlab", owner, task)
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":  "concurrency cap or queue limit exceeded",
+			"status": "rate_limited",
+		})
+		return
+	}
+
+	if deliveryID != "" {
+		s.recordDelivery(deliveryID)
+	}
+	s.startJob(jobStatus, task)
 
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]string{
@@ -777,10 +815,22 @@ func (s *WebhookServer) canAcceptJob() bool {
 	return activeOrQueued < limit
 }
 
+func isLoopbackRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func (s *WebhookServer) isAuthorized(r *http.Request) bool {
-	if s.cfg.JobsAuthToken != "" || policy.IsEnterprise() {
+	if s.cfg.InsecureDev && isLoopbackRequest(r) {
+		return true
+	}
+	if s.cfg.JobsAuthToken != "" || s.cfg.RequireAuth || policy.IsEnterprise() {
 		if s.cfg.JobsAuthToken == "" {
-			return false // fail closed in enterprise mode when no token is set
+			return false // fail closed when auth is required and no token is set
 		}
 		authHeader := r.Header.Get("Authorization")
 		token := strings.TrimPrefix(authHeader, "Bearer ")
@@ -1205,7 +1255,18 @@ func (s *WebhookServer) handleTasks(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		s.startJob(taskID, "task_api", tenant, task)
+		jobStatus, ok := s.tryEnqueueJob(taskID, "task_api", tenant, task)
+		if !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error":  "concurrency cap or queue limit exceeded",
+				"status": "rate_limited",
+			})
+			return
+		}
+
+		s.startJob(jobStatus, task)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
@@ -1219,7 +1280,21 @@ func (s *WebhookServer) handleTasks(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 }
 
-func (s *WebhookServer) startJob(id, source, tenant string, task *RemoteWorkerTask) {
+func (s *WebhookServer) tryEnqueueJob(id, source, tenant string, task *RemoteWorkerTask) (*JobStatus, bool) {
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+
+	activeOrQueued := 0
+	for _, j := range s.jobs {
+		if j.Status == "queued" || j.Status == "running" {
+			activeOrQueued++
+		}
+	}
+	limit := s.cfg.MaxConcurrentJobs + s.cfg.MaxQueuedJobs
+	if activeOrQueued >= limit {
+		return nil, false
+	}
+
 	status := &JobStatus{
 		ID:        id,
 		Source:    source,
@@ -1227,13 +1302,24 @@ func (s *WebhookServer) startJob(id, source, tenant string, task *RemoteWorkerTa
 		Status:    "queued",
 		CreatedAt: time.Now(),
 	}
-
-	s.jobsMu.Lock()
 	s.jobs[id] = status
-	s.jobsMu.Unlock()
+	return status, true
+}
+
+func (s *WebhookServer) startJob(status *JobStatus, task *RemoteWorkerTask) {
 	s.saveState()
 
 	if s.cfg.Worker == nil {
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			s.jobsMu.Lock()
+			if status.Status == "queued" {
+				status.Status = "failed"
+				status.Error = "no remote worker configured"
+			}
+			s.jobsMu.Unlock()
+			s.saveState()
+		}()
 		return
 	}
 
@@ -1277,15 +1363,33 @@ func (s *WebhookServer) startJob(id, source, tenant string, task *RemoteWorkerTa
 	}()
 }
 
-func (s *WebhookServer) isDuplicateDelivery(deliveryID string) bool {
+func (s *WebhookServer) hasProcessedDelivery(deliveryID string) bool {
 	s.deliveriesMu.Lock()
-	if _, exists := s.processedDeliveries[deliveryID]; exists {
-		s.deliveriesMu.Unlock()
-		return true
-	}
+	defer s.deliveriesMu.Unlock()
+	_, exists := s.processedDeliveries[deliveryID]
+	return exists
+}
+
+func (s *WebhookServer) recordDelivery(deliveryID string) {
+	s.deliveriesMu.Lock()
 	s.processedDeliveries[deliveryID] = time.Now()
+	if len(s.processedDeliveries) > 10000 {
+		cutoff := time.Now().Add(-24 * time.Hour)
+		for id, t := range s.processedDeliveries {
+			if t.Before(cutoff) {
+				delete(s.processedDeliveries, id)
+			}
+		}
+	}
 	s.deliveriesMu.Unlock()
 	s.saveState()
+}
+
+func (s *WebhookServer) isDuplicateDelivery(deliveryID string) bool {
+	if s.hasProcessedDelivery(deliveryID) {
+		return true
+	}
+	s.recordDelivery(deliveryID)
 	return false
 }
 
@@ -1297,9 +1401,11 @@ func (s *WebhookServer) saveState() {
 	defer s.storageMu.Unlock()
 
 	s.jobsMu.RLock()
+	// Deep copy JobStatus structs under lock to prevent data races during background execution
 	jobsCopy := make(map[string]*JobStatus, len(s.jobs))
 	for k, v := range s.jobs {
-		jobsCopy[k] = v
+		var jobCopy JobStatus = *v
+		jobsCopy[k] = &jobCopy
 	}
 	s.jobsMu.RUnlock()
 
@@ -1317,7 +1423,10 @@ func (s *WebhookServer) saveState() {
 
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err == nil {
-		_ = os.WriteFile(s.cfg.StoragePath, data, 0600)
+		tmpPath := s.cfg.StoragePath + fmt.Sprintf(".tmp.%d", time.Now().UnixNano())
+		if wErr := os.WriteFile(tmpPath, data, 0600); wErr == nil {
+			_ = os.Rename(tmpPath, s.cfg.StoragePath)
+		}
 	}
 }
 
@@ -1341,6 +1450,16 @@ func (s *WebhookServer) loadState() {
 	s.jobsMu.Lock()
 	if state.Jobs != nil {
 		for k, v := range state.Jobs {
+			// Per P1-7 d: Stale running jobs from prior crash must be marked failed to prevent wedge
+			if v.Status == "running" {
+				v.Status = "failed"
+				v.Error = "server restarted while job was running (interrupted)"
+			} else if v.Status == "queued" {
+				if time.Since(v.CreatedAt) > time.Hour {
+					v.Status = "failed"
+					v.Error = "queued job expired after server restart"
+				}
+			}
 			s.jobs[k] = v
 		}
 	}
@@ -1353,6 +1472,16 @@ func (s *WebhookServer) loadState() {
 		}
 	}
 	s.deliveriesMu.Unlock()
+}
+
+func (s *WebhookServer) Drain(ctx context.Context) {
+	for i := 0; i < cap(s.sem); i++ {
+		select {
+		case s.sem <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func (s *WebhookServer) getBranchLock(key string) *sync.Mutex {
