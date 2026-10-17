@@ -607,6 +607,44 @@ func TestP0_2_AutonomyGateSecurity(t *testing.T) {
 	}
 }
 
+func TestP0_2_Residual_EnvKeyCannotSetVerified_And_SetActivePolicyCannotBypassAutonomyGate(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. Env-forged policy must NOT be IsVerified=true and must NOT loosen RequireSeparateApprover
+	envPolicyFile := filepath.Join(tempDir, "attacker_policy.json")
+	_ = os.WriteFile(envPolicyFile, []byte(`{
+		"requireSeparateApprover": false,
+		"allowAutonomous": false
+	}`), 0644)
+	t.Setenv("ARTIX_POLICY_SIGNING_KEY", "attacker-secret")
+	_ = SignPolicyFile(envPolicyFile, "attacker-secret")
+
+	p, err := LoadPolicy(envPolicyFile)
+	if err == nil && p != nil && p.IsVerified {
+		t.Fatalf("SECURITY VULNERABILITY: LoadPolicy marked env HMAC-signed policy as IsVerified=true!")
+	}
+
+	SetDefaultPolicyPath(envPolicyFile)
+	ResetCache()
+	active := Active()
+	if active.IsVerified {
+		t.Fatalf("SECURITY VULNERABILITY: Active() returned IsVerified=true for env-signed policy!")
+	}
+	if !active.RequireSeparateApprover && (os.Getenv("ARTIX_ENTERPRISE") == "1" || isSignedPolicyEnforced()) {
+		t.Fatalf("SECURITY VULNERABILITY: Env-forged policy loosened RequireSeparateApprover to false!")
+	}
+
+	// 2. SetActivePolicyForTest must NEVER bypass VerifyAutonomyGate()
+	SetActivePolicyForTest(&Policy{
+		AllowAutonomous: true,
+	})
+	defer ResetTestPolicy()
+
+	if err := VerifyAutonomyGate(); err == nil {
+		t.Fatalf("SECURITY VULNERABILITY: SetActivePolicyForTest allowed VerifyAutonomyGate() to return nil without compiled/root-owned key!")
+	}
+}
+
 
 
 
