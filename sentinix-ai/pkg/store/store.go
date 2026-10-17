@@ -78,6 +78,7 @@ func Open(dsn string) (*Store, error) {
 	for _, q := range []string{
 		"alter table projects add column enforcement text not null default 'block'",
 		"alter table projects add column fail_on text not null default ''",
+		"alter table durable_queue add column lease_until bigint not null default 0",
 		"alter table audit add column seq bigint not null default 0",
 		"alter table audit add column source text not null default ''",
 		"alter table audit add column before_val text not null default ''",
@@ -106,7 +107,6 @@ func Open(dsn string) (*Store, error) {
 		}
 	}
 	db.Exec("insert into audit_counter(id, last_seq) values(1, 0) on conflict do nothing")
-	db.Exec("update durable_queue set status='pending' where status='running'")
 	st := &Store{db: db}
 	if k := os.Getenv("SENTINIX_AUDIT_KEY"); k != "" {
 		st.auditKey = []byte(k)

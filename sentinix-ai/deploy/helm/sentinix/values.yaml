@@ -1,5 +1,5 @@
 image: { repository: sentinix, tag: "0.0.0-set-me" }
-replicas: 1                # scheduled scans run in-process; keep 1 until a job lock exists
+replicas: 1                # >1 is supported (job leases + scheduler leader lock) but not yet verified end to end with kill -9 on a real cluster
 args: ["-config", "/etc/sentinix/sentinix.json"]
 # Secret holding SENTINIX_SESSION_KEY, git host tokens/secrets, OIDC_* and the database URL as SENTINIX_DB.
 existingSecret: sentinix-env

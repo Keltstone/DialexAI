@@ -311,7 +311,7 @@ func (s *Store) DequeueJob() (string, string, string, error) {
 	// 1. Try atomic Postgres UPDATE ... RETURNING with FOR UPDATE SKIP LOCKED
 	qPostgres := `
 		update durable_queue
-		set status = 'running'
+		set status = 'running', lease_until = $1
 		where id = (
 			select id
 			from durable_queue
@@ -322,7 +322,7 @@ func (s *Store) DequeueJob() (string, string, string, error) {
 		)
 		returning id, host, payload
 	`
-	err := s.db.QueryRow(qPostgres).Scan(&jobID, &host, &payload)
+	err := s.db.QueryRow(qPostgres, now()+JobLeaseSeconds).Scan(&jobID, &host, &payload)
 	if err == nil {
 		return jobID, host, payload, nil
 	}
@@ -338,7 +338,7 @@ func (s *Store) DequeueJob() (string, string, string, error) {
 	if err != nil {
 		return "", "", "", err
 	}
-	res, err := tx.Exec("update durable_queue set status='running' where id=$1 and status='pending'", jobID)
+	res, err := tx.Exec("update durable_queue set status='running', lease_until=$2 where id=$1 and status='pending'", jobID, now()+JobLeaseSeconds)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -356,8 +356,17 @@ func (s *Store) FinishJob(jobID string) error {
 	return err
 }
 
+// JobLeaseSeconds is how long a worker owns a running job without a heartbeat. A replica killed
+// mid-scan stops heartbeating, and any replica's ReclaimStaleJobs re-queues the job after this.
+const JobLeaseSeconds = 120
+
+func (s *Store) ExtendJobLease(jobID string) error {
+	_, err := s.db.Exec("update durable_queue set lease_until=$2 where id=$1 and status='running'", jobID, now()+JobLeaseSeconds)
+	return err
+}
+
 func (s *Store) ReclaimStaleJobs() error {
-	_, err := s.db.Exec("update durable_queue set status='pending' where status='running'")
+	_, err := s.db.Exec("update durable_queue set status='pending' where status='running' and lease_until < $1", now())
 	return err
 }
 
