@@ -379,7 +379,10 @@ func scanAll(ctx context.Context, root string, extra []engines.Engine) ([]engine
 					m = rf.Evidence
 				}
 				h := sha256.Sum256([]byte(m))
-				key := rf.Rule + ":" + rf.File + ":" + hex.EncodeToString(h[:]) // per-path so scoped scans number occurrences like full scans
+				// ponytail: keyed by basename like the fingerprint, so identical copies in different dirs get distinct ids
+			// (no collision) while a dir move keeps ids. Ceiling: an identical same-basename copy sorting earlier
+			// renumbers later copies. Full path would fix that but costs move-retention (churn_test needs >=95%).
+			key := rf.Rule + ":" + engines.NormalizeFindingPath(rf.File) + ":" + hex.EncodeToString(h[:])
 				rf.Occurrence = occ[key]
 				occ[key]++
 			}
@@ -482,10 +485,6 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 	if err != nil {
 		return nil, err
 	}
-	base, err := r.worktree(ctx, "wt-base", baseCommit)
-	if err != nil {
-		return nil, err
-	}
 
 	baseKey := fmt.Sprintf("%s", baseCommit)
 	if sc := engines.ScopeFrom(ctx); sc != nil {
@@ -516,6 +515,12 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 	} else {
 		go func() {
 			defer close(baseDone)
+			// checkout overlaps the head scan; a cached base needs no checkout at all
+			base, err := r.worktree(ctx, "wt-base", baseCommit)
+			if err != nil {
+				baseErr = err
+				return
+			}
 			bf, _, _, _, _, baseErr = scanAll(ctx, base, extra)
 			if baseErr == nil {
 				SetBaseCache(baseKey, bf)
@@ -624,10 +629,22 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 		hfFps[f.Fingerprint()] = true
 	}
 	var resolved []engines.Finding
+	oldToNew := map[string]string{}
+	for newP, oldP := range renames {
+		oldToNew[oldP] = newP
+	}
 	for _, f := range bf {
-		if !hfFps[f.Fingerprint()] {
-			resolved = append(resolved, f)
+		if hfFps[f.Fingerprint()] {
+			continue
 		}
+		if np, ok := oldToNew[f.File]; ok { // renamed, not fixed: still present under the new path
+			rf := f
+			rf.File = np
+			if hfFps[rf.Fingerprint()] {
+				continue
+			}
+		}
+		resolved = append(resolved, f)
 	}
 
 	res := &Result{
