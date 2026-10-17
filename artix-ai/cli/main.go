@@ -1480,6 +1480,34 @@ func runKnowledge(cwd string, args []string, human io.Writer, sendJSON func(any)
 			return 1
 		}
 
+		if ki.LastEvalResult != nil && ki.LastEvalResult.Status != "unmeasured" && len(ki.LastEvalResult.BaselineSamples) > 0 {
+			res := ki.LastEvalResult
+			if isJSON {
+				sendJSON(map[string]any{
+					"ok":              true,
+					"status":          res.Status,
+					"id":              ki.ID,
+					"baselineSamples": res.BaselineSamples,
+					"kiSamples":       res.KISamples,
+					"pRound":          res.PRound,
+					"pFailure":        res.PFailure,
+					"pValue":          res.PValue,
+					"mde":             res.MDE,
+					"regression":      res.Regression,
+					"summary":         res.Summary,
+				})
+			} else {
+				fmt.Fprintf(human, "A/B Evaluation for %s:\n", ki.ID)
+				fmt.Fprintf(human, " - Baseline samples: %v (mean: %.2f, failures: %d)\n", res.BaselineSamples, res.MeanBaseline, res.BaseFailures)
+				fmt.Fprintf(human, " - KI samples: %v (mean: %.2f, failures: %d)\n", res.KISamples, res.MeanWithKI, res.KIFailures)
+				fmt.Fprintf(human, " - P-values: pRound=%.4f, pFailure=%.4f\n", res.PRound, res.PFailure)
+				fmt.Fprintf(human, " - Minimum Detectable Effect (MDE): %.4f rounds\n", res.MDE)
+				fmt.Fprintf(human, " - Regression: %v (status: %s)\n", res.Regression, res.Status)
+				fmt.Fprintf(human, " - Summary: %s\n", res.Summary)
+			}
+			return 0
+		}
+
 		ki.LastEvalResult = &knowledge.ABEvalResult{
 			TargetID:   ki.ID,
 			Status:     "unmeasured",
@@ -1488,14 +1516,19 @@ func runKnowledge(cwd string, args []string, human io.Writer, sendJSON func(any)
 		}
 		_ = store.Save(ki)
 
-		errStr := fmt.Sprintf("Error: A/B evaluation unmeasured: no evaluation harness or active session available to measure %s", ki.ID)
+		errStr := fmt.Sprintf("Error: A/B evaluation unmeasured: no evaluation harness or active session available to measure %s (samples: none, p-values: n/a, MDE: n/a)", ki.ID)
 		if isJSON {
 			sendJSON(map[string]any{
-				"ok":      false,
-				"status":  "unmeasured",
-				"id":      ki.ID,
-				"error":   errStr,
-				"summary": ki.LastEvalResult.Summary,
+				"ok":              false,
+				"status":          "unmeasured",
+				"id":              ki.ID,
+				"baselineSamples": []int{},
+				"kiSamples":       []int{},
+				"pRound":          0.0,
+				"pFailure":        0.0,
+				"mde":             0.0,
+				"error":           errStr,
+				"summary":         ki.LastEvalResult.Summary,
 			})
 		} else {
 			fmt.Fprintf(stderr, "%s\n", errStr)

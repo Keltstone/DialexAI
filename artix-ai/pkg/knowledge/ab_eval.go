@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 )
 
 // DefaultSamplesPerArm specifies the minimum sample count per arm in A/B evaluation (N >= 3).
@@ -17,7 +18,7 @@ const DefaultAlpha = 0.05
 // DemotionThresholdRatio defines the maximum allowable ratio of mean rounds with KI vs baseline.
 // When mean(roundsWithKI) > mean(roundsBaseline) * DemotionThresholdRatio (default 1.0),
 // and one-sided Mann-Whitney test shows statistically significant regression (p <= alpha),
-// or when any sample fails convergence with KI while baseline succeeded, the KI is demoted.
+// or when Fisher exact test on failure counts shows statistically significant excess failures, the KI is demoted.
 const DemotionThresholdRatio = 1.0
 
 // ABEvalOptions configures the A/B evaluation parameters.
@@ -54,17 +55,41 @@ type ABEvalResult struct {
 // When item is nil, it runs the baseline configuration without the candidate item.
 type ABEvalRunner func(ctx context.Context, item any) (rounds int, success bool, err error)
 
+func isBudgetExhausted(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "budget exhausted") || strings.Contains(msg, "budget exceeded") || strings.Contains(msg, "parent budget")
+}
+
 // RunABEval executes an A/B evaluation harness comparing convergence rounds without vs with the target knowledge item/rule.
 // It executes N >= 3 samples per arm (baseline arm with item = nil, and test arm with target item).
 // Demotion threshold:
-// If mean rounds with KI exceeds mean baseline rounds (or if KI samples fail convergence while baseline succeeded),
-// the candidate item is automatically demoted.
+// Uses Fisher exact test on failure counts and Mann-Whitney test on rounds with alpha split to keep
+// false demotion <= alpha across null conditions (0%, 10%, 20% non-convergence).
 func RunABEval(ctx context.Context, target any, runner ABEvalRunner, opts ...ABEvalOptions) (*ABEvalResult, error) {
 	if target == nil {
 		return nil, fmt.Errorf("target is nil")
 	}
 	if runner == nil {
 		return nil, fmt.Errorf("loop runner harness is required")
+	}
+
+	var targetID string
+	switch item := target.(type) {
+	case *KnowledgeItem:
+		if item == nil {
+			return nil, fmt.Errorf("target knowledge item is nil")
+		}
+		targetID = item.ID
+	case *SynthesizedRule:
+		if item == nil {
+			return nil, fmt.Errorf("target synthesized rule is nil")
+		}
+		targetID = item.RuleID
+	default:
+		return nil, fmt.Errorf("unsupported target type for A/B eval: %T", target)
 	}
 
 	samplesPerArm := DefaultSamplesPerArm
@@ -89,6 +114,15 @@ func RunABEval(ctx context.Context, target any, runner ABEvalRunner, opts ...ABE
 	for i := 0; i < samplesPerArm; i++ {
 		rounds, success, err := runner(ctx, nil)
 		if err != nil {
+			if isBudgetExhausted(err) {
+				return &ABEvalResult{
+					TargetID:      targetID,
+					SamplesPerArm: samplesPerArm,
+					Status:        "unmeasured",
+					Regression:    false,
+					Summary:       fmt.Sprintf("A/B evaluation unmeasured: sub-run killed by parent budget exhaustion (%v)", err),
+				}, nil
+			}
 			return nil, fmt.Errorf("baseline loop run (sample %d/%d) failed: %w", i+1, samplesPerArm, err)
 		}
 		if rounds <= 0 {
@@ -109,6 +143,15 @@ func RunABEval(ctx context.Context, target any, runner ABEvalRunner, opts ...ABE
 	for i := 0; i < samplesPerArm; i++ {
 		rounds, success, err := runner(ctx, target)
 		if err != nil {
+			if isBudgetExhausted(err) {
+				return &ABEvalResult{
+					TargetID:      targetID,
+					SamplesPerArm: samplesPerArm,
+					Status:        "unmeasured",
+					Regression:    false,
+					Summary:       fmt.Sprintf("A/B evaluation unmeasured: sub-run killed by parent budget exhaustion (%v)", err),
+				}, nil
+			}
 			return nil, fmt.Errorf("loop run with target (sample %d/%d) failed: %w", i+1, samplesPerArm, err)
 		}
 		if rounds <= 0 {
@@ -122,49 +165,50 @@ func RunABEval(ctx context.Context, target any, runner ABEvalRunner, opts ...ABE
 	}
 	meanKI := float64(totalKIRounds) / float64(samplesPerArm)
 
-	pValue := computeOneSidedMannWhitneyPValue(baselineSamples, kiSamples)
+	pRound := computeOneSidedMannWhitneyPValue(baselineSamples, kiSamples)
+	pFailure := computeFisherExactPValue(kiFailures, samplesPerArm, baselineFailures, samplesPerArm)
+	mde := computeMDE(baselineSamples, kiSamples, alpha)
+
+	// Alpha split:
+	// For small N (N < 5) where exact test distributions are highly discrete (min p-value is 0.05),
+	// setting threshold to alpha bounds the combined false demotion rate to <= alpha (e.g. ~0.03 <= 0.05)
+	// while retaining non-zero power. For N >= 5, Bonferroni split (alpha/2 for failure and alpha/2 for rounds)
+	// strictly bounds the family-wise error rate by alpha/2 + alpha/2 = alpha.
+	alphaFailure := alpha
+	alphaRound := alpha
+	if samplesPerArm >= 5 {
+		alphaFailure = alpha / 2.0
+		alphaRound = alpha / 2.0
+	}
 
 	// Documented Demotion Rule:
-	// A knowledge item regresses and is demoted only when the evidence is strong:
-	// 1. kiFailures > baselineFailures, OR
-	// 2. Convergence succeeded, meanKI > meanBaseline * threshold,
-	//    AND one-sided Mann-Whitney test rejects H0 with strong evidence (pValue <= alpha).
-	regression := (kiFailures > baselineFailures) || (meanKI > meanBaseline*threshold && pValue <= alpha)
+	// A knowledge item regresses and is demoted only when:
+	// 1. Fisher exact test on failure counts indicates statistically significant excess failures (pFailure <= alphaFailure), OR
+	// 2. Mean KI rounds exceeds baseline * threshold, AND one-sided Mann-Whitney test rejects H0 (pRound <= alphaRound).
+	regression := (pFailure <= alphaFailure) || (meanKI > meanBaseline*threshold && pRound <= alphaRound)
 
-	var targetID string
 	var summary string
-
 	status := "pass"
 	if regression {
 		status = "regression"
-		if kiFailures > baselineFailures {
-			summary = fmt.Sprintf("A/B evaluation regression across %d samples: %d KI failures vs %d baseline failures", samplesPerArm, kiFailures, baselineFailures)
+		if pFailure <= alphaFailure {
+			summary = fmt.Sprintf("A/B evaluation regression across %d samples: KI failures (%d/%d) significantly higher than baseline (%d/%d) (pFailure=%.4f <= alpha=%.2f, MDE=%.2f)", samplesPerArm, kiFailures, samplesPerArm, baselineFailures, samplesPerArm, pFailure, alphaFailure, mde)
 		} else {
-			summary = fmt.Sprintf("A/B evaluation regression across %d samples: %.2f mean rounds with KI vs %.2f baseline rounds (p=%.4f <= alpha=%.2f, threshold ratio %.2f)", samplesPerArm, meanKI, meanBaseline, pValue, alpha, threshold)
+			summary = fmt.Sprintf("A/B evaluation regression across %d samples: %.2f mean rounds with KI vs %.2f baseline rounds (pRound=%.4f <= alpha=%.2f, pFailure=%.4f, MDE=%.2f, threshold ratio %.2f)", samplesPerArm, meanKI, meanBaseline, pRound, alphaRound, pFailure, mde, threshold)
 		}
 	} else {
-		summary = fmt.Sprintf("A/B evaluation pass across %d samples: %.2f mean rounds with KI vs %.2f baseline rounds (p=%.4f > alpha=%.2f)", samplesPerArm, meanKI, meanBaseline, pValue, alpha)
+		summary = fmt.Sprintf("A/B evaluation pass across %d samples: %.2f mean rounds with KI vs %.2f baseline rounds (pRound=%.4f, pFailure=%.4f, alpha=%.2f, MDE=%.2f)", samplesPerArm, meanKI, meanBaseline, pRound, pFailure, alpha, mde)
 	}
 
 	switch item := target.(type) {
 	case *KnowledgeItem:
-		if item == nil {
-			return nil, fmt.Errorf("target knowledge item is nil")
-		}
-		targetID = item.ID
 		if regression {
 			item.AutoDemote(summary)
 		}
 	case *SynthesizedRule:
-		if item == nil {
-			return nil, fmt.Errorf("target synthesized rule is nil")
-		}
-		targetID = item.RuleID
 		if regression {
 			item.AutoDemote(summary)
 		}
-	default:
-		return nil, fmt.Errorf("unsupported target type for A/B eval: %T", target)
 	}
 
 	return &ABEvalResult{
@@ -176,12 +220,114 @@ func RunABEval(ctx context.Context, target any, runner ABEvalRunner, opts ...ABE
 		MeanWithKI:      meanKI,
 		BaselineSamples: baselineSamples,
 		KISamples:       kiSamples,
-		PValue:          pValue,
+		PValue:          pRound,
+		PRound:          pRound,
+		PFailure:        pFailure,
+		MDE:             mde,
+		KIFailures:      kiFailures,
+		BaseFailures:    baselineFailures,
 		Alpha:           alpha,
 		Regression:      regression,
 		Status:          status,
 		Summary:         summary,
 	}, nil
+}
+
+func computeMDE(baseline, ki []int, alpha float64) float64 {
+	n1 := len(baseline)
+	n2 := len(ki)
+	if n1 == 0 || n2 == 0 {
+		return 0
+	}
+	var sumB, sumK float64
+	for _, v := range baseline {
+		sumB += float64(v)
+	}
+	for _, v := range ki {
+		sumK += float64(v)
+	}
+	meanB := sumB / float64(n1)
+	meanK := sumK / float64(n2)
+
+	var ssq float64
+	for _, v := range baseline {
+		diff := float64(v) - meanB
+		ssq += diff * diff
+	}
+	for _, v := range ki {
+		diff := float64(v) - meanK
+		ssq += diff * diff
+	}
+
+	df := n1 + n2 - 2
+	var s float64
+	if df > 0 {
+		s = math.Sqrt(ssq / float64(df))
+	}
+	if s <= 0 {
+		s = 1.0 // fallback floor if sample variance is 0
+	}
+
+	// Critical value for one-sided alpha and 80% power (beta = 0.20 -> z = 0.842)
+	zAlpha := 1.645
+	if alpha <= 0.01 {
+		zAlpha = 2.326
+	} else if alpha <= 0.025 {
+		zAlpha = 1.960
+	}
+	zBeta := 0.842
+	se := s * math.Sqrt(1.0/float64(n1)+1.0/float64(n2))
+	return (zAlpha + zBeta) * se
+}
+
+func computeFisherExactPValue(kiFailures, kiTotal, baseFailures, baseTotal int) float64 {
+	a := kiFailures
+	b := kiTotal - kiFailures
+	c := baseFailures
+	d := baseTotal - baseFailures
+
+	n1 := a + b
+	n2 := c + d
+	k := a + c
+	totalN := n1 + n2
+
+	if k == 0 || n1 == 0 || n2 == 0 {
+		return 1.0
+	}
+	if a <= c {
+		return 1.0
+	}
+
+	denom := logComb(totalN, k)
+	var pValue float64
+	maxA := n1
+	if k < maxA {
+		maxA = k
+	}
+	for x := a; x <= maxA; x++ {
+		logNum := logComb(n1, x) + logComb(n2, k-x)
+		prob := math.Exp(logNum - denom)
+		pValue += prob
+	}
+	if pValue > 1.0 {
+		pValue = 1.0
+	}
+	return pValue
+}
+
+func logComb(n, k int) float64 {
+	if k < 0 || k > n {
+		return math.Inf(-1)
+	}
+	if k == 0 || k == n {
+		return 0
+	}
+	return logFactorial(n) - logFactorial(k) - logFactorial(n-k)
+}
+
+func logFactorial(n int) float64 {
+	val, _ := math.Lgamma(float64(n + 1))
+	return val
 }
 
 func nCr(n, r int) int {

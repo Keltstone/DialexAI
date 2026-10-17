@@ -101,3 +101,35 @@ func TestP1_5_ABEval_ReportsMDE_And_CatchesLargeRegression(t *testing.T) {
 		t.Fatalf("large-regression demotion rate %.4f is less than required 0.95", regressionRate)
 	}
 }
+
+func TestP1_5_ABEval_BudgetExhaustion_IsUnmeasured_NotFailure(t *testing.T) {
+	ki := &KnowledgeItem{
+		ID:     "ki-budget-exhaustion-test",
+		Status: "active",
+	}
+
+	runner := func(ctx context.Context, item any) (int, bool, error) {
+		if item != nil {
+			return 0, false, fmt.Errorf("agent sub-run error: parent budget exhausted (tokens exceeded)")
+		}
+		return 2, true, nil
+	}
+
+	res, err := RunABEval(t.Context(), ki, runner, ABEvalOptions{
+		SamplesPerArm: 3,
+		Threshold:     1.0,
+		Alpha:         DefaultAlpha,
+	})
+	if err != nil {
+		t.Fatalf("expected nil error on budget exhaustion, got: %v", err)
+	}
+	if res.Status != "unmeasured" {
+		t.Fatalf("expected Status to be 'unmeasured', got %q", res.Status)
+	}
+	if res.Regression {
+		t.Fatalf("expected Regression to be false on budget exhaustion, got true")
+	}
+	if ki.Status != "active" {
+		t.Fatalf("expected KI status to remain 'active', got %q", ki.Status)
+	}
+}

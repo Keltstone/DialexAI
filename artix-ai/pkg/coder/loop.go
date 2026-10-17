@@ -1284,7 +1284,9 @@ func (c *ConvergenceCoordinator) Run(
 							// once with the KI excluded from PromptContext.KnowledgeItems and once with it included.
 							targetKI := *ki
 							evalRunner = func(evalCtx context.Context, item any) (int, bool, error) {
-								wtDir, wtErr := os.MkdirTemp("", "artix-ab-eval-*")
+								artixTmp := filepath.Join(repoCtx.RootDir, ".artix", "tmp")
+								_ = os.MkdirAll(artixTmp, 0700)
+								wtDir, wtErr := os.MkdirTemp(artixTmp, "ab-eval-*")
 								if wtErr != nil {
 									return 0, false, fmt.Errorf("failed to create temp worktree dir: %w", wtErr)
 								}
@@ -1318,8 +1320,11 @@ func (c *ConvergenceCoordinator) Run(
 								subOpts.ForgeApproval = nil
 								subOpts.ForgeVerifier = nil
 								subOpts.ForgePusher = nil
-								subOpts.AuditEval = true
-								subOpts.TestCommandsConfirmed = true
+								// Justification: A/B sub-runs evaluate the exact same story whose test commands
+								// were already accepted and executed by the parent loop. Inherit confirmation:
+								// if the parent confirmed via flag, callback, or ran autonomously, the commands
+								// are confirmed for the evaluation replay; otherwise require confirmation.
+								subOpts.TestCommandsConfirmed = opts.TestCommandsConfirmed || (opts.ConfirmTestCommands != nil) || (opts.Autonomy == AutonomyAutonomous || opts.Autonomy == "")
 
 								if item == nil {
 									// Baseline run: exclude target KI from KnowledgeItems
@@ -1332,6 +1337,9 @@ func (c *ConvergenceCoordinator) Run(
 								}
 
 								subRes := subCoord.Run(evalCtx, s, subRepoCtx, coderSteering, revSteering, &subOpts)
+								if subRes.Error != "" && (strings.Contains(strings.ToLower(subRes.Error), "budget") || strings.Contains(strings.ToLower(subRes.Error), "token cap")) {
+									return 0, false, fmt.Errorf("sub-run budget exhausted: %s", subRes.Error)
+								}
 								return subRes.RoundsRun, subRes.Success, nil
 							}
 						}
