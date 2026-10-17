@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"artix/pkg/audit"
 	"artix/pkg/coder"
@@ -56,19 +57,27 @@ func runExplain(cwd string, args []string, human io.Writer, sendJSON func(any), 
 		}
 	}
 
-	if failingPhase == "" && len(traces) > 0 {
-		failingPhase = traces[len(traces)-1].Phase
-		if failingPhase == "" {
-			failingPhase = "CONVERGENCE"
-		}
-	}
-
-	if reproduceCmd == "" && len(traces) > 0 {
-		reproduceCmd = fmt.Sprintf("artix replay %s --round %d", taskID, traces[len(traces)-1].Round)
-	}
-
 	if finalStatus == "UNKNOWN" && len(traces) > 0 {
 		finalStatus = traces[len(traces)-1].ReviewerVerdict
+	}
+
+	isApproved := strings.EqualFold(finalStatus, "APPROVED") || strings.EqualFold(finalStatus, "SUCCESS") || strings.EqualFold(finalStatus, "COMPLETED")
+
+	if isApproved {
+		failingPhase = ""
+		reproduceCmd = ""
+		rejectionReasons = nil
+	} else {
+		if failingPhase == "" && len(traces) > 0 {
+			failingPhase = traces[len(traces)-1].Phase
+			if failingPhase == "" {
+				failingPhase = "CONVERGENCE"
+			}
+		}
+
+		if reproduceCmd == "" && len(traces) > 0 {
+			reproduceCmd = fmt.Sprintf("artix replay %s --round %d", taskID, traces[len(traces)-1].Round)
+		}
 	}
 
 	res := ExplainResult{

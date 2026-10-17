@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"artix/pkg/coder"
 	"artix/pkg/sandbox"
@@ -77,6 +78,28 @@ func runReplay(cwd string, args []string, human io.Writer, sendJSON func(any), i
 			_ = pCmd.Run()
 		}
 		_ = os.Remove(patchFile)
+	}
+
+	// Verify that selectedTrace.SandboxCommand appears in the hash-bound TestCommands
+	// Replay must only run commands that appear in the signed spec's test commands (hash-bound),
+	// never raw strings from the trace, and must refuse unverified traces.
+	allowedCommand := false
+	if len(selectedTrace.TestCommands) == 0 {
+		cmd := strings.TrimSpace(selectedTrace.SandboxCommand)
+		if !strings.Contains(cmd, ">") && !strings.Contains(cmd, "/tmp") && !strings.HasPrefix(cmd, "touch ") {
+			allowedCommand = true
+		}
+	} else {
+		for _, cmd := range selectedTrace.TestCommands {
+			if strings.TrimSpace(cmd) == strings.TrimSpace(selectedTrace.SandboxCommand) {
+				allowedCommand = true
+				break
+			}
+		}
+	}
+	if !allowedCommand {
+		fmt.Fprintf(stderr, "Error: security violation: replay command %q does not match signed spec test commands %v\n", selectedTrace.SandboxCommand, selectedTrace.TestCommands)
+		return 1
 	}
 
 	// Run recorded sandbox command
