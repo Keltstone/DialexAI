@@ -14,6 +14,7 @@ import (
 
 	"artix/pkg/audit"
 	"artix/pkg/coder"
+	"fmt"
 )
 
 type safeBuffer struct {
@@ -351,5 +352,58 @@ func TestT4_ACP_PlanAndReview_BudgetAndAuditEmitters(t *testing.T) {
 	}
 	if !foundBudgetExhausted {
 		t.Errorf("expected EventBudgetExhausted audit event in audit log")
+	}
+}
+
+func TestP1_6_ACP_Governance(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. Client maxTokens/maxUsd cannot elevate or mutate the shared budget
+	sharedBudget := &coder.TokenBudget{
+		MaxStoryTokens: 50,
+		MaxStoryCost:   1.0,
+	}
+	server := NewServer(tmpDir, nil, nil, nil)
+	server.SetBudget(sharedBudget)
+
+	sess := &sessionState{
+		id:        "sess-gov",
+		rootDir:   tmpDir,
+		domain:    "backend_engineer",
+		maxTokens: 0,
+		maxUSD:    0,
+	}
+
+	// Client passes higher maxTokens: 99999999
+	resolved := server.resolveBudget(sess, SessionPromptParams{
+		SessionID: "sess-gov",
+		MaxTokens: 99999999,
+		MaxUSD:    100.0,
+	})
+	if resolved.MaxStoryTokens > 50 {
+		t.Fatalf("SECURITY VULNERABILITY: client maxTokens elevated cap from 50 to %d", resolved.MaxStoryTokens)
+	}
+	if sharedBudget.MaxStoryTokens != 50 {
+		t.Fatalf("SECURITY VULNERABILITY: client permanently mutated shared budget to %d", sharedBudget.MaxStoryTokens)
+	}
+
+	// 2. Client may only lower the cap
+	resolvedLower := server.resolveBudget(sess, SessionPromptParams{
+		SessionID: "sess-gov",
+		MaxTokens: 20,
+	})
+	if resolvedLower.MaxStoryTokens != 20 {
+		t.Fatalf("expected client to be able to lower cap to 20, got: %d", resolvedLower.MaxStoryTokens)
+	}
+	if sharedBudget.MaxStoryTokens != 50 {
+		t.Fatalf("client mutated shared budget when lowering cap!")
+	}
+
+	// 3. Message framing bounded to 8 MiB
+	tooBigMsg := fmt.Sprintf("Content-Length: %d\r\n\r\n", 9*1024*1024)
+	serverBounded := NewServer(tmpDir, nil, strings.NewReader(tooBigMsg), nil)
+	_, err := serverBounded.readMessage()
+	if err == nil {
+		t.Fatalf("SECURITY VULNERABILITY: readMessage accepted 9 MiB message without error")
 	}
 }
