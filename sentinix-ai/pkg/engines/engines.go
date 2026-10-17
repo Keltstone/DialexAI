@@ -532,6 +532,12 @@ func Redact(s string) string {
 	return res
 }
 
+// reAssignedSecret masks the value of secret-looking assignments regardless of length or entropy
+// (`password = "hunter2"`), which the vendor rules and the entropy fallback both miss.
+var reAssignedSecret = regexp.MustCompile(`(?i)((?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|auth(?:orization)?|credential)s?["']?\s*[:=]\s*["']?)([^\s"',;)]{4,})`)
+
+var rePEMBlock = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)`)
+
 var wordRe = regexp.MustCompile(`[A-Za-z0-9+/=_\-]{20,}`)
 
 func RedactSafe(s string) (string, error) {
@@ -541,6 +547,8 @@ func RedactSafe(s string) (string, error) {
 	for _, r := range secretRules {
 		s = r.Regex.ReplaceAllStringFunc(s, func(m string) string { return mask(m) })
 	}
+	s = rePEMBlock.ReplaceAllString(s, "-----BEGIN PRIVATE KEY-----****")
+	s = reAssignedSecret.ReplaceAllString(s, "${1}****")
 	// High entropy fallback for remaining unmasked candidate tokens
 	s = wordRe.ReplaceAllStringFunc(s, func(m string) string {
 		if strings.Contains(m, "****") {

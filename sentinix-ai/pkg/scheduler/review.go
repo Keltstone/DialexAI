@@ -220,7 +220,19 @@ func dirSize(path string) (int64, error) {
 }
 
 // fetch brings one ref in at depth 1 and returns its commit. Tokens are sent only over https.
+// checkRef refuses refs git could read as options or that git itself forbids in ref names.
+// Refs come from PR authors (fork branch names), so this is a trust boundary.
+func checkRef(ref string) error {
+	if ref == "" || strings.HasPrefix(ref, "-") || strings.Contains(ref, "..") || strings.ContainsAny(ref, " \t\n\r\x00~^:?*[\\") {
+		return fmt.Errorf("refusing unsafe ref %q", ref)
+	}
+	return nil
+}
+
 func (r *repo) fetch(ctx context.Context, rawURL, ref string, auth bool) (string, error) {
+	if err := checkRef(ref); err != nil {
+		return "", err
+	}
 	fetchCtx, cancel := context.WithTimeout(ctx, FetchTimeout)
 	defer cancel()
 
@@ -251,7 +263,7 @@ func (r *repo) fetch(ctx context.Context, rawURL, ref string, auth bool) (string
 	if !auth {
 		args = append(args, "-c", "credential.helper=")
 	}
-	args = append(args, "-c", fmt.Sprintf("pack.packSizeLimit=%d", maxBytes), "fetch", "--depth=1", "--no-tags", rawURL, ref)
+	args = append(args, "-c", fmt.Sprintf("pack.packSizeLimit=%d", maxBytes), "fetch", "--depth=1", "--no-tags", "--", rawURL, ref)
 	r.lastFetchArgs = args
 	_, err := r.gitContext(fetchCtx, args...)
 	close(done)
@@ -273,6 +285,9 @@ func (r *repo) fetch(ctx context.Context, rawURL, ref string, auth bool) (string
 }
 
 func (r *repo) fetchDeepen(ctx context.Context, rawURL, ref string, auth bool, depth int) error {
+	if err := checkRef(ref); err != nil {
+		return err
+	}
 	fetchCtx, cancel := context.WithTimeout(ctx, FetchTimeout)
 	defer cancel()
 
@@ -303,7 +318,7 @@ func (r *repo) fetchDeepen(ctx context.Context, rawURL, ref string, auth bool, d
 	if !auth {
 		args = append(args, "-c", "credential.helper=")
 	}
-	args = append(args, "-c", fmt.Sprintf("pack.packSizeLimit=%d", maxBytes), "fetch", fmt.Sprintf("--deepen=%d", depth), "--no-tags", rawURL, ref)
+	args = append(args, "-c", fmt.Sprintf("pack.packSizeLimit=%d", maxBytes), "fetch", fmt.Sprintf("--deepen=%d", depth), "--no-tags", "--", rawURL, ref)
 	r.lastFetchArgs = args
 	_, err := r.gitContext(fetchCtx, args...)
 	close(done)
