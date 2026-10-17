@@ -140,7 +140,7 @@ func BuildSanitizedChildEnv(cwd string, extraEnv map[string]string) []string {
 		return false
 	}
 
-	var childEnv []string
+	envMap := make(map[string]string)
 	for _, envStr := range os.Environ() {
 		parts := strings.SplitN(envStr, "=", 2)
 		if len(parts) != 2 {
@@ -151,19 +151,38 @@ func BuildSanitizedChildEnv(cwd string, extraEnv map[string]string) []string {
 			continue
 		}
 		if allowlistKeys[strings.ToUpper(k)] {
-			childEnv = append(childEnv, fmt.Sprintf("%s=%s", k, v))
+			envMap[k] = v
 		}
 	}
 
-	// Set HOME to workspace temp directory
-	sandboxHome := filepath.Join(os.TempDir(), "artix-sandbox-home")
-	_ = os.MkdirAll(sandboxHome, 0700)
-	childEnv = append(childEnv, fmt.Sprintf("HOME=%s", sandboxHome))
+	// Per P0-3, P0-5, and N1: Redirect mutable toolchain homes & caches to per-job tmp
+	jobCacheDir := filepath.Join(os.TempDir(), "artix-job-caches")
+	jobHome := filepath.Join(jobCacheDir, "home")
+	jobGradle := filepath.Join(jobCacheDir, "gradle")
+	jobSwiftPM := filepath.Join(jobCacheDir, "swiftpm")
+	jobKonan := filepath.Join(jobCacheDir, "konan")
+	jobCargo := filepath.Join(jobCacheDir, "cargo")
+	jobNpm := filepath.Join(jobCacheDir, "npm")
+	_ = os.MkdirAll(jobHome, 0700)
+	_ = os.MkdirAll(jobGradle, 0700)
+	_ = os.MkdirAll(jobSwiftPM, 0700)
+	_ = os.MkdirAll(jobKonan, 0700)
+	_ = os.MkdirAll(jobCargo, 0700)
+	_ = os.MkdirAll(jobNpm, 0700)
+
+	envMap["HOME"] = jobHome
+	envMap["GRADLE_USER_HOME"] = jobGradle
+	envMap["SWIFTPM_CACHE"] = jobSwiftPM
+	envMap["KONAN_DATA_DIR"] = jobKonan
+	envMap["CARGO_HOME"] = jobCargo
+	envMap["npm_config_cache"] = jobNpm
+	envMap["JAVA_TOOL_OPTIONS"] = "-Duser.home=" + jobHome
+	envMap["_JAVA_OPTIONS"] = "-Duser.home=" + jobHome
 
 	// On macOS, fallback to installed Xcode if DEVELOPER_DIR was not explicitly passed
-	if runtime.GOOS == "darwin" && os.Getenv("DEVELOPER_DIR") == "" {
+	if runtime.GOOS == "darwin" && envMap["DEVELOPER_DIR"] == "" {
 		if _, err := os.Stat("/Applications/Xcode.app/Contents/Developer"); err == nil {
-			childEnv = append(childEnv, "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer")
+			envMap["DEVELOPER_DIR"] = "/Applications/Xcode.app/Contents/Developer"
 		}
 	}
 
@@ -171,11 +190,15 @@ func BuildSanitizedChildEnv(cwd string, extraEnv map[string]string) []string {
 	if extraEnv != nil {
 		for k, v := range extraEnv {
 			if !isDeniedKey(k) {
-				childEnv = append(childEnv, fmt.Sprintf("%s=%s", k, v))
+				envMap[k] = v
 			}
 		}
 	}
 
+	var childEnv []string
+	for k, v := range envMap {
+		childEnv = append(childEnv, fmt.Sprintf("%s=%s", k, v))
+	}
 	return childEnv
 }
 

@@ -42,6 +42,11 @@ var SensitiveReadDenyPaths = []string{
 	"Library/Application Support/Google/Chrome",
 	"Library/Application Support/Firefox",
 	"Library/Application Support/BraveSoftware",
+	".zsh_history",
+	".bash_history",
+	".gitconfig",
+	".config/op",
+	".slack",
 }
 
 // IsConfinementAvailable returns whether kernel-level sandbox tooling is available on this host.
@@ -110,6 +115,20 @@ func BuildBwrapArgs(writable []string, net bool, cmdStr string, env ...[]string)
 		}
 	}
 
+	// 4. Set environment variables after --clearenv
+	var childEnv []string
+	if len(env) > 0 {
+		childEnv = env[0]
+	} else {
+		childEnv = BuildSanitizedChildEnv("", nil)
+	}
+	for _, kv := range childEnv {
+		parts := strings.SplitN(kv, "=", 2)
+		if len(parts) == 2 {
+			args = append(args, "--setenv", parts[0], parts[1])
+		}
+	}
+
 	if !net {
 		args = append(args, "--unshare-net")
 	}
@@ -172,8 +191,8 @@ func confine(cwd, cmdStr string, net bool, loopback bool) (*exec.Cmd, string) {
 		}
 
 		// Read deny list for credentials & tokens
+		p.WriteString("(deny file-read*")
 		if home != "" {
-			p.WriteString("(deny file-read*")
 			for _, denyRel := range SensitiveReadDenyPaths {
 				denyPath := filepath.Join(home, denyRel)
 				fmt.Fprintf(&p, " (subpath %q)", denyPath)
@@ -181,8 +200,13 @@ func confine(cwd, cmdStr string, net bool, loopback bool) (*exec.Cmd, string) {
 					fmt.Fprintf(&p, " (subpath %q)", resolved)
 				}
 			}
-			p.WriteString(")")
 		}
+		if runtime.GOOS == "darwin" {
+			if _, err := os.Stat("/Users/Shared"); err == nil {
+				fmt.Fprintf(&p, " (subpath %q)", "/Users/Shared")
+			}
+		}
+		p.WriteString(")")
 
 		// Write deny list
 		p.WriteString("(deny file-write*)(allow file-write* (literal \"/dev/null\") (literal \"/dev/tty\") (regex #\"^/dev/fd/\")")
@@ -234,7 +258,7 @@ func confine(cwd, cmdStr string, net bool, loopback bool) (*exec.Cmd, string) {
 			}
 			return plain()
 		}
-		args := BuildBwrapArgs(writable, net, cmdStr)
+		args := BuildBwrapArgs(writable, net, cmdStr, BuildSanitizedChildEnv(cwd, nil))
 		return exec.Command(bwrap, args...), IsolationOSSandbox
 
 	default:
