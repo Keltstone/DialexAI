@@ -1,3 +1,4 @@
+# SENTINIX_PGSSLMODE: set to require/verify-full when the db is not on the private compose network.
 # docker compose -f deploy/docker-compose.yml --env-file .env up
 # .env (not committed) defines POSTGRES_PASSWORD, SENTINIX_SESSION_KEY (32+ chars), the git host tokens/secrets
 # referenced by sentinix.json, and the OIDC_* variables.
@@ -16,7 +17,7 @@ services:
   sentinix:
     build: { context: .., dockerfile: deploy/Dockerfile }
     depends_on: { db: { condition: service_healthy } }
-    command: ["-db", "postgres://sentinix:${POSTGRES_PASSWORD}@db:5432/sentinix?sslmode=disable", "-config", "/etc/sentinix/sentinix.json"]
+    command: ["-db", "postgres://sentinix:${POSTGRES_PASSWORD}@db:5432/sentinix?sslmode=${SENTINIX_PGSSLMODE:-disable}", "-config", "/etc/sentinix/sentinix.json"]
     env_file: ../.env
     ports: ["8080:8080"]
     volumes: ["./sentinix.json:/etc/sentinix/sentinix.json:ro"]

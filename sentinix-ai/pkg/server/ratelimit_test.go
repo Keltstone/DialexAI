@@ -10,10 +10,10 @@ import (
 	"sentinix/pkg/store"
 )
 
-// TestProbe2RateLimitStarvesWebhooks tests that:
+// TestRateLimitExemptsWebhooks tests that:
 // 1. Webhooks (/webhook/*) and /healthz do not return 429 even after 400 requests from one proxy IP.
 // 2. Behind a trusted proxy, rate limiting keys on X-Forwarded-For per client, not the proxy IP.
-func TestProbe2RateLimitStarvesWebhooks(t *testing.T) {
+func TestRateLimitExemptsWebhooks(t *testing.T) {
 	st, _ := store.Open("sqlite::memory:")
 	a := &App{
 		Store:          st,

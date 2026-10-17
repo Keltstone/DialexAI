@@ -1,7 +1,13 @@
-image: { repository: sentinix, tag: latest }
+image: { repository: sentinix, tag: "0.0.0-set-me" }
 replicas: 1                # scheduled scans run in-process; keep 1 until a job lock exists
 args: ["-config", "/etc/sentinix/sentinix.json"]
 # Secret holding SENTINIX_SESSION_KEY, git host tokens/secrets, OIDC_* and the database URL as SENTINIX_DB.
 existingSecret: sentinix-env
 hostsConfig: "[]"          # contents of sentinix.json (names of env vars only, never values)
 service: { port: 8080 }
+resources:
+  requests: { cpu: 500m, memory: 512Mi }
+  limits: { cpu: "2", memory: 2Gi }
+networkPolicy:           # empty = any peer on the allowed ports; restrict to ingress controller / db CIDR in production
+  ingressFrom: []
+  egressTo: []
