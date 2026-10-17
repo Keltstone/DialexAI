@@ -45,9 +45,25 @@ func TestP1_10_ReviewDiffFlag_AnalyzesDiffFileAndRejectsTamperedDiff(t *testing.
 	}
 }
 
+func findRepoRoot() string {
+	dir, _ := os.Getwd()
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ".."
+}
+
 func TestP1_10_CIWorkflowIntegrity_And_HardenedGates(t *testing.T) {
+	repoRoot := findRepoRoot()
 	// Look up root .github/workflows/artix.yml
-	rootWorkflowPath := filepath.Join("..", ".github", "workflows", "artix.yml")
+	rootWorkflowPath := filepath.Join(repoRoot, ".github", "workflows", "artix.yml")
 	workflowBytes, err := os.ReadFile(rootWorkflowPath)
 	if err != nil {
 		t.Fatalf("could not read %s: %v", rootWorkflowPath, err)
@@ -55,7 +71,7 @@ func TestP1_10_CIWorkflowIntegrity_And_HardenedGates(t *testing.T) {
 	content := string(workflowBytes)
 
 	// 1. No duplicate workflow in artix-ai/.github/workflows/artix.yml
-	dupPath := filepath.Join("..", "artix-ai", ".github", "workflows", "artix.yml")
+	dupPath := filepath.Join(repoRoot, "artix-ai", ".github", "workflows", "artix.yml")
 	if _, err := os.Stat(dupPath); err == nil {
 		t.Errorf("duplicate divergent workflow file exists at %s and must be removed", dupPath)
 	}
@@ -110,7 +126,8 @@ func TestP1_10_CIWorkflowIntegrity_And_HardenedGates(t *testing.T) {
 }
 
 func TestP1_10_CheckTestRetention_FailsClosed(t *testing.T) {
-	scriptPath := filepath.Join("..", "scripts", "check-test-retention.sh")
+	repoRoot := findRepoRoot()
+	scriptPath := filepath.Join(repoRoot, "scripts", "check-test-retention.sh")
 	bytes, err := os.ReadFile(scriptPath)
 	if err != nil {
 		t.Fatalf("failed to read %s: %v", scriptPath, err)

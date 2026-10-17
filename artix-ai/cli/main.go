@@ -915,6 +915,7 @@ func runReview(cwd string, reg *persona.Registry, args []string, human io.Writer
 	fs.SetOutput(stderr)
 	providerFlag := fs.String("provider", "", "Model provider for the Critic (omit for rule-based pre-filter only, which yields 'unreviewed')")
 	modelFlag := fs.String("model", "", "Model name for --provider")
+	diffFlag := fs.String("diff", "", "Path to patch/diff file to review instead of working directory diff")
 	if err := fs.Parse(args); err != nil {
 		if isJSON {
 			sendJSON(map[string]any{"ok": false, "status": "error", "error": err.Error()})
@@ -932,22 +933,41 @@ func runReview(cwd string, reg *persona.Registry, args []string, human io.Writer
 	}
 
 	driver := git.NewDriver(cwd)
-	diff, err := driver.Diff(false)
-	if err != nil {
-		if isJSON {
-			sendJSON(map[string]any{"ok": false, "status": "error", "error": fmt.Sprintf("Error reading git diff: %v", err)})
+	var diff string
+	if *diffFlag != "" {
+		diffPath := *diffFlag
+		if !filepath.IsAbs(diffPath) {
+			diffPath = filepath.Join(cwd, diffPath)
 		}
-		if isStream {
-			emitter := coder.NewStreamEmitter(stdout)
-			emitter.Emit(coder.StreamEvent{
-				Type:    coder.EventError,
-				Phase:   "REVIEW",
-				Status:  "error",
-				Message: fmt.Sprintf("Error reading git diff: %v", err),
-			})
+		data, rerr := os.ReadFile(diffPath)
+		if rerr != nil {
+			errStr := fmt.Sprintf("Error reading diff file %s: %v", *diffFlag, rerr)
+			if isJSON {
+				sendJSON(map[string]any{"ok": false, "status": "error", "error": errStr})
+			}
+			fmt.Fprintf(stderr, "%s\n", errStr)
+			return 1
 		}
-		fmt.Fprintf(stderr, "Error reading git diff: %v\n", err)
-		return 1
+		diff = string(data)
+	} else {
+		var err error
+		diff, err = driver.Diff(false)
+		if err != nil {
+			if isJSON {
+				sendJSON(map[string]any{"ok": false, "status": "error", "error": fmt.Sprintf("Error reading git diff: %v", err)})
+			}
+			if isStream {
+				emitter := coder.NewStreamEmitter(stdout)
+				emitter.Emit(coder.StreamEvent{
+					Type:    coder.EventError,
+					Phase:   "REVIEW",
+					Status:  "error",
+					Message: fmt.Sprintf("Error reading git diff: %v", err),
+				})
+			}
+			fmt.Fprintf(stderr, "Error reading git diff: %v\n", err)
+			return 1
+		}
 	}
 
 	if strings.TrimSpace(diff) == "" {
