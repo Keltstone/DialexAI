@@ -453,4 +453,58 @@ func TestP0_5_SanitizedChildEnv_AllowlistsDeveloperToolchains(t *testing.T) {
 		}
 	}
 }
+func TestN1_N2_SandboxToolchainRedirectionAndLinuxBwrapEnv(t *testing.T) {
+	// 1. Check SensitiveReadDenyPaths covers new denylist entries
+	denyMap := make(map[string]bool)
+	for _, p := range SensitiveReadDenyPaths {
+		denyMap[p] = true
+	}
+	for _, expected := range []string{".zsh_history", ".bash_history", ".gitconfig", ".config/op", ".slack"} {
+		if !denyMap[expected] {
+			t.Errorf("SensitiveReadDenyPaths missing expected entry: %s", expected)
+		}
+	}
 
+	// 2. Check BuildSanitizedChildEnv redirects toolchain homes to per-job tmp cache
+	env := BuildSanitizedChildEnv(t.TempDir(), nil)
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	for _, k := range []string{"HOME", "GRADLE_USER_HOME", "SWIFTPM_CACHE", "KONAN_DATA_DIR"} {
+		v, ok := envMap[k]
+		if !ok || !strings.Contains(v, "artix-job-caches") {
+			t.Errorf("BuildSanitizedChildEnv expected %s to point to artix-job-caches, got: %q (present: %v)", k, v, ok)
+		}
+	}
+
+	for _, k := range []string{"JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS"} {
+		v, ok := envMap[k]
+		if !ok || !strings.Contains(v, "-Duser.home=") {
+			t.Errorf("BuildSanitizedChildEnv expected %s to contain -Duser.home=, got: %q (present: %v)", k, v, ok)
+		}
+	}
+
+	// 3. Check BuildBwrapArgs emits --setenv for child environment variables after --clearenv
+	bwrapArgs := BuildBwrapArgs([]string{"/tmp"}, false, "echo ok", env)
+	clearenvIdx := -1
+	setenvCount := 0
+	for i, arg := range bwrapArgs {
+		if arg == "--clearenv" {
+			clearenvIdx = i
+		}
+		if arg == "--setenv" {
+			setenvCount++
+			if clearenvIdx == -1 || i < clearenvIdx {
+				t.Fatalf("--setenv appeared at index %d before --clearenv at index %d", i, clearenvIdx)
+			}
+		}
+	}
+	if setenvCount == 0 {
+		t.Fatalf("BuildBwrapArgs failed to emit any --setenv flags for sanitized env after --clearenv")
+	}
+}
