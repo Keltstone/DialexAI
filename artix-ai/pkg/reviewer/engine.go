@@ -93,6 +93,7 @@ type ReviewContext struct {
 	RequiresTestGates        bool
 	SemanticRunnerConfigured bool
 	SemanticRunnerExecuted   bool
+	RulePacksRan             []string
 }
 
 func determineScanMode(diff string) string {
