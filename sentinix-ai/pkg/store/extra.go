@@ -349,3 +349,30 @@ func (s *Store) ReclaimStaleJobs() error {
 	_, err := s.db.Exec("update durable_queue set status='pending' where status='running'")
 	return err
 }
+
+func (s *Store) GrantProjectAccess(projectID, grantee string) error {
+	_, err := s.db.Exec("insert into project_grants(project_id, grantee) values($1, $2) on conflict do nothing", projectID, grantee)
+	return err
+}
+
+func (s *Store) RevokeProjectAccess(projectID, grantee string) error {
+	_, err := s.db.Exec("delete from project_grants where project_id=$1 and grantee=$2", projectID, grantee)
+	return err
+}
+
+func (s *Store) HasProjectAccess(email string, groups []string, projectID string) (bool, error) {
+	var count int
+	query := "select count(*) from project_grants where project_id=$1 and grantee=$2"
+	if err := s.db.QueryRow(query, projectID, email).Scan(&count); err == nil && count > 0 {
+		return true, nil
+	}
+	for _, g := range groups {
+		if g == "" {
+			continue
+		}
+		if err := s.db.QueryRow(query, projectID, g).Scan(&count); err == nil && count > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}

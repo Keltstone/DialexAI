@@ -51,7 +51,8 @@ create table if not exists tokens(hash text primary key, project_id text not nul
 create table if not exists webhook_deliveries(id text primary key, ts bigint not null);
 create table if not exists durable_queue(id text primary key, host text not null, payload text not null, status text not null, created bigint not null);
 create table if not exists leader_election(lock_key text primary key, holder text not null, expires_at bigint not null);
-create table if not exists skipped_file_overrides(project_id text not null default '*', file text not null, expires_at bigint not null, reason text not null default '', approver text not null default '', ts bigint not null default 0, primary key(project_id, file))`
+create table if not exists skipped_file_overrides(project_id text not null default '*', file text not null, expires_at bigint not null, reason text not null default '', approver text not null default '', ts bigint not null default 0, primary key(project_id, file));
+create table if not exists project_grants(project_id text not null, grantee text not null, primary key(project_id, grantee))`
 
 // Open takes "postgres://…" or "sqlite:<path>" (":memory:" works for tests).
 func Open(dsn string) (*Store, error) {

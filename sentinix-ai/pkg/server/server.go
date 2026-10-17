@@ -62,6 +62,7 @@ type App struct {
 
 type principal struct {
 	Email, Role, Project string // Project is set for API tokens, which have no Role
+	Groups               []string
 }
 
 type ctxKey struct{}
@@ -255,6 +256,24 @@ func (a *App) who(r *http.Request) (principal, bool) {
 }
 
 func who(r *http.Request) principal { return r.Context().Value(ctxKey{}).(principal) }
+
+func (a *App) canReadProject(r *http.Request, projectID string) bool {
+	p := who(r)
+	if p.Role != auth.Developer {
+		return true
+	}
+	if p.Project != "" {
+		return p.Project == projectID
+	}
+	if a.Store == nil {
+		return true
+	}
+	has, err := a.Store.HasProjectAccess(p.Email, p.Groups, projectID)
+	if err != nil {
+		return false
+	}
+	return has
+}
 
 // Login is the OIDC OnLogin hook: new users start as developers; the configured owner email becomes owner.
 func (a *App) Login(email, name string) error {
