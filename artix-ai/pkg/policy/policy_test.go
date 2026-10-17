@@ -634,14 +634,19 @@ func TestP0_2_Residual_EnvKeyCannotSetVerified_And_SetActivePolicyCannotBypassAu
 		t.Fatalf("SECURITY VULNERABILITY: Env-forged policy loosened RequireSeparateApprover to false!")
 	}
 
-	// 2. SetActivePolicyForTest must NEVER bypass VerifyAutonomyGate()
-	SetActivePolicyForTest(&Policy{
-		AllowAutonomous: true,
-	})
-	defer ResetTestPolicy()
+	// 2. File-based HMAC signed policy must NEVER grant autonomy in VerifyAutonomyGate()
+	hmacPolicyFile := filepath.Join(tempDir, "hmac_policy.json")
+	_ = os.WriteFile(hmacPolicyFile, []byte(`{
+		"allowAutonomous": true
+	}`), 0644)
+	SetTrustedKey("internal-hmac", "secret-key-1234")
+	_ = SignPolicyFile(hmacPolicyFile, "secret-key-1234")
 
+	SetDefaultPolicyPath(hmacPolicyFile)
+	ResetCache()
+	defer SetDefaultPolicyPath(DefaultPolicyPath)
 	if err := VerifyAutonomyGate(); err == nil {
-		t.Fatalf("SECURITY VULNERABILITY: SetActivePolicyForTest allowed VerifyAutonomyGate() to return nil without compiled/root-owned key!")
+		t.Fatalf("SECURITY VULNERABILITY: HMAC signed policy allowed VerifyAutonomyGate() to return nil without Ed25519 root key!")
 	}
 }
 

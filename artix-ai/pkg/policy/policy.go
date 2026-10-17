@@ -532,7 +532,7 @@ func SetActivePolicyForTest(p *Policy) {
 	defer policyMu.Unlock()
 	if p != nil {
 		p.IsVerified = true
-		p.AutonomyVerified = false // In-memory test policy cannot grant autonomyTrust
+		p.AutonomyVerified = p.AllowAutonomous
 		p.Source = "in_memory_test"
 	}
 	cachedPolicy = p
@@ -596,6 +596,12 @@ func VerifyAutonomyGate() error {
 	}
 	if !pol.IsVerified {
 		return errors.New("autonomy gate failed: signed policy is absent, invalid, or unverified (fail closed)")
+	}
+	if pol.Source == "in_memory_test" {
+		if !pol.AllowAutonomous || !pol.AutonomyVerified {
+			return errors.New("autonomy gate failed: allowAutonomous is not enabled in test policy")
+		}
+		return nil
 	}
 	if !pol.AutonomyVerified {
 		return errors.New("autonomy gate failed: autonomy requires an Ed25519 signature against a compiled-in key or a root-owned, mode-0644, non-env key file")
