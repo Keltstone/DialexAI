@@ -11,7 +11,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -109,6 +108,28 @@ type OIDC struct {
 	verifier *oidc.IDTokenVerifier
 	Sess     Sessions
 	OnLogin  func(email, name string) error
+	// AllowedDomains restricts login to these email domains (lowercase, no "@"). Empty = any verified email at the IdP.
+	AllowedDomains []string
+}
+
+func (o *OIDC) domainAllowed(email string) bool {
+	if len(o.AllowedDomains) == 0 {
+		return true
+	}
+	_, d, ok := strings.Cut(email, "@")
+	if !ok {
+		return false
+	}
+	for _, a := range o.AllowedDomains {
+		if strings.EqualFold(a, d) {
+			return true
+		}
+	}
+	return false
+}
+
+func (o *OIDC) setTmp(w http.ResponseWriter, name, val string, age int) {
+	http.SetCookie(w, &http.Cookie{Name: name, Value: val, Path: "/auth", HttpOnly: true, Secure: o.Sess.Secure, SameSite: http.SameSiteLaxMode, MaxAge: age})
 }
 
 func NewOIDC(ctx context.Context, issuer, clientID, secret, redirect string, sess Sessions, on func(email, name string) error) (*OIDC, error) {
@@ -129,18 +150,25 @@ func nonce() string {
 }
 
 func (o *OIDC) Login(w http.ResponseWriter, r *http.Request) {
-	st := nonce()
-	http.SetCookie(w, &http.Cookie{Name: "sx_state", Value: st, Path: "/auth", HttpOnly: true, Secure: o.Sess.Secure, SameSite: http.SameSiteLaxMode, MaxAge: 600})
-	http.Redirect(w, r, o.cfg.AuthCodeURL(st), http.StatusFound)
+	st, nn, ver := nonce(), nonce(), oauth2.GenerateVerifier()
+	o.setTmp(w, "sx_state", st, 600)
+	o.setTmp(w, "sx_nonce", nn, 600)
+	o.setTmp(w, "sx_pkce", ver, 600)
+	http.Redirect(w, r, o.cfg.AuthCodeURL(st, oauth2.S256ChallengeOption(ver), oidc.Nonce(nn)), http.StatusFound)
 }
 
 func (o *OIDC) Callback(w http.ResponseWriter, r *http.Request) {
 	c, err := r.Cookie("sx_state")
-	if err != nil || subtle.ConstantTimeCompare([]byte(c.Value), []byte(r.URL.Query().Get("state"))) != 1 {
+	nc, nerr := r.Cookie("sx_nonce")
+	vc, verr := r.Cookie("sx_pkce")
+	for _, n := range []string{"sx_state", "sx_nonce", "sx_pkce"} { // single use, even on failure
+		o.setTmp(w, n, "", -1)
+	}
+	if err != nil || nerr != nil || verr != nil || subtle.ConstantTimeCompare([]byte(c.Value), []byte(r.URL.Query().Get("state"))) != 1 {
 		http.Error(w, "bad state", http.StatusBadRequest)
 		return
 	}
-	tok, err := o.cfg.Exchange(r.Context(), r.URL.Query().Get("code"))
+	tok, err := o.cfg.Exchange(r.Context(), r.URL.Query().Get("code"), oauth2.VerifierOption(vc.Value))
 	if err != nil {
 		http.Error(w, "login failed", http.StatusUnauthorized)
 		return
@@ -152,14 +180,19 @@ func (o *OIDC) Callback(w http.ResponseWriter, r *http.Request) {
 		EmailVerified bool   `json:"email_verified"`
 		Name          string `json:"name"`
 	}
-	if err != nil || idt.Claims(&cl) != nil || cl.Email == "" || !cl.EmailVerified {
+	if err != nil || subtle.ConstantTimeCompare([]byte(idt.Nonce), []byte(nc.Value)) != 1 || idt.Claims(&cl) != nil || cl.Email == "" || !cl.EmailVerified {
 		http.Error(w, "login failed", http.StatusUnauthorized)
 		return
 	}
-	if err := o.OnLogin(strings.ToLower(cl.Email), cl.Name); err != nil {
-		http.Error(w, fmt.Sprint("login failed"), http.StatusInternalServerError)
+	email := strings.ToLower(cl.Email)
+	if !o.domainAllowed(email) {
+		http.Error(w, "login failed", http.StatusForbidden)
 		return
 	}
-	o.Sess.Issue(w, strings.ToLower(cl.Email), 12*time.Hour)
+	if err := o.OnLogin(email, cl.Name); err != nil {
+		http.Error(w, "login failed", http.StatusInternalServerError)
+		return
+	}
+	o.Sess.Issue(w, email, 12*time.Hour)
 	http.Redirect(w, r, "/", http.StatusFound)
 }

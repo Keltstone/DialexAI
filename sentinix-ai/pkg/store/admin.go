@@ -1,6 +1,9 @@
 package store
 
 import (
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
@@ -227,6 +230,13 @@ func (s *Store) Propose(kind string, payload any, proposer string) (string, erro
 }
 
 func canonicalEmail(e string) string {
+	// NFKC folds fullwidth/compat forms; drop invisible format runes (zero-width joiners, BOM, bidi marks).
+	e = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, norm.NFKC.String(e))
 	e = strings.TrimSpace(strings.ToLower(e))
 	user, domain, ok := strings.Cut(e, "@")
 	if !ok {

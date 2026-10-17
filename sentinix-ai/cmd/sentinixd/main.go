@@ -125,6 +125,14 @@ func main() {
 		app.OIDC, err = auth.NewOIDC(context.Background(), iss, os.Getenv("OIDC_CLIENT_ID"), os.Getenv("OIDC_CLIENT_SECRET"),
 			os.Getenv("OIDC_REDIRECT_URL"), app.Sess, app.Login)
 		check(err)
+		for _, d := range strings.Split(os.Getenv("SENTINIX_ALLOWED_EMAIL_DOMAINS"), ",") {
+			if d = strings.ToLower(strings.TrimSpace(d)); d != "" {
+				app.OIDC.AllowedDomains = append(app.OIDC.AllowedDomains, d)
+			}
+		}
+		if len(app.OIDC.AllowedDomains) == 0 {
+			log.Print("WARNING: SENTINIX_ALLOWED_EMAIL_DOMAINS unset: any verified email at the IdP can sign in (as developer, no project grants)")
+		}
 	} else {
 		log.Print("OIDC_ISSUER not set: SSO login disabled")
 	}
