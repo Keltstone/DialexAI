@@ -2,12 +2,14 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"artix/pkg/policy"
@@ -281,3 +283,174 @@ func TestBuildBwrapArgs_MountsGitReadOnly(t *testing.T) {
 		t.Fatalf("expected bwrap args to include --ro-bind %s %s, got: %v", gitDir, gitDir, args)
 	}
 }
+
+func TestP0_3_SandboxDeniesSensitiveReads(t *testing.T) {
+	requiredDenies := []string{
+		".config/gh",
+		".git-credentials",
+		".docker",
+		".npmrc",
+		".pypirc",
+		".config/git",
+		"Library/Keychains",
+	}
+
+	for _, req := range requiredDenies {
+		found := false
+		for _, p := range SensitiveReadDenyPaths {
+			if p == req {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %q in SensitiveReadDenyPaths", req)
+		}
+	}
+
+	if runtime.GOOS == "darwin" {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			testDir := filepath.Join(home, ".config", "gh")
+			_ = os.MkdirAll(testDir, 0700)
+			testFile := filepath.Join(testDir, "hosts.yml")
+			_ = os.WriteFile(testFile, []byte("github.com: oauth_token: secret"), 0600)
+			defer os.Remove(testFile)
+
+			box := NewSandbox(t.TempDir())
+			res := box.Run(context.Background(), "cat "+testFile, nil)
+			if res.Success() {
+				t.Fatalf("CRITICAL SECURITY DEFECT: sandbox allowed reading %s: stdout=%s", testFile, res.Stdout)
+			}
+		}
+	}
+}
+
+func TestP0_3_SandboxDeniesHostCacheWrites(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("skipping macOS sandbox-exec persistence test")
+	}
+
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		t.Skip("no home dir")
+	}
+
+	targets := []string{
+		filepath.Join(home, ".gradle", "init.d", "exploit.gradle"),
+		filepath.Join(home, ".cargo", "config.toml"),
+		filepath.Join(home, ".cargo", "bin", "exploit"),
+	}
+
+	box := NewSandbox(t.TempDir())
+	for _, target := range targets {
+		_ = os.MkdirAll(filepath.Dir(target), 0755)
+		res := box.Run(context.Background(), fmt.Sprintf("echo 'exploit' > %q", target), nil)
+		if res.Success() {
+			_ = os.Remove(target)
+			t.Fatalf("CRITICAL SECURITY DEFECT: sandbox allowed writing to host persistence path %s", target)
+		}
+		if _, err := os.Stat(target); err == nil {
+			_ = os.Remove(target)
+			t.Fatalf("CRITICAL SECURITY DEFECT: file was created on host at %s", target)
+		}
+	}
+}
+
+func TestP0_3_BuildBwrapArgs_LinuxHardenings(t *testing.T) {
+	worktreeInTmp := filepath.Join(os.TempDir(), "artix-test-repo-bwrap")
+	_ = os.MkdirAll(filepath.Join(worktreeInTmp, ".git"), 0755)
+	defer os.RemoveAll(worktreeInTmp)
+
+	writable := []string{worktreeInTmp, "/tmp"}
+	args := BuildBwrapArgs(writable, false, "echo ok")
+
+	hasArg := func(expected string) bool {
+		for _, a := range args {
+			if a == expected {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Missing linux flags: --unshare-pid, --unshare-ipc, --new-session, --clearenv, --cap-drop ALL
+	for _, expected := range []string{"--unshare-pid", "--unshare-ipc", "--new-session", "--clearenv"} {
+		if !hasArg(expected) {
+			t.Errorf("BuildBwrapArgs missing expected security flag: %s", expected)
+		}
+	}
+
+	// Cap drop ALL
+	hasCapDropAll := false
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--cap-drop" && args[i+1] == "ALL" {
+			hasCapDropAll = true
+			break
+		}
+	}
+	if !hasCapDropAll {
+		t.Errorf("BuildBwrapArgs missing --cap-drop ALL")
+	}
+
+	// Check that /tmp does not shadow the .git bind for worktrees under /tmp
+	gitRoIndex := -1
+	tmpBindIndex := -1
+	for i, a := range args {
+		if a == "--ro-bind" && i+1 < len(args) && strings.HasSuffix(args[i+1], ".git") {
+			gitRoIndex = i
+		}
+		if a == "--bind" && i+1 < len(args) && args[i+1] == "/tmp" {
+			tmpBindIndex = i
+		}
+	}
+	if gitRoIndex != -1 && tmpBindIndex != -1 && tmpBindIndex > gitRoIndex {
+		t.Errorf("BuildBwrapArgs binds /tmp (index %d) AFTER .git ro-bind (index %d), shadowing read-only .git!", tmpBindIndex, gitRoIndex)
+	}
+}
+
+func TestP0_5_LoopbackAllowed_OutboundDenied(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("skipping macOS loopback sandbox test")
+	}
+
+	box := NewSandbox(t.TempDir())
+	ctx := context.Background()
+
+	// 1. Loopback bind & connect MUST succeed without ARTIX_SANDBOX_NETWORK=1
+	loopbackScript := `python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen(1); port = s.getsockname()[1]; c = socket.socket(); c.connect(("127.0.0.1", port)); print("OK")'`
+	resLoop := box.Run(ctx, loopbackScript, nil)
+	if !resLoop.Success() || !strings.Contains(resLoop.Stdout, "OK") {
+		t.Fatalf("expected loopback socket bind/connect to succeed under sandbox, got: %+v", resLoop)
+	}
+
+	// 2. Outbound connect MUST fail without ARTIX_SANDBOX_NETWORK=1
+	outboundScript := `python3 -c 'import socket; s = socket.socket(); s.settimeout(1); s.connect(("1.1.1.1", 80))'`
+	resOut := box.Run(ctx, outboundScript, nil)
+	if resOut.Success() {
+		t.Fatalf("expected outbound network connection to fail without ARTIX_SANDBOX_NETWORK=1, but succeeded!")
+	}
+}
+
+func TestP0_5_SanitizedChildEnv_AllowlistsDeveloperToolchains(t *testing.T) {
+	t.Setenv("DEVELOPER_DIR", "/Applications/Xcode.app/Contents/Developer")
+	t.Setenv("JAVA_HOME", "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home")
+	t.Setenv("ANDROID_HOME", "/Users/dev/Library/Android/sdk")
+	t.Setenv("KONAN_DATA_DIR", "/Users/dev/.konan")
+
+	childEnv := BuildSanitizedChildEnv(t.TempDir(), nil)
+	envMap := make(map[string]string)
+	for _, e := range childEnv {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	for _, k := range []string{"DEVELOPER_DIR", "JAVA_HOME", "ANDROID_HOME", "KONAN_DATA_DIR"} {
+		if _, ok := envMap[k]; !ok {
+			t.Errorf("BuildSanitizedChildEnv dropped required toolchain environment variable: %s", k)
+		}
+	}
+}
+
