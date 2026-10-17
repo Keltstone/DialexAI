@@ -15,7 +15,6 @@ import (
 
 	"artix/pkg/forge"
 	"artix/pkg/persona"
-	"artix/pkg/policy"
 )
 
 // DaemonOptions configures the Artix daemon server.

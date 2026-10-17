@@ -114,18 +114,40 @@ func TestBuildDaemonServer_RefusesNonLoopbackWithoutAuth(t *testing.T) {
 		t.Errorf("expected non-loopback bind without jobs token to be rejected")
 	}
 
-	// 3. Loopback without auth in non-enterprise dev mode -> permitted
+	// 3. Loopback without auth in dev mode -> permitted
 	server, err := BuildDaemonServer(DaemonOptions{
-		Addr:      "127.0.0.1:8080",
-		GHSecret:  "",
-		GLToken:   "",
-		JobsToken: "",
+		Addr:        "127.0.0.1:8080",
+		GHSecret:    "",
+		GLToken:     "",
+		JobsToken:   "",
+		InsecureDev: true,
 	})
 	if err != nil {
-		t.Errorf("expected loopback bind in non-enterprise mode to succeed, got: %v", err)
+		t.Errorf("expected loopback bind in dev mode to succeed, got: %v", err)
 	}
 	if server == nil {
 		t.Errorf("expected server to be non-nil")
+	}
+
+	// 4. Loopback without auth in default non-dev mode -> rejected
+	_, err = BuildDaemonServer(DaemonOptions{
+		Addr:        "127.0.0.1:8080",
+		GHSecret:    "",
+		GLToken:     "",
+		JobsToken:   "",
+		InsecureDev: false,
+	})
+	if err == nil {
+		t.Errorf("expected loopback bind without auth in default non-dev mode to be rejected")
+	}
+
+	// 5. Non-loopback with InsecureDev -> rejected
+	_, err = BuildDaemonServer(DaemonOptions{
+		Addr:        "0.0.0.0:8080",
+		InsecureDev: true,
+	})
+	if err == nil {
+		t.Errorf("expected non-loopback bind with InsecureDev to be rejected")
 	}
 }
 
