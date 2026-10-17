@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -99,10 +100,25 @@ func main() {
 		app.AIModels, err = loadModels(*aiCfg)
 		check(err)
 	}
-	if *sbImage != "" {
-		d := sandbox.Docker{Image: *sbImage, Bin: os.Getenv("SENTINIX_CONTAINER_BIN")}
-		engines.Sandbox = d.ScanCmd
-		app.TestRunner = d.Run
+	if *sbImage == "in-container" || (*sbImage == "" && os.Getenv("SENTINIX_CONTAINER") != "") {
+		ic := sandbox.InContainer{}
+		engines.Sandbox = ic.ScanCmd
+		app.TestRunner = ic.Run
+	} else if *sbImage != "" {
+		bin := os.Getenv("SENTINIX_CONTAINER_BIN")
+		if bin == "" {
+			bin = "docker"
+		}
+		if _, err := exec.LookPath(bin); err != nil {
+			log.Printf("container binary %q not found on PATH, using InContainer sandbox", bin)
+			ic := sandbox.InContainer{}
+			engines.Sandbox = ic.ScanCmd
+			app.TestRunner = ic.Run
+		} else {
+			d := sandbox.Docker{Image: *sbImage, Bin: bin}
+			engines.Sandbox = d.ScanCmd
+			app.TestRunner = d.Run
+		}
 	}
 	if iss := os.Getenv("OIDC_ISSUER"); iss != "" {
 		app.OIDC, err = auth.NewOIDC(context.Background(), iss, os.Getenv("OIDC_CLIENT_ID"), os.Getenv("OIDC_CLIENT_SECRET"),
