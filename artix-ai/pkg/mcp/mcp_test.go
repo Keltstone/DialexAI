@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -380,6 +381,39 @@ func TestHTTPClient_ErrorResponses(t *testing.T) {
 	// 4. Close client
 	if err := clientEmptyRes.Close(); err != nil {
 		t.Errorf("unexpected error on Close: %v", err)
+	}
+}
+
+func TestP2_JiraConnector_Base64Auth(t *testing.T) {
+	client := JiraConnector("example.atlassian.net", "user@example.com", "my-secret-token")
+	httpCli, ok := client.(*HTTPClient)
+	if !ok {
+		t.Fatalf("expected *HTTPClient, got %T", client)
+	}
+	expectedAuth := "Basic dXNlckBleGFtcGxlLmNvbXpteS1zZWNyZXQtdG9rZW4="
+	actualAuth := httpCli.headers["Authorization"]
+	if actualAuth != expectedAuth {
+		t.Fatalf("Jira Authorization header not base64 encoded! expected %q, got %q", expectedAuth, actualAuth)
+	}
+}
+
+func TestP2_StdioClient_SanitizesChildEnv(t *testing.T) {
+	t.Setenv("ARTIX_FORGE_WEBHOOK_SECRET", "super-secret-forge-token")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "sensitive-aws-key")
+
+	client, err := NewStdioClient("echo", "test")
+	if err != nil {
+		t.Fatalf("failed to create stdio client: %v", err)
+	}
+	defer client.Close()
+
+	if client.cmd.Env == nil {
+		t.Fatalf("SECURITY FLAW: client.cmd.Env is nil, inherits full unsanitized parent environment!")
+	}
+	for _, envVar := range client.cmd.Env {
+		if strings.HasPrefix(envVar, "ARTIX_FORGE_WEBHOOK_SECRET=") || strings.HasPrefix(envVar, "AWS_SECRET_ACCESS_KEY=") {
+			t.Fatalf("SECURITY LEAK: sensitive environment variable leaked into MCP stdio child env: %s", envVar)
+		}
 	}
 }
 
