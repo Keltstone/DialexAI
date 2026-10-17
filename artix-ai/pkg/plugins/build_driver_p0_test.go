@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -148,5 +149,90 @@ func TestP0_5_Xcode_DerivedData_ExcludedFromGit(t *testing.T) {
 	}
 	if !strings.Contains(string(content), ".derivedData") {
 		t.Fatalf("expected .git/info/exclude to exclude .derivedData, got: %s", string(content))
+	}
+}
+
+func TestP0_1_GradleWrapper_DistributionURL_PropertiesEvasions(t *testing.T) {
+	evasionCases := []struct {
+		name  string
+		props string
+	}{
+		{
+			name: "colon separator",
+			props: "distributionUrl: http://evil.com/gradle.zip\n",
+		},
+		{
+			name: "tab separator",
+			props: "distributionUrl\t=\thttp://evil.com/gradle.zip\n",
+		},
+		{
+			name: "space in key with escape",
+			props: "distributionUrl\\ = http://evil.com/gradle.zip\n",
+		},
+		{
+			name: "line continuation backslash",
+			props: "distributionUrl\\\n  = http://evil.com/gradle.zip\n",
+		},
+	}
+
+	gr := &GradleDriver{}
+	for _, tc := range evasionCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			wrapDir := filepath.Join(tmpDir, "gradle", "wrapper")
+			_ = os.MkdirAll(wrapDir, 0755)
+			_ = os.WriteFile(filepath.Join(wrapDir, "gradle-wrapper.properties"), []byte(tc.props), 0644)
+
+			err := gr.ValidateWrapper(tmpDir)
+			if err == nil {
+				t.Fatalf("SECURITY VULNERABILITY: GradleDriver.ValidateWrapper accepted evasion %q!", tc.name)
+			}
+		})
+	}
+}
+
+func TestP0_5_Xcode_EnsureDerivedDataExcluded_InWorktreeFile(t *testing.T) {
+	tempRepo := t.TempDir()
+	runCmd := func(dir string, name string, args ...string) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("cmd %s %v failed: %v\nOutput: %s", name, args, err, string(out))
+		}
+	}
+	runCmd(tempRepo, "git", "init", "-b", "main")
+	runCmd(tempRepo, "git", "config", "user.name", "Test Admin")
+	runCmd(tempRepo, "git", "config", "user.email", "admin@test.local")
+	_ = os.WriteFile(filepath.Join(tempRepo, "README.md"), []byte("# Root\n"), 0644)
+	runCmd(tempRepo, "git", "add", ".")
+	runCmd(tempRepo, "git", "commit", "-m", "init")
+
+	wtDir := filepath.Join(tempRepo, "wt")
+	runCmd(tempRepo, "git", "worktree", "add", "-b", "feature", wtDir)
+
+	// In wtDir, .git is a file, not a directory
+	gitFile := filepath.Join(wtDir, ".git")
+	fi, err := os.Stat(gitFile)
+	if err != nil || fi.IsDir() {
+		t.Fatalf("expected wt/.git to be a file, err: %v", err)
+	}
+
+	d := &XcodeDriver{}
+	d.EnsureDerivedDataExcluded(wtDir)
+
+	// Check if .derivedData is in git exclude path
+	excludeCmd := exec.Command("git", "rev-parse", "--git-path", "info/exclude")
+	excludeCmd.Dir = wtDir
+	out, err := excludeCmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse failed: %v", err)
+	}
+	excludePath := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(excludePath) {
+		excludePath = filepath.Join(wtDir, excludePath)
+	}
+	data, err := os.ReadFile(excludePath)
+	if err != nil || !strings.Contains(string(data), ".derivedData") {
+		t.Fatalf("expected .derivedData to be written to %s, got: %s (err: %v)", excludePath, string(data), err)
 	}
 }
