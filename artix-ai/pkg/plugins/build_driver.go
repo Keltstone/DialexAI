@@ -398,6 +398,85 @@ func (gr *GradleDriver) FormatTargetStatusSummary(passedTasks []string, skippedT
 	return "All targets green"
 }
 
+func parseJavaProperties(data []byte) map[string]string {
+	props := make(map[string]string)
+	rawLines := strings.Split(string(data), "\n")
+	var combinedLines []string
+
+	var current strings.Builder
+	for _, l := range rawLines {
+		l = strings.TrimRight(l, "\r")
+		trimmed := strings.TrimSpace(l)
+		if current.Len() == 0 && (strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "!")) {
+			continue
+		}
+		// Count trailing backslashes
+		bsCount := 0
+		for i := len(l) - 1; i >= 0; i-- {
+			if l[i] == '\\' {
+				bsCount++
+			} else {
+				break
+			}
+		}
+		if bsCount%2 == 1 {
+			// Line continuation: strip trailing backslash and append
+			current.WriteString(l[:len(l)-1])
+		} else {
+			current.WriteString(l)
+			combinedLines = append(combinedLines, current.String())
+			current.Reset()
+		}
+	}
+	if current.Len() > 0 {
+		combinedLines = append(combinedLines, current.String())
+	}
+
+	for _, line := range combinedLines {
+		line = strings.TrimLeft(line, " \t\f\r\n")
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
+			continue
+		}
+		var keyBuilder strings.Builder
+		i := 0
+		n := len(line)
+		escaped := false
+		for i < n {
+			c := line[i]
+			if escaped {
+				keyBuilder.WriteByte(c)
+				escaped = false
+				i++
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				i++
+				continue
+			}
+			if c == '=' || c == ':' || c == ' ' || c == '\t' || c == '\f' {
+				break
+			}
+			keyBuilder.WriteByte(c)
+			i++
+		}
+		key := keyBuilder.String()
+
+		for i < n && (line[i] == ' ' || line[i] == '\t' || line[i] == '\f') {
+			i++
+		}
+		if i < n && (line[i] == '=' || line[i] == ':') {
+			i++
+			for i < n && (line[i] == ' ' || line[i] == '\t' || line[i] == '\f') {
+				i++
+			}
+		}
+		val := line[i:]
+		props[strings.TrimSpace(key)] = strings.TrimSpace(val)
+	}
+	return props
+}
+
 func (gr *GradleDriver) ValidateWrapper(rootDir string) error {
 	propsPath := filepath.Join(rootDir, "gradle", "wrapper", "gradle-wrapper.properties")
 	data, err := os.ReadFile(propsPath)
@@ -407,27 +486,21 @@ func (gr *GradleDriver) ValidateWrapper(rootDir string) error {
 		}
 		return err
 	}
-	lines := strings.Split(string(data), "\n")
-	for _, l := range lines {
-		l = strings.TrimSpace(l)
-		if strings.HasPrefix(l, "#") || strings.HasPrefix(l, "!") {
-			continue
-		}
-		if strings.HasPrefix(l, "distributionUrl=") || strings.HasPrefix(l, "distributionUrl =") {
-			parts := strings.SplitN(l, "=", 2)
-			if len(parts) == 2 {
-				rawURL := strings.TrimSpace(parts[1])
-				rawURL = strings.ReplaceAll(rawURL, `\:`, ":")
-				u, err := url.Parse(rawURL)
-				if err != nil || u.Scheme != "https" {
-					return fmt.Errorf("untrusted gradle wrapper distributionUrl: %s", rawURL)
-				}
-				host := strings.ToLower(u.Hostname())
-				if host != "services.gradle.org" && host != "downloads.gradle-dn.com" &&
-					!strings.HasSuffix(host, ".services.gradle.org") &&
-					!strings.HasSuffix(host, ".downloads.gradle-dn.com") {
-					return fmt.Errorf("untrusted gradle wrapper distributionUrl: %s", rawURL)
-				}
+	props := parseJavaProperties(data)
+	for k, rawURL := range props {
+		normKey := strings.ToLower(strings.TrimSpace(k))
+		if normKey == "distributionurl" || strings.Contains(normKey, "distributionurl") {
+			rawURL = strings.ReplaceAll(rawURL, `\:`, ":")
+			rawURL = strings.ReplaceAll(rawURL, `\/`, "/")
+			u, err := url.Parse(rawURL)
+			if err != nil || u.Scheme != "https" {
+				return fmt.Errorf("untrusted gradle wrapper distributionUrl: %s", rawURL)
+			}
+			host := strings.ToLower(u.Hostname())
+			if host != "services.gradle.org" && host != "downloads.gradle-dn.com" &&
+				!strings.HasSuffix(host, ".services.gradle.org") &&
+				!strings.HasSuffix(host, ".downloads.gradle-dn.com") {
+				return fmt.Errorf("untrusted gradle wrapper distributionUrl: %s", rawURL)
 			}
 		}
 	}
@@ -992,13 +1065,24 @@ func (x *XcodeDriver) derivedDataPath(rootDir string) string {
 }
 
 func (x *XcodeDriver) EnsureDerivedDataExcluded(rootDir string) {
-	gitDir := filepath.Join(rootDir, ".git")
-	if _, err := os.Stat(gitDir); err != nil {
-		return
+	cmd := exec.Command("git", "rev-parse", "--git-path", "info/exclude")
+	cmd.Dir = rootDir
+	out, err := cmd.Output()
+	var excludePath string
+	if err == nil {
+		excludePath = strings.TrimSpace(string(out))
+		if !filepath.IsAbs(excludePath) {
+			excludePath = filepath.Join(rootDir, excludePath)
+		}
+	} else {
+		gitDir := filepath.Join(rootDir, ".git")
+		if fi, sErr := os.Stat(gitDir); sErr == nil && fi.IsDir() {
+			excludePath = filepath.Join(gitDir, "info", "exclude")
+		} else {
+			return
+		}
 	}
-	infoDir := filepath.Join(gitDir, "info")
-	_ = os.MkdirAll(infoDir, 0755)
-	excludePath := filepath.Join(infoDir, "exclude")
+	_ = os.MkdirAll(filepath.Dir(excludePath), 0755)
 	data, _ := os.ReadFile(excludePath)
 	if !strings.Contains(string(data), ".derivedData") {
 		f, err := os.OpenFile(excludePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -1007,7 +1091,7 @@ func (x *XcodeDriver) EnsureDerivedDataExcluded(rootDir string) {
 			if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
 				_, _ = f.WriteString("\n")
 			}
-			_, _ = f.WriteString(".derivedData\n")
+			_, _ = f.WriteString(".derivedData\n.derivedData/**\n")
 		}
 	}
 }
