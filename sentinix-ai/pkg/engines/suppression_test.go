@@ -23,7 +23,7 @@ func TestExternalScan_IsolatesInRepoSuppressionConfigsRecursively(t *testing.T) 
 
 	// Stub external engine that fails if any suppression file is visible during scan
 	script := `
-		if [ -f "$1/.semgrepignore" ] || [ -f "$1/.gitleaks.toml" ] || [ -f "$1/.gitleaksignore" ] || [ -f "$1/sub/deep/osv-scanner.toml" ] || [ -f "$1/sub/deep/.semgrepignore" ]; then
+		if [ -s "$1/.semgrepignore" ] || [ -f "$1/.gitleaks.toml" ] || [ -f "$1/.gitleaksignore" ] || [ -f "$1/sub/deep/osv-scanner.toml" ] || [ -f "$1/sub/deep/.semgrepignore" ]; then
 			echo '{"error": "suppression file visible during scan"}'
 			exit 1
 		fi

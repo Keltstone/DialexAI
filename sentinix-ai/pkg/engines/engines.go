@@ -213,7 +213,7 @@ func copyTreeForScan(src, dst string) error {
 	}
 	return filepath.Walk(src, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return err
 		}
 		rel, err := filepath.Rel(src, p)
 		if err != nil || rel == "." {
@@ -229,7 +229,7 @@ func copyTreeForScan(src, dst string) error {
 		if fi.Mode()&os.ModeSymlink != 0 {
 			linkTarget, err := os.Readlink(p)
 			if err != nil {
-				return nil
+				return err
 			}
 			if filepath.IsAbs(linkTarget) || strings.HasPrefix(linkTarget, "..") {
 				return nil
@@ -238,7 +238,7 @@ func copyTreeForScan(src, dst string) error {
 		}
 		data, err := os.ReadFile(p)
 		if err != nil {
-			return nil
+			return err
 		}
 		return os.WriteFile(target, data, fi.Mode())
 	})
@@ -259,6 +259,9 @@ func (e External) ScanContext(ctx context.Context, root string) ([]Finding, erro
 		return nil, err
 	}
 
+	// Place an empty .semgrepignore in the isolated copy to override default ignore patterns
+	_ = os.WriteFile(filepath.Join(isoDir, ".semgrepignore"), []byte{}, 0o644)
+
 	var cmd *exec.Cmd
 	if Sandbox != nil {
 		scmd := Sandbox(isoDir, e.Bin, e.Args)
@@ -277,7 +280,7 @@ func (e External) ScanContext(ctx context.Context, root string) ([]Finding, erro
 		if e.Bin == "osv-scanner" && (strings.Contains(stderr.String(), "No package sources found") || strings.Contains(err.Error(), "128")) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("%s: %w", e.Bin, err)
+		return nil, fmt.Errorf("%s: %w: %s", e.Bin, err, stderr.String())
 	}
 	fs, err := ParseSARIF(e.Bin, out)
 	if err != nil {
