@@ -103,7 +103,12 @@ rules:
 	}
 
 	for _, p := range paths {
-		if !foundPaths[p] {
+		count := 0
+		if foundPaths[p] {
+			count = 1
+		}
+		t.Logf("%-22s semgrep=%d", p, count)
+		if count != 1 {
 			t.Errorf("expected finding in %s, but semgrep skipped it (found=%v)", p, foundPaths)
 		}
 	}
