@@ -70,6 +70,7 @@ func TestAuthAndApprovalFlow(t *testing.T) {
 
 	p, _ := e.st.CreateProject(store.Project{Name: "p", Host: "gh", Repo: "o/r"})
 	tok, _ := e.st.CreateToken(p.ID, "ci")
+	e.st.GrantProjectAccess(p.ID, "dev@example.test") // developers only see granted projects
 	body := `{"commit":"c1","ran":["secrets"],"findings":[{"rule":"r","engine":"secrets","file":"a.kt","line":1,"severity":3,"evidence":"x"}]}`
 	e.ok(e.call(tok, "", "POST", "/api/projects/"+p.ID+"/ingest", body), 200)
 	e.ok(e.call(tok, "", "POST", "/api/projects/other/ingest", body), 403)

@@ -161,7 +161,21 @@ func (a *App) Handler() http.Handler {
 	if a.Static != nil {
 		m.Handle("/", a.Static)
 	}
-	return newRateLimiter(a).limit(m)
+	return secureHeaders(newRateLimiter(a).limit(m))
+}
+
+// secureHeaders sets baseline hardening on every response; handlers may override (the SPA sets its own CSP).
+func secureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type rateLimiter struct {

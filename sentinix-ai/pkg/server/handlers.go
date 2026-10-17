@@ -1,6 +1,7 @@
 package server
 
 import (
+	"sort"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -465,10 +466,40 @@ func (a *App) findings(w http.ResponseWriter, r *http.Request) {
 		f.MinSeverity = sev
 	}
 	f.Limit, _ = strconv.Atoi(q.Get("limit"))
-	fs, err := a.Store.Findings(f)
-	if err != nil {
-		fail(w, err, 500)
-		return
+	fs := []store.Finding{}
+	var err error
+	if f.Project == "" && who(r).Role == auth.Developer {
+		// developers see only granted projects: query each, never the unfiltered table
+		ps, perr := a.Store.Projects()
+		if perr != nil {
+			fail(w, perr, 500)
+			return
+		}
+		for _, proj := range ps {
+			if !a.canReadProject(r, proj.ID) {
+				continue
+			}
+			pf := f
+			pf.Project = proj.ID
+			got, ferr := a.Store.Findings(pf)
+			if ferr != nil {
+				fail(w, ferr, 500)
+				return
+			}
+			fs = append(fs, got...)
+		}
+		sort.SliceStable(fs, func(i, j int) bool { return fs[i].Severity > fs[j].Severity })
+		if lim := f.Limit; lim > 0 && len(fs) > lim {
+			fs = fs[:lim]
+		} else if lim <= 0 && len(fs) > 500 {
+			fs = fs[:500]
+		}
+	} else {
+		fs, err = a.Store.Findings(f)
+		if err != nil {
+			fail(w, err, 500)
+			return
+		}
 	}
 	writeJSON(w, fs)
 }
