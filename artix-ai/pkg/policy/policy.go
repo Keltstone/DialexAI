@@ -420,7 +420,7 @@ func LoadPolicy(path string) (*Policy, error) {
 	h := sha256.Sum256(data)
 	p.PolicyHash = hex.EncodeToString(h[:])
 	p.Source = path
-	p.IsVerified = sigValid || isRoot
+	p.IsVerified = sigValid
 	p.AutonomyVerified = sigValid && autonomyTrust
 
 	// Security fix P0-2: Remove HMAC/env verification from any path that can set AllowAutonomous.
@@ -462,45 +462,16 @@ func verifyPolicySignature(policyPath string) (bool, bool, error) {
 				return true, true, nil
 			}
 		}
-
-		// Also check ARTIX_POLICY_TRUSTED_PUBKEY env var ONLY if enterprise ldflag is NOT enforced.
-		// Note: env key verification NEVER grants autonomyTrust.
-		if !isSignedPolicyEnforced() {
-			if envPubHex := os.Getenv("ARTIX_POLICY_TRUSTED_PUBKEY"); envPubHex != "" {
-				if rawPub, err := hex.DecodeString(strings.TrimSpace(envPubHex)); err == nil && len(rawPub) == ed25519.PublicKeySize {
-					if ed25519.Verify(ed25519.PublicKey(rawPub), content, sigBytes) {
-						return true, false, nil
-					}
-				}
-			}
-		}
 	}
 
-	// 2. Symmetric HMAC Verification (Fallback) - Only for non-enterprise binaries, never grants autonomyTrust
-	if !isSignedPolicyEnforced() && len(trustedKeys) == 0 {
-		// Check ARTIX_POLICY_SIGNING_KEY in environment for verification if available
-		if k := os.Getenv("ARTIX_POLICY_SIGNING_KEY"); k != "" {
-			mac := hmac.New(sha256.New, []byte(k))
-			mac.Write(content)
-			expected := hex.EncodeToString(mac.Sum(nil))
-			if hmac.Equal([]byte(expected), []byte(trimmedSig)) {
-				return true, false, nil
-			}
-		}
-		if len(trustedPublicKeys) > 0 {
-			return false, false, errors.New("policy signature does not match any trusted ed25519 public key")
-		}
-		return false, false, errors.New("no trusted signing keys registered to verify policy signature")
-	}
-
-	if !isSignedPolicyEnforced() {
-		for _, secret := range trustedKeys {
-			mac := hmac.New(sha256.New, []byte(secret))
-			mac.Write(content)
-			expected := hex.EncodeToString(mac.Sum(nil))
-			if hmac.Equal([]byte(expected), []byte(trimmedSig)) {
-				return true, false, nil
-			}
+	// 2. Symmetric HMAC Verification - registered in-process via SetTrustedKey ONLY (never from environment)
+	// Note: in-process SetTrustedKey grants isVerified=true for enterprise config, but NEVER grants autonomyTrust (autonomy requires compiled/root-owned Ed25519 key).
+	for _, secret := range trustedKeys {
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write(content)
+		expected := hex.EncodeToString(mac.Sum(nil))
+		if hmac.Equal([]byte(expected), []byte(trimmedSig)) {
+			return true, false, nil
 		}
 	}
 
@@ -561,7 +532,7 @@ func SetActivePolicyForTest(p *Policy) {
 	defer policyMu.Unlock()
 	if p != nil {
 		p.IsVerified = true
-		p.AutonomyVerified = p.AllowAutonomous
+		p.AutonomyVerified = false // In-memory test policy cannot grant autonomyTrust
 		p.Source = "in_memory_test"
 	}
 	cachedPolicy = p
@@ -625,12 +596,6 @@ func VerifyAutonomyGate() error {
 	}
 	if !pol.IsVerified {
 		return errors.New("autonomy gate failed: signed policy is absent, invalid, or unverified (fail closed)")
-	}
-	if pol.Source == "in_memory_test" {
-		if !pol.AllowAutonomous || !pol.AutonomyVerified {
-			return errors.New("autonomy gate failed: allowAutonomous is not enabled in test policy")
-		}
-		return nil
 	}
 	if !pol.AutonomyVerified {
 		return errors.New("autonomy gate failed: autonomy requires an Ed25519 signature against a compiled-in key or a root-owned, mode-0644, non-env key file")
