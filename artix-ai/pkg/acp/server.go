@@ -18,6 +18,7 @@ import (
 	"artix/pkg/coder"
 	"artix/pkg/git"
 	"artix/pkg/persona"
+	"artix/pkg/policy"
 	"artix/pkg/repo"
 	"artix/pkg/reviewer"
 	"artix/pkg/spec"
@@ -175,6 +176,8 @@ func (s *Server) Close() {
 	s.inFlightMu.Unlock()
 }
 
+const MaxACPMessageBytes = 8 * 1024 * 1024 // 8 MiB
+
 func (s *Server) readMessage() ([]byte, error) {
 	// Peek to determine framing: Content-Length header or line-delimited JSON
 	peekBytes, err := s.in.Peek(1)
@@ -188,15 +191,23 @@ func (s *Server) readMessage() ([]byte, error) {
 		if err != nil && len(line) == 0 {
 			return nil, err
 		}
+		if len(line) > MaxACPMessageBytes {
+			return nil, fmt.Errorf("line frame exceeds maximum allowed limit of %d bytes", MaxACPMessageBytes)
+		}
 		return bytes.TrimSpace(line), nil
 	}
 
 	// Content-Length header based framing
 	contentLength := 0
+	headerBytes := 0
 	for {
 		line, err := s.in.ReadString('\n')
 		if err != nil {
 			return nil, err
+		}
+		headerBytes += len(line)
+		if headerBytes > 64*1024 {
+			return nil, fmt.Errorf("header size exceeds maximum limit")
 		}
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -210,8 +221,8 @@ func (s *Server) readMessage() ([]byte, error) {
 		}
 	}
 
-	if contentLength <= 0 {
-		return nil, fmt.Errorf("invalid or missing Content-Length")
+	if contentLength <= 0 || contentLength > MaxACPMessageBytes {
+		return nil, fmt.Errorf("invalid Content-Length: %d (must be between 1 and %d bytes)", contentLength, MaxACPMessageBytes)
 	}
 
 	body := make([]byte, contentLength)
@@ -424,13 +435,28 @@ func (s *Server) handleRequest(req *Request) {
 	}
 }
 
+func (s *Server) emitAudit(rootDir string, ev audit.AuditEvent) error {
+	err := audit.Default(rootDir).Emit(ev)
+	if err != nil && policy.IsEnterprise() {
+		return fmt.Errorf("enterprise audit emission failed: %w", err)
+	}
+	return nil
+}
+
 func (s *Server) resolveBudget(sess *sessionState, params SessionPromptParams) *coder.TokenBudget {
 	s.sessionsMu.RLock()
-	b := s.budget
+	orig := s.budget
 	s.sessionsMu.RUnlock()
-	if b == nil {
-		b = coder.LoadBudgetFromEnv()
+	if orig == nil {
+		orig = coder.LoadBudgetFromEnv()
 	}
+
+	var b *coder.TokenBudget
+	if orig != nil {
+		bCopy := *orig
+		b = &bCopy
+	}
+
 	maxTokens := params.MaxTokens
 	if maxTokens <= 0 {
 		maxTokens = sess.maxTokens
@@ -439,17 +465,25 @@ func (s *Server) resolveBudget(sess *sessionState, params SessionPromptParams) *
 	if maxUSD <= 0 {
 		maxUSD = sess.maxUSD
 	}
-	if b == nil && (maxTokens > 0 || maxUSD > 0) {
-		b = &coder.TokenBudget{
-			MaxStoryTokens: maxTokens,
-			MaxStoryCost:   maxUSD,
+
+	if b == nil {
+		if maxTokens > 0 || maxUSD > 0 {
+			b = &coder.TokenBudget{
+				MaxStoryTokens: maxTokens,
+				MaxStoryCost:   maxUSD,
+			}
 		}
-	} else if b != nil {
+	} else {
+		// Client values may ONLY LOWER the cap; never elevate or mutate shared budget
 		if maxTokens > 0 {
-			b.MaxStoryTokens = maxTokens
+			if b.MaxStoryTokens <= 0 || maxTokens < b.MaxStoryTokens {
+				b.MaxStoryTokens = maxTokens
+			}
 		}
 		if maxUSD > 0 {
-			b.MaxStoryCost = maxUSD
+			if b.MaxStoryCost <= 0 || maxUSD < b.MaxStoryCost {
+				b.MaxStoryCost = maxUSD
+			}
 		}
 	}
 	return b
@@ -467,14 +501,17 @@ func (s *Server) handlePlanPrompt(ctx context.Context, reqID any, sess *sessionS
 	b := s.resolveBudget(sess, params)
 	if b != nil {
 		if exhausted, reason := b.CheckExhaustion(); exhausted {
-			_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+			if err := s.emitAudit(sess.rootDir, audit.AuditEvent{
 				EventType: audit.EventBudgetExhausted,
 				Status:    "FAILED",
 				Details: map[string]any{
 					"reason":  reason,
 					"context": "acp.plan",
 				},
-			})
+			}); err != nil {
+				s.sendError(reqID, -32000, "Enterprise audit failure", err.Error())
+				return
+			}
 			s.sendError(reqID, -32000, fmt.Sprintf("budget exhausted: %s", reason), nil)
 			return
 		}
@@ -504,7 +541,7 @@ func (s *Server) handlePlanPrompt(ctx context.Context, reqID any, sess *sessionS
 
 	storySpec, err := council.Plan(ctx, pCtx)
 	if err != nil {
-		_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+		_ = s.emitAudit(sess.rootDir, audit.AuditEvent{
 			EventType: audit.EventSpecDeliberation,
 			Status:    "FAILED",
 			Details: map[string]any{
@@ -516,20 +553,27 @@ func (s *Server) handlePlanPrompt(ctx context.Context, reqID any, sess *sessionS
 		return
 	}
 
-	specsDir := filepath.Join(sess.rootDir, "docs", "specs")
-	specPath, _, _ := spec.WriteSpecWithProvenance(specsDir, storySpec, nil)
-
-	approved := err == nil && storySpec != nil && len(storySpec.AcceptanceCriteria) > 0
-
 	usedTokens := coder.EstimateTokens(params.Prompt) + coder.EstimateTokens(fmt.Sprintf("%+v", storySpec))
 	var costUSD float64
 	if b != nil {
 		price, _ := b.GetModelPrice(params.Model)
 		costUSD = (float64(usedTokens) / 1000.0) * price
 		b.RecordRoundUsage(usedTokens, costUSD)
+		if exhausted, reason := b.CheckExhaustion(); exhausted {
+			_ = s.emitAudit(sess.rootDir, audit.AuditEvent{
+				EventType: audit.EventBudgetExhausted,
+				Status:    "FAILED",
+				Details: map[string]any{
+					"reason":  reason,
+					"context": "acp.plan",
+				},
+			})
+			s.sendError(reqID, -32000, fmt.Sprintf("budget exhausted: %s", reason), nil)
+			return
+		}
 	}
 
-	_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+	if err := s.emitAudit(sess.rootDir, audit.AuditEvent{
 		EventType: audit.EventSpecDeliberation,
 		Status:    "SUCCESS",
 		Cost:      costUSD,
@@ -538,22 +582,14 @@ func (s *Server) handlePlanPrompt(ctx context.Context, reqID any, sess *sessionS
 			"specId":    storySpec.ID,
 			"title":     storySpec.Title,
 			"scenarios": len(storySpec.AcceptanceCriteria),
-			"approved":  approved,
 		},
-	})
-
-	if b != nil {
-		if exhausted, reason := b.CheckExhaustion(); exhausted {
-			_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
-				EventType: audit.EventBudgetExhausted,
-				Status:    "FAILED",
-				Details: map[string]any{
-					"reason":  reason,
-					"context": "acp.plan",
-				},
-			})
-		}
+	}); err != nil {
+		s.sendError(reqID, -32000, "Enterprise audit failure", err.Error())
+		return
 	}
+
+	specsDir := filepath.Join(sess.rootDir, "docs", "specs")
+	specPath, _, _ := spec.WriteSpecWithProvenance(specsDir, storySpec, nil)
 
 	s.sendResponse(reqID, SessionPromptResult{
 		SessionID: sess.id,
@@ -561,7 +597,6 @@ func (s *Server) handlePlanPrompt(ctx context.Context, reqID any, sess *sessionS
 		SpecID:    storySpec.ID,
 		Summary:   fmt.Sprintf("Spec %s: %s (%d scenarios)", storySpec.ID, storySpec.Title, len(storySpec.AcceptanceCriteria)),
 		Output:    specPath,
-		Approved:  approved,
 	})
 }
 
@@ -577,14 +612,17 @@ func (s *Server) handleReviewPrompt(ctx context.Context, reqID any, sess *sessio
 	b := s.resolveBudget(sess, params)
 	if b != nil {
 		if exhausted, reason := b.CheckExhaustion(); exhausted {
-			_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+			if err := s.emitAudit(sess.rootDir, audit.AuditEvent{
 				EventType: audit.EventBudgetExhausted,
 				Status:    "FAILED",
 				Details: map[string]any{
 					"reason":  reason,
 					"context": "acp.review",
 				},
-			})
+			}); err != nil {
+				s.sendError(reqID, -32000, "Enterprise audit failure", err.Error())
+				return
+			}
 			s.sendError(reqID, -32000, fmt.Sprintf("budget exhausted: %s", reason), nil)
 			return
 		}
@@ -601,7 +639,7 @@ func (s *Server) handleReviewPrompt(ctx context.Context, reqID any, sess *sessio
 	// Empty-diff reviews are not approved!
 	if strings.TrimSpace(diff) == "" {
 		verdictSummary := "empty diff: no changes found to review"
-		_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+		if err := s.emitAudit(sess.rootDir, audit.AuditEvent{
 			EventType: audit.EventReviewerVerdict,
 			Status:    "REJECTED",
 			Details: map[string]any{
@@ -609,7 +647,10 @@ func (s *Server) handleReviewPrompt(ctx context.Context, reqID any, sess *sessio
 				"blockingIssues": []string{"Workspace diff is empty; no code changes were produced."},
 				"approved":       false,
 			},
-		})
+		}); err != nil {
+			s.sendError(reqID, -32000, "Enterprise audit failure", err.Error())
+			return
+		}
 		s.sendResponse(reqID, SessionPromptResult{
 			SessionID: sess.id,
 			Status:    "REJECTED",
@@ -636,13 +677,25 @@ func (s *Server) handleReviewPrompt(ctx context.Context, reqID any, sess *sessio
 		price, _ := b.GetModelPrice(params.Model)
 		costUSD = (float64(reviewTokens) / 1000.0) * price
 		b.RecordRoundUsage(reviewTokens, costUSD)
+		if exhausted, reason := b.CheckExhaustion(); exhausted {
+			_ = s.emitAudit(sess.rootDir, audit.AuditEvent{
+				EventType: audit.EventBudgetExhausted,
+				Status:    "FAILED",
+				Details: map[string]any{
+					"reason":  reason,
+					"context": "acp.review",
+				},
+			})
+			s.sendError(reqID, -32000, fmt.Sprintf("budget exhausted: %s", reason), nil)
+			return
+		}
 	}
 
 	status := "SUCCESS"
 	if !verdict.Approved {
 		status = "REJECTED"
 	}
-	_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
+	if err := s.emitAudit(sess.rootDir, audit.AuditEvent{
 		EventType: audit.EventReviewerVerdict,
 		Status:    status,
 		Cost:      costUSD,
@@ -653,19 +706,9 @@ func (s *Server) handleReviewPrompt(ctx context.Context, reqID any, sess *sessio
 			"warnings":       verdict.Warnings,
 			"approved":       verdict.Approved,
 		},
-	})
-
-	if b != nil {
-		if exhausted, reason := b.CheckExhaustion(); exhausted {
-			_ = audit.Default(sess.rootDir).Emit(audit.AuditEvent{
-				EventType: audit.EventBudgetExhausted,
-				Status:    "FAILED",
-				Details: map[string]any{
-					"reason":  reason,
-					"context": "acp.review",
-				},
-			})
-		}
+	}); err != nil {
+		s.sendError(reqID, -32000, "Enterprise audit failure", err.Error())
+		return
 	}
 
 	s.sendResponse(reqID, SessionPromptResult{
