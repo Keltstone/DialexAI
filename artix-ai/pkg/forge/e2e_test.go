@@ -1312,8 +1312,14 @@ func TestR10_2_BuiltBinary_Phase1ToPhase2_EndToEndWithVerdictHash(t *testing.T) 
 	defer os.RemoveAll(tempBinDir)
 
 	binPath := filepath.Join(tempBinDir, "artix")
-	// Compile real binary from CLI package
-	buildCmd := exec.Command("go", "build", "-o", binPath, "artix/cli")
+	polPub, polPriv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("failed to generate ed25519 key: %v", err)
+	}
+	polPubHex := hex.EncodeToString(polPub)
+	ldflags := fmt.Sprintf("-X artix/pkg/policy.RequireSignedPolicyFlag=true -X artix/pkg/policy.CompiledTrustedPublicKeyHex=%s", polPubHex)
+	// Compile real binary from CLI package with compiled key
+	buildCmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", binPath, "artix/cli")
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to build artix binary: %v (%s)", err, string(out))
 	}
@@ -1354,8 +1360,9 @@ func TestR10_2_BuiltBinary_Phase1ToPhase2_EndToEndWithVerdictHash(t *testing.T) 
 		"auditPublicKey": "%s"
 	}`, pubHex)
 	_ = os.WriteFile(policyFile, []byte(policyJSON), 0644)
-	policySignKey := "test-secret-key-1234"
-	_ = policy.SignPolicyFile(policyFile, policySignKey)
+	if err := policy.SignPolicyFileEd25519(policyFile, polPriv); err != nil {
+		t.Fatalf("failed to sign policy file: %v", err)
+	}
 
 	// Mock LLM server
 	llmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1459,7 +1466,6 @@ func TestR10_2_BuiltBinary_Phase1ToPhase2_EndToEndWithVerdictHash(t *testing.T) 
 		"ARTIX_FORGE_REMOTE=origin",
 		"ANTHROPIC_API_KEY=mock-key",
 		"OPENAI_API_KEY=mock-key",
-		"ARTIX_POLICY_SIGNING_KEY="+policySignKey,
 		"ARTIX_POLICY_PATH="+policyFile,
 		"ARTIX_API_URL="+llmServer.URL,
 	)
@@ -1510,7 +1516,6 @@ func TestR10_2_BuiltBinary_Phase1ToPhase2_EndToEndWithVerdictHash(t *testing.T) 
 	cmdMergeOk.Env = append(os.Environ(),
 		"ARTIX_ENTERPRISE=1",
 		"ARTIX_ALLOW_AUTONOMOUS=1",
-		"ARTIX_POLICY_SIGNING_KEY="+policySignKey,
 		"ARTIX_POLICY_PATH="+policyFile,
 	)
 
@@ -1548,7 +1553,6 @@ func TestR10_2_BuiltBinary_Phase1ToPhase2_EndToEndWithVerdictHash(t *testing.T) 
 	cmdMergeBad.Env = append(os.Environ(),
 		"ARTIX_ENTERPRISE=1",
 		"ARTIX_ALLOW_AUTONOMOUS=1",
-		"ARTIX_POLICY_SIGNING_KEY="+policySignKey,
 		"ARTIX_POLICY_PATH="+policyFile,
 	)
 

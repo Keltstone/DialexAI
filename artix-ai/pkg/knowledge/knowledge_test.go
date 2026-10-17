@@ -317,7 +317,7 @@ func TestRuleConflictDetection(t *testing.T) {
 }
 
 func TestR13_6_KnowledgeStore_EnterpriseMode_ViaPolicyIsEnterprise(t *testing.T) {
-	policy.EnforceSignedPolicy()
+	policy.RequireSignedPolicyFlag = "true"
 	defer func() {
 		policy.RequireSignedPolicyFlag = "false"
 		policy.ResetCachedPolicy()
@@ -328,7 +328,7 @@ func TestR13_6_KnowledgeStore_EnterpriseMode_ViaPolicyIsEnterprise(t *testing.T)
 	t.Setenv("KRITIX_ENTERPRISE", "")
 
 	if !policy.IsEnterprise() {
-		t.Fatalf("policy.IsEnterprise() must be true when EnforceSignedPolicy() is active")
+		t.Fatalf("policy.IsEnterprise() must be true when RequireSignedPolicyFlag is active")
 	}
 
 	tempDir := t.TempDir()

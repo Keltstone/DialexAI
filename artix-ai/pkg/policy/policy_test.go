@@ -276,7 +276,7 @@ func TestRequireSignedPolicyFlagEnforcement(t *testing.T) {
 	t.Setenv("ARTIX_ALLOW_AUTONOMOUS", "1")
 
 	// Enable compile-time / programmatic signed policy requirement
-	EnforceSignedPolicy()
+	RequireSignedPolicyFlag = "true"
 	defer func() {
 		RequireSignedPolicyFlag = "false"
 		ResetCache()
@@ -369,8 +369,15 @@ func TestBoard1_SignedPolicyAutonomyGate_FailClosed(t *testing.T) {
 	defer ResetCache()
 
 	tempDir := t.TempDir()
-	signingKey := "board1-test-signing-key-32bytes!!"
-	SetTrustedKey("corp-board1", signingKey)
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("failed to generate ed25519 key: %v", err)
+	}
+	SetTrustedPublicKey("corp-board1", pub)
+	CompiledTrustedPublicKeyHex = hex.EncodeToString(pub)
+	defer func() {
+		CompiledTrustedPublicKeyHex = ""
+	}()
 
 	// 1. Absent signature -> VerifyAutonomyGate must fail closed
 	unsignedFile := filepath.Join(tempDir, "unsigned_policy.json")
@@ -404,7 +411,7 @@ func TestBoard1_SignedPolicyAutonomyGate_FailClosed(t *testing.T) {
 		"approverIdentity": "security-council@corp.internal",
 		"expiresAt": "2020-01-01T00:00:00Z"
 	}`), 0644)
-	if err := SignPolicyFile(expiredFile, signingKey); err != nil {
+	if err := SignPolicyFileEd25519(expiredFile, priv); err != nil {
 		t.Fatalf("failed to sign expired policy: %v", err)
 	}
 	SetDefaultPolicyPath(expiredFile)
@@ -425,7 +432,7 @@ func TestBoard1_SignedPolicyAutonomyGate_FailClosed(t *testing.T) {
 		"approverIdentity": "security-council@corp.internal",
 		"expiresAt": "2039-12-31T23:59:59Z"
 	}`), 0644)
-	if err := SignPolicyFile(validFile, signingKey); err != nil {
+	if err := SignPolicyFileEd25519(validFile, priv); err != nil {
 		t.Fatalf("failed to sign valid policy: %v", err)
 	}
 	SetDefaultPolicyPath(validFile)

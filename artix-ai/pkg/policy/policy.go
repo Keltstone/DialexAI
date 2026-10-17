@@ -226,6 +226,7 @@ type Policy struct {
 	Pilot                     PilotPolicyConfig    `json:"pilot,omitempty"`
 	Source                  string               `json:"-"`
 	IsVerified              bool                 `json:"-"`
+	AutonomyVerified        bool                 `json:"-"`
 }
 
 // PilotPolicyConfig defines pilot stop rule thresholds.
@@ -348,6 +349,33 @@ func ResetCache() {
 	cachedPolicy = nil
 }
 
+func loadRootOwnedPublicKey() (ed25519.PublicKey, bool) {
+	path := "/etc/artix/policy.pub"
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, false
+	}
+	if !isFileRootOwned(info) {
+		return nil, false
+	}
+	// mode must not be writable by group or other (must be 0644 or tighter)
+	if info.Mode().Perm()&0022 != 0 {
+		return nil, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if raw, err := hex.DecodeString(trimmed); err == nil && len(raw) == ed25519.PublicKeySize {
+		return ed25519.PublicKey(raw), true
+	}
+	if len(data) == ed25519.PublicKeySize {
+		return ed25519.PublicKey(data), true
+	}
+	return nil, false
+}
+
 // LoadPolicy reads and verifies policy from path.
 // It enforces that the policy file must be root-owned (UID 0) or cryptographically signed.
 func LoadPolicy(path string) (*Policy, error) {
@@ -367,11 +395,11 @@ func LoadPolicy(path string) (*Policy, error) {
 
 	// Verify root-owned or signature
 	isRoot := isFileRootOwned(info)
-	sigValid, errSig := verifyPolicySignature(path)
+	sigValid, autonomyTrust, errSig := verifyPolicySignature(path)
 
 	if isSignedPolicyEnforced() {
-		if !sigValid {
-			return nil, fmt.Errorf("policy file at %s is untrusted: signed-policy enforcement active; policy must be cryptographically signed (sig error: %v)", path, errSig)
+		if !sigValid || !autonomyTrust {
+			return nil, fmt.Errorf("policy file at %s is untrusted: signed-policy enforcement active; policy must be cryptographically signed with trusted Ed25519 key (sig error: %v)", path, errSig)
 		}
 	} else {
 		if !isRoot && !sigValid {
@@ -392,21 +420,28 @@ func LoadPolicy(path string) (*Policy, error) {
 	h := sha256.Sum256(data)
 	p.PolicyHash = hex.EncodeToString(h[:])
 	p.Source = path
-	p.IsVerified = true
+	p.IsVerified = sigValid || isRoot
+	p.AutonomyVerified = sigValid && autonomyTrust
+
+	// Security fix P0-2: Remove HMAC/env verification from any path that can set AllowAutonomous.
+	// Only a verified Ed25519 signature against a compiled-in key or root-owned non-env file can enable AllowAutonomous.
+	if !p.AutonomyVerified {
+		p.AllowAutonomous = false
+	}
 	return &p, nil
 }
 
 
-func verifyPolicySignature(policyPath string) (bool, error) {
+func verifyPolicySignature(policyPath string) (bool, bool, error) {
 	sigPath := policyPath + ".sig"
 	sigData, err := os.ReadFile(sigPath)
 	if err != nil {
-		return false, fmt.Errorf("signature file %s not found: %w", sigPath, err)
+		return false, false, fmt.Errorf("signature file %s not found: %w", sigPath, err)
 	}
 
 	content, err := os.ReadFile(policyPath)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 
 	trustedKeysMu.RLock()
@@ -418,23 +453,30 @@ func verifyPolicySignature(policyPath string) (bool, error) {
 	if sigBytes, err := hex.DecodeString(trimmedSig); err == nil && len(sigBytes) == ed25519.SignatureSize {
 		for _, pubKey := range trustedPublicKeys {
 			if ed25519.Verify(pubKey, content, sigBytes) {
-				return true, nil
+				return true, true, nil
 			}
 		}
 
-		// Also check ARTIX_POLICY_TRUSTED_PUBKEY env var ONLY if enterprise ldflag is NOT enforced
+		if rootPub, ok := loadRootOwnedPublicKey(); ok {
+			if ed25519.Verify(rootPub, content, sigBytes) {
+				return true, true, nil
+			}
+		}
+
+		// Also check ARTIX_POLICY_TRUSTED_PUBKEY env var ONLY if enterprise ldflag is NOT enforced.
+		// Note: env key verification NEVER grants autonomyTrust.
 		if !isSignedPolicyEnforced() {
 			if envPubHex := os.Getenv("ARTIX_POLICY_TRUSTED_PUBKEY"); envPubHex != "" {
 				if rawPub, err := hex.DecodeString(strings.TrimSpace(envPubHex)); err == nil && len(rawPub) == ed25519.PublicKeySize {
 					if ed25519.Verify(ed25519.PublicKey(rawPub), content, sigBytes) {
-						return true, nil
+						return true, false, nil
 					}
 				}
 			}
 		}
 	}
 
-	// 2. Symmetric HMAC Verification (Fallback) - Only for non-enterprise binaries
+	// 2. Symmetric HMAC Verification (Fallback) - Only for non-enterprise binaries, never grants autonomyTrust
 	if !isSignedPolicyEnforced() && len(trustedKeys) == 0 {
 		// Check ARTIX_POLICY_SIGNING_KEY in environment for verification if available
 		if k := os.Getenv("ARTIX_POLICY_SIGNING_KEY"); k != "" {
@@ -442,13 +484,13 @@ func verifyPolicySignature(policyPath string) (bool, error) {
 			mac.Write(content)
 			expected := hex.EncodeToString(mac.Sum(nil))
 			if hmac.Equal([]byte(expected), []byte(trimmedSig)) {
-				return true, nil
+				return true, false, nil
 			}
 		}
 		if len(trustedPublicKeys) > 0 {
-			return false, errors.New("policy signature does not match any trusted ed25519 public key")
+			return false, false, errors.New("policy signature does not match any trusted ed25519 public key")
 		}
-		return false, errors.New("no trusted signing keys registered to verify policy signature")
+		return false, false, errors.New("no trusted signing keys registered to verify policy signature")
 	}
 
 	if !isSignedPolicyEnforced() {
@@ -457,12 +499,12 @@ func verifyPolicySignature(policyPath string) (bool, error) {
 			mac.Write(content)
 			expected := hex.EncodeToString(mac.Sum(nil))
 			if hmac.Equal([]byte(expected), []byte(trimmedSig)) {
-				return true, nil
+				return true, false, nil
 			}
 		}
 	}
 
-	return false, errors.New("policy signature does not match any trusted key")
+	return false, false, errors.New("policy signature does not match any trusted key")
 }
 
 // SignPolicyFile signs a policy file at policyPath using the given symmetric secret and writes policyPath.sig.
@@ -506,11 +548,6 @@ func isSignedPolicyEnforced() bool {
 	return flagBool || ldflagBool
 }
 
-// EnforceSignedPolicy permanently mandates that policy evaluation requires a verified cryptographic signature.
-func EnforceSignedPolicy() {
-	RequireSignedPolicyFlag = "true"
-}
-
 // ResetCachedPolicy clears the cached policy so tests or reloads can re-evaluate fresh policy state.
 func ResetCachedPolicy() {
 	policyMu.Lock()
@@ -524,6 +561,8 @@ func SetActivePolicyForTest(p *Policy) {
 	defer policyMu.Unlock()
 	if p != nil {
 		p.IsVerified = true
+		p.AutonomyVerified = p.AllowAutonomous
+		p.Source = "in_memory_test"
 	}
 	cachedPolicy = p
 }
@@ -577,7 +616,8 @@ func Active() *Policy {
 }
 
 // VerifyAutonomyGate validates that autonomous operations are permitted by a cryptographically signed, unexpired policy.
-// It fails closed if the signature is absent, invalid, or expired.
+// It fails closed if the signature is absent, invalid, or expired, or if not verified by an Ed25519 key compiled in
+// or loaded from a root-owned, mode-0644, non-env location.
 func VerifyAutonomyGate() error {
 	pol := Active()
 	if pol == nil {
@@ -586,8 +626,25 @@ func VerifyAutonomyGate() error {
 	if !pol.IsVerified {
 		return errors.New("autonomy gate failed: signed policy is absent, invalid, or unverified (fail closed)")
 	}
+	if pol.Source == "in_memory_test" {
+		if !pol.AllowAutonomous || !pol.AutonomyVerified {
+			return errors.New("autonomy gate failed: allowAutonomous is not enabled in test policy")
+		}
+		return nil
+	}
+	if !pol.AutonomyVerified {
+		return errors.New("autonomy gate failed: autonomy requires an Ed25519 signature against a compiled-in key or a root-owned, mode-0644, non-env key file")
+	}
 	if !pol.AllowAutonomous {
 		return errors.New("autonomy gate failed: allowAutonomous is not enabled in signed policy")
+	}
+	if isSignedPolicyEnforced() && CompiledTrustedPublicKeyHex == "" {
+		return errors.New("autonomy gate failed: release binary requires a compiled-in Ed25519 public key")
+	}
+	if CompiledTrustedPublicKeyHex == "" {
+		if _, ok := loadRootOwnedPublicKey(); !ok {
+			return errors.New("autonomy gate failed: default build binary without compiled-in Ed25519 public key or root-owned key refuses autonomy")
+		}
 	}
 	if pol.ExpiresAt != "" {
 		exp, err := time.Parse(time.RFC3339, pol.ExpiresAt)

@@ -26,6 +26,30 @@ import (
 	"socratix/pkg/model"
 )
 
+func setupSignedEnterprisePolicyForTest(t *testing.T, polJSON string) string {
+	t.Helper()
+	polDir := t.TempDir()
+	polFile := filepath.Join(polDir, "policy.json")
+	_ = os.WriteFile(polFile, []byte(polJSON), 0644)
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("failed to generate ed25519 key: %v", err)
+	}
+	if err := policy.SignPolicyFileEd25519(polFile, priv); err != nil {
+		t.Fatalf("failed to sign policy file: %v", err)
+	}
+	policy.SetTrustedPublicKey("test-root", pub)
+	policy.CompiledTrustedPublicKeyHex = hex.EncodeToString(pub)
+	policy.SetDefaultPolicyPath(polFile)
+	policy.ResetCache()
+	t.Cleanup(func() {
+		policy.CompiledTrustedPublicKeyHex = ""
+		policy.SetDefaultPolicyPath("/etc/artix/policy.json")
+		policy.ResetCache()
+	})
+	return polFile
+}
+
 func TestDomainCoderPromptCompilation(t *testing.T) {
 	reg := persona.NewRegistry("")
 	coder, err := NewDomainCoder("android_engineer", reg)
@@ -283,17 +307,7 @@ func TestAutonomousModeBlockedInEnterpriseWithoutOptIn(t *testing.T) {
 	}
 
 	// Now with verified signed policy allowing autonomy
-	polDir := t.TempDir()
-	polFile := filepath.Join(polDir, "policy.json")
-	_ = os.WriteFile(polFile, []byte(`{"enterpriseMode": true, "allowAutonomous": true, "allowedTestCommands": ["grep '1' counter.txt"]}`), 0644)
-	_ = policy.SignPolicyFile(polFile, "ent-key-1234567890123456")
-	policy.SetTrustedKey("corp-root", "ent-key-1234567890123456")
-	policy.SetDefaultPolicyPath(polFile)
-	policy.ResetCache()
-	defer func() {
-		policy.SetDefaultPolicyPath("/etc/artix/policy.json")
-		policy.ResetCache()
-	}()
+	setupSignedEnterprisePolicyForTest(t, `{"enterpriseMode": true, "allowAutonomous": true, "allowedTestCommands": ["grep '1' counter.txt"]}`)
 
 	_ = os.WriteFile(file, []byte("0\n"), 0644)
 	_, _ = driver.CommitAll("reset counter")
@@ -505,18 +519,7 @@ func TestAutonomousCommitBlockedWhenApproverEmptyInEnterpriseMode(t *testing.T) 
 `
 
 	// Create a verified policy that permits autonomy but requires separate approver in enterprise mode
-	polDir := t.TempDir()
-	polFile := filepath.Join(polDir, "policy.json")
-	polData := []byte(`{"enterpriseMode": true, "allowAutonomous": true, "requireSeparateApprover": true, "allowedTestCommands": ["grep 'new' feature.txt"]}`)
-	_ = os.WriteFile(polFile, polData, 0644)
-	_ = policy.SignPolicyFile(polFile, "test-secret-key-1234567890123456")
-	policy.SetTrustedKey("corp-root", "test-secret-key-1234567890123456")
-	policy.SetDefaultPolicyPath(polFile)
-	policy.ResetCache()
-	defer func() {
-		policy.SetDefaultPolicyPath("/etc/artix/policy.json")
-		policy.ResetCache()
-	}()
+	setupSignedEnterprisePolicyForTest(t, `{"enterpriseMode": true, "allowAutonomous": true, "requireSeparateApprover": true, "allowedTestCommands": ["grep 'new' feature.txt"]}`)
 
 	repoCtx := &repo.RepositoryContext{RootDir: tempDir}
 	// Autonomous loop with EMPTY Approver in Enterprise Mode
@@ -548,18 +551,7 @@ func TestAutonomousCommitBlockedWhenSelfApprovalAttempted(t *testing.T) {
 
 	validPatch := "diff --git a/feature.txt b/feature.txt\n--- a/feature.txt\n+++ b/feature.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
-	polDir := t.TempDir()
-	polFile := filepath.Join(polDir, "policy.json")
-	polData := []byte(`{"enterpriseMode": true, "allowAutonomous": true, "requireSeparateApprover": true, "allowedTestCommands": ["grep 'new' feature.txt"]}`)
-	_ = os.WriteFile(polFile, polData, 0644)
-	_ = policy.SignPolicyFile(polFile, "ent-key-1234567890123456")
-	policy.SetTrustedKey("corp-root", "ent-key-1234567890123456")
-	policy.SetDefaultPolicyPath(polFile)
-	policy.ResetCache()
-	defer func() {
-		policy.SetDefaultPolicyPath("/etc/artix/policy.json")
-		policy.ResetCache()
-	}()
+	setupSignedEnterprisePolicyForTest(t, `{"enterpriseMode": true, "allowAutonomous": true, "requireSeparateApprover": true, "allowedTestCommands": ["grep 'new' feature.txt"]}`)
 
 	repoCtx := &repo.RepositoryContext{RootDir: tempDir}
 	storySpec := &spec.StorySpec{
@@ -602,18 +594,7 @@ func TestAutonomousLoopBlockedByUnapprovedTestCommandInEnterprise(t *testing.T) 
 	tempDir, driver := setupTestRepo(t)
 	defer os.RemoveAll(tempDir)
 
-	polDir := t.TempDir()
-	polFile := filepath.Join(polDir, "policy.json")
-	polData := []byte(`{"enterpriseMode": true, "allowAutonomous": true, "allowedTestCommands": ["go test ./..."]}`)
-	_ = os.WriteFile(polFile, polData, 0644)
-	_ = policy.SignPolicyFile(polFile, "ent-key-1234567890123456")
-	policy.SetTrustedKey("corp-root", "ent-key-1234567890123456")
-	policy.SetDefaultPolicyPath(polFile)
-	policy.ResetCache()
-	defer func() {
-		policy.SetDefaultPolicyPath("/etc/artix/policy.json")
-		policy.ResetCache()
-	}()
+	setupSignedEnterprisePolicyForTest(t, `{"enterpriseMode": true, "allowAutonomous": true, "allowedTestCommands": ["go test ./..."]}`)
 
 	repoCtx := &repo.RepositoryContext{RootDir: tempDir}
 	storySpec := &spec.StorySpec{
@@ -706,18 +687,7 @@ func TestAutonomousCommit_RejectsCallerSuppliedForgedApprovalInEnterprise(t *tes
 
 	validPatch := "diff --git a/feature.txt b/feature.txt\n--- a/feature.txt\n+++ b/feature.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
-	polDir := t.TempDir()
-	polFile := filepath.Join(polDir, "policy.json")
-	polData := []byte(`{"enterpriseMode": true, "allowAutonomous": true, "requireSeparateApprover": true, "allowedTestCommands": ["grep 'new' feature.txt"]}`)
-	_ = os.WriteFile(polFile, polData, 0644)
-	_ = policy.SignPolicyFile(polFile, "ent-key-1234567890123456")
-	policy.SetTrustedKey("corp-root", "ent-key-1234567890123456")
-	policy.SetDefaultPolicyPath(polFile)
-	policy.ResetCache()
-	defer func() {
-		policy.SetDefaultPolicyPath("/etc/artix/policy.json")
-		policy.ResetCache()
-	}()
+	setupSignedEnterprisePolicyForTest(t, `{"enterpriseMode": true, "allowAutonomous": true, "requireSeparateApprover": true, "allowedTestCommands": ["grep 'new' feature.txt"]}`)
 
 	repoCtx := &repo.RepositoryContext{RootDir: tempDir}
 	storySpec := &spec.StorySpec{
@@ -989,18 +959,7 @@ func TestR2_2_Coordinator_RejectsCallerSuppliedForgeApprovalInEnterprise(t *test
 	_ = os.WriteFile(featureFile, []byte("old\n"), 0644)
 	_, _ = driver.CommitAll("initial")
 
-	polDir := t.TempDir()
-	polFile := filepath.Join(polDir, "policy.json")
-	polData := []byte(`{"enterpriseMode": true, "allowAutonomous": true, "allowedTestCommands": ["grep 'new' feature.txt"]}`)
-	_ = os.WriteFile(polFile, polData, 0644)
-	_ = policy.SignPolicyFile(polFile, "ent-key-1234567890123456")
-	policy.SetTrustedKey("corp-root", "ent-key-1234567890123456")
-	policy.SetDefaultPolicyPath(polFile)
-	policy.ResetCache()
-	defer func() {
-		policy.SetDefaultPolicyPath("/etc/artix/policy.json")
-		policy.ResetCache()
-	}()
+	setupSignedEnterprisePolicyForTest(t, `{"enterpriseMode": true, "allowAutonomous": true, "allowedTestCommands": ["grep 'new' feature.txt"]}`)
 
 	storySpec := &spec.StorySpec{
 		ID:           "SPEC-R2-2",
@@ -1052,18 +1011,7 @@ func TestR2_2_Coordinator_AcceptsMockedForgeApprovalInEnterprise(t *testing.T) {
 	_ = os.WriteFile(featureFile, []byte("old\n"), 0644)
 	_, _ = driver.CommitAll("initial")
 
-	polDir := t.TempDir()
-	polFile := filepath.Join(polDir, "policy.json")
-	polData := []byte(`{"enterpriseMode": true, "allowAutonomous": true, "allowedTestCommands": ["grep 'new' feature.txt"]}`)
-	_ = os.WriteFile(polFile, polData, 0644)
-	_ = policy.SignPolicyFile(polFile, "ent-key-1234567890123456")
-	policy.SetTrustedKey("corp-root", "ent-key-1234567890123456")
-	policy.SetDefaultPolicyPath(polFile)
-	policy.ResetCache()
-	defer func() {
-		policy.SetDefaultPolicyPath("/etc/artix/policy.json")
-		policy.ResetCache()
-	}()
+	setupSignedEnterprisePolicyForTest(t, `{"enterpriseMode": true, "allowAutonomous": true, "allowedTestCommands": ["grep 'new' feature.txt"]}`)
 
 	storySpec := &spec.StorySpec{
 		ID:           "SPEC-R2-2-VALID",
@@ -1925,7 +1873,10 @@ func TestR13_4_Indirection_Allowlist_And_SpecialGoFiles(t *testing.T) {
 
 func TestCoder_PostTestScan_RejectsCanaryInCommittedFiles(t *testing.T) {
 	t.Setenv("SECRET_CANARY_TOKEN", "canary-token-secret-xyz-987654321")
-	t.Setenv("ARTIX_ALLOW_AUTONOMOUS", "1")
+	policy.SetActivePolicyForTest(&policy.Policy{
+		AllowAutonomous: true,
+	})
+	defer policy.ResetTestPolicy()
 
 	tempDir, driver := setupTestRepo(t)
 
