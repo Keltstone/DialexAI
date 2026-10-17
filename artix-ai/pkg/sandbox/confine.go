@@ -59,7 +59,7 @@ func IsConfinementAvailable() bool {
 }
 
 // BuildBwrapArgs builds the bubblewrap execution arguments for Linux environments.
-func BuildBwrapArgs(writable []string, net bool, cmdStr string) []string {
+func BuildBwrapArgs(writable []string, net bool, cmdStr string, env ...[]string) []string {
 	args := []string{
 		"--unshare-user-try",
 		"--unshare-pid",
