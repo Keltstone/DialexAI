@@ -111,3 +111,31 @@ func TestReview_SemgrepWithoutConfigReportsUnavailable(t *testing.T) {
 	}
 }
 
+func TestReview_RenameMapAndCosmeticComment(t *testing.T) {
+	d := t.TempDir()
+	run := func(args ...string) {
+		c := exec.Command("git", append([]string{"-C", d, "-c", "user.name=t", "-c", "user.email=t@example.test"}, args...)...)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", args, out)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	os.WriteFile(filepath.Join(d, "old.txt"), []byte("k = \"AKIA"+"ABCDEFGHIJKLMNOP\"\n"), 0o644)
+	run("add", ".")
+	run("commit", "-qm", "base")
+
+	run("checkout", "-qb", "feat")
+	run("mv", "old.txt", "new.txt")
+	os.WriteFile(filepath.Join(d, "new.txt"), []byte("k = \"AKIA"+"ABCDEFGHIJKLMNOP\" // cosmetic moved comment\n"), 0o644)
+	run("add", ".")
+	run("commit", "-qm", "head")
+
+	ev := &githost.Event{HeadSHA: "feat", HeadRef: "feat", BaseRef: "main", CloneURL: d, BaseCloneURL: d, Fork: true}
+	res, err := Review(t.Context(), ev, "", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(res.New) != 0 {
+		t.Fatalf("expected 0 new findings after rename + cosmetic comment, got %d: %+v", len(res.New), res.New)
+	}
+}
