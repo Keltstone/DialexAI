@@ -63,3 +63,31 @@ func TestStreamEmitter_NilSafe(t *testing.T) {
 	emptyEmitter := NewStreamEmitter(nil)
 	emptyEmitter.Emit(StreamEvent{Type: EventError})
 }
+
+func TestP2_StreamEmitter_RedactsSecretsInChunkAndFeedback(t *testing.T) {
+	buf := &bytes.Buffer{}
+	emitter := NewStreamEmitter(buf)
+
+	rawSecretMsg := "Found AWS key AKIAIOSFODNN7EXAMPLE and GitHub token ghp_1234567890abcdefghijklmnopqrstuvwxyzAB"
+	emitter.Emit(StreamEvent{
+		Type:    EventSandboxRunChunk,
+		TaskID:  "task-sec-1",
+		Phase:   "SANDBOX_EXECUTION",
+		Message: rawSecretMsg,
+		Payload: map[string]any{
+			"chunk":    rawSecretMsg,
+			"feedback": "Reviewer found secret: ghp_1234567890abcdefghijklmnopqrstuvwxyzAB",
+			"nested": map[string]any{
+				"token": "ghp_1234567890abcdefghijklmnopqrstuvwxyzAB",
+			},
+		},
+	})
+
+	output := buf.String()
+	if strings.Contains(output, "AKIAIOSFODNN7EXAMPLE") {
+		t.Fatalf("SECURITY LEAK: StreamEmitter leaked AWS secret key: %s", output)
+	}
+	if strings.Contains(output, "ghp_1234567890abcdefghijklmnopqrstuvwxyzAB") {
+		t.Fatalf("SECURITY LEAK: StreamEmitter leaked GitHub PAT: %s", output)
+	}
+}
