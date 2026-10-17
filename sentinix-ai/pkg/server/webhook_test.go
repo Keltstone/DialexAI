@@ -153,4 +153,6 @@ func TestWebhook_EnqueueFailureThenRedeliveryResultsInScan(t *testing.T) {
 	if jobID == "" || hostName != "gh" || !strings.Contains(queuedPayload, "42") {
 		t.Fatalf("expected queued job for PR 42, got jobID=%q, host=%q, payload=%q", jobID, hostName, queuedPayload)
 	}
+	t.Logf("attempt 1 (forced failure) status: %d", rec1.Code)
+	t.Logf("attempt 2 (redelivery) status: %d, queued jobID=%s host=%s (scan ready)", rec2.Code, jobID, hostName)
 }
