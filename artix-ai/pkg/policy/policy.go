@@ -504,8 +504,7 @@ func SignPolicyFileEd25519(policyPath string, privKey ed25519.PrivateKey) error 
 // RequireSignedPolicyLdflag can be set at compile time via -ldflags "-X artix/pkg/policy.RequireSignedPolicyLdflag=true"
 var RequireSignedPolicyLdflag = "false"
 
-// RequireSignedPolicyFlag can be set at compile time via -ldflags "-X artix/pkg/policy.RequireSignedPolicyFlag=true"
-// or programmatically via EnforceSignedPolicy.
+// RequireSignedPolicyFlag can be set at compile time via -ldflags "-X artix/pkg/policy.RequireSignedPolicyFlag=true".
 var RequireSignedPolicyFlag = "false"
 
 // IsSignedPolicyEnforced returns whether enterprise signed policy enforcement is active via compile-time flag.

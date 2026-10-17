@@ -25,24 +25,31 @@ const (
 	TaskSecurityAudit    TaskType = "security_audit"
 )
 
+// ModelPricing configures separate input and output token pricing for a model.
+type ModelPricing struct {
+	InputCostPer1k  float64 `json:"inputCostPer1k"`
+	OutputCostPer1k float64 `json:"outputCostPer1k"`
+}
+
 // TokenBudget defines token and USD financial limits at story, team, and daily levels.
 type TokenBudget struct {
-	MaxStoryTokens  int                `json:"maxStoryTokens"`
-	MaxTeamTokens   int                `json:"maxTeamTokens"`
-	MaxDayTokens    int                `json:"maxDayTokens"`
-	MaxStoryCost    float64            `json:"maxStoryCost,omitempty"` // USD
-	MaxTeamCost     float64            `json:"maxTeamCost,omitempty"`  // USD
-	MaxDayCost      float64            `json:"maxDayCost,omitempty"`   // USD
-	CostPer1kTokens float64            `json:"costPer1kTokens,omitempty"`
-	PriceTable      map[string]float64 `json:"priceTable,omitempty"` // model -> cost per 1k tokens
-	UsedStoryTokens int                `json:"usedStoryTokens"`
-	UsedTeamTokens  int                `json:"usedTeamTokens"`
-	UsedDayTokens   int                `json:"usedDayTokens"`
-	UsedStoryCost   float64            `json:"usedStoryCost"`
-	UsedTeamCost    float64            `json:"usedTeamCost"`
-	UsedDayCost     float64            `json:"usedDayCost"`
-	TeamID          string             `json:"teamId,omitempty"`
-	TaskID          string             `json:"taskId,omitempty"`
+	MaxStoryTokens    int                     `json:"maxStoryTokens"`
+	MaxTeamTokens     int                     `json:"maxTeamTokens"`
+	MaxDayTokens      int                     `json:"maxDayTokens"`
+	MaxStoryCost      float64                 `json:"maxStoryCost,omitempty"` // USD
+	MaxTeamCost       float64                 `json:"maxTeamCost,omitempty"`  // USD
+	MaxDayCost        float64                 `json:"maxDayCost,omitempty"`   // USD
+	CostPer1kTokens   float64                 `json:"costPer1kTokens,omitempty"`
+	PriceTable        map[string]float64      `json:"priceTable,omitempty"` // model -> cost per 1k tokens
+	ModelPricingTable map[string]ModelPricing `json:"modelPricingTable,omitempty"` // model -> input/output pricing
+	UsedStoryTokens   int                     `json:"usedStoryTokens"`
+	UsedTeamTokens    int                     `json:"usedTeamTokens"`
+	UsedDayTokens     int                     `json:"usedDayTokens"`
+	UsedStoryCost     float64                 `json:"usedStoryCost"`
+	UsedTeamCost      float64                 `json:"usedTeamCost"`
+	UsedDayCost       float64                 `json:"usedDayCost"`
+	TeamID            string                  `json:"teamId,omitempty"`
+	TaskID            string                  `json:"taskId,omitempty"`
 	LedgerPath      string             `json:"ledgerPath,omitempty"`
 	LedgerError     error              `json:"-"`
 }
@@ -126,6 +133,12 @@ func LoadBudgetFromEnv() *TokenBudget {
 	if v := getEnv("ARTIX_BUDGET_DAY_COST", "KRITIX_BUDGET_DAY_COST"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
 			b.MaxDayCost = f
+			hasConfig = true
+		}
+	}
+	if v := getEnv("ARTIX_BUDGET_PRICE_PER_1K", "KRITIX_BUDGET_PRICE_PER_1K"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			b.CostPer1kTokens = f
 			hasConfig = true
 		}
 	}
@@ -215,6 +228,30 @@ func (b *TokenBudget) GetModelPrice(modelKey string) (float64, error) {
 		return 0, fmt.Errorf("budget error: no price table or pricing configured for model %q under active USD financial cap (refusing operation)", modelKey)
 	}
 	return 0, nil
+}
+
+// CalculateModelCost calculates USD cost for given input and output tokens using input/output pricing if available.
+func (b *TokenBudget) CalculateModelCost(modelKey string, inputTokens, outputTokens int) (float64, error) {
+	if b == nil {
+		return 0, nil
+	}
+	trimmedKey := strings.TrimSpace(modelKey)
+	if len(b.ModelPricingTable) > 0 {
+		if mp, ok := b.ModelPricingTable[trimmedKey]; ok && (mp.InputCostPer1k > 0 || mp.OutputCostPer1k > 0) {
+			return (float64(inputTokens)/1000.0)*mp.InputCostPer1k + (float64(outputTokens)/1000.0)*mp.OutputCostPer1k, nil
+		}
+		for k, mp := range b.ModelPricingTable {
+			if strings.EqualFold(k, trimmedKey) && (mp.InputCostPer1k > 0 || mp.OutputCostPer1k > 0) {
+				return (float64(inputTokens)/1000.0)*mp.InputCostPer1k + (float64(outputTokens)/1000.0)*mp.OutputCostPer1k, nil
+			}
+		}
+	}
+	pricePer1k, err := b.GetModelPrice(modelKey)
+	if err != nil {
+		return 0, err
+	}
+	total := inputTokens + outputTokens
+	return (float64(total) / 1000.0) * pricePer1k, nil
 }
 
 // CheckExhaustion checks if any token or USD cap is exceeded or if ledger operations failed with a cap active.
@@ -340,6 +377,7 @@ func (b *TokenBudget) SyncWithSharedLedger() {
 type ProviderUsage struct {
 	PromptTokens     int `json:"promptTokens"`
 	CompletionTokens int `json:"completionTokens"`
+	ThinkingTokens   int `json:"thinkingTokens,omitempty"`
 	TotalTokens      int `json:"totalTokens"`
 }
 

@@ -143,6 +143,12 @@ func BuildBwrapArgs(writable []string, net bool, cmdStr string, env ...[]string)
 // 1. ARTIX_SANDBOX=off is strictly disallowed and ignored.
 // 2. Fail-Closed: If no confinement tool exists (sandbox-exec or bwrap), execution is REFUSED.
 func confine(cwd, cmdStr string, net bool, loopback bool) (*exec.Cmd, string) {
+	if runtime.GOOS == "windows" {
+		// Windows does not have kernel sandbox tooling (sandbox-exec or bubblewrap).
+		// Fail closed to prevent running untrusted code unconfined on Windows.
+		return nil, IsolationRefused
+	}
+
 	plain := func() (*exec.Cmd, string) { return exec.Command("sh", "-c", cmdStr), IsolationProcessGroup }
 
 	isEnterprise := policy.IsEnterprise()
