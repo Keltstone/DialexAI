@@ -96,11 +96,14 @@ func Open(dsn string) (*Store, error) {
 		"alter table audit add column prev_hash text not null default ''",
 		"alter table audit add column hash text not null default ''",
 		"alter table findings add column source text not null default ''",
+		"create table if not exists audit_counter(id int primary key, last_seq bigint not null)",
+		"create unique index if not exists idx_audit_seq on audit(seq)",
 	} {
 		if _, err := db.Exec(q); err != nil && !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
 			return nil, err
 		}
 	}
+	db.Exec("insert into audit_counter(id, last_seq) values(1, 0) on conflict do nothing")
 	db.Exec("update durable_queue set status='pending' where status='running'")
 	st := &Store{db: db}
 	if k := os.Getenv("SENTINIX_AUDIT_KEY"); k != "" {
