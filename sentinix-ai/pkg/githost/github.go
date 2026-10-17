@@ -99,7 +99,7 @@ func (g github) Comment(ctx context.Context, e *Event, body string) error {
 			}
 			if json.NewDecoder(resp.Body).Decode(&comments) == nil {
 				for _, c := range comments {
-					if strings.HasPrefix(strings.TrimSpace(c.Body), "### Sentinix") {
+					if strings.Contains(c.Body, "<!-- sentinix-review-marker -->") || strings.HasPrefix(strings.TrimSpace(c.Body), "### Sentinix") {
 						patchURL := fmt.Sprintf("%s/repos/%s/issues/comments/%d", g.API, e.Repo, c.ID)
 						return g.request(ctx, "PATCH", patchURL, g.hdr(), map[string]string{"body": body})
 					}

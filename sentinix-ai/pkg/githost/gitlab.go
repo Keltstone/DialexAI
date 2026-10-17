@@ -87,7 +87,7 @@ func (g gitlab) Comment(ctx context.Context, e *Event, body string) error {
 			}
 			if json.NewDecoder(resp.Body).Decode(&notes) == nil {
 				for _, n := range notes {
-					if strings.HasPrefix(strings.TrimSpace(n.Body), "### Sentinix") {
+					if strings.Contains(n.Body, "<!-- sentinix-review-marker -->") || strings.HasPrefix(strings.TrimSpace(n.Body), "### Sentinix") {
 						putURL := fmt.Sprintf("%s/projects/%s/merge_requests/%s/notes/%d", g.API, e.Repo, e.PR, n.ID)
 						return g.request(ctx, "PUT", putURL, g.hdr(), map[string]string{"body": body})
 					}
