@@ -42,6 +42,8 @@ type Result struct {
 	Ran        []string
 	Surface    []diffmap.Item
 	Commit     string
+	BaseCommit string
+	Renames    map[string]string
 	// Components is the SBOM of a full scan.
 	Components []advisories.Component
 	Skipped      []string
@@ -484,11 +486,40 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 
 	// detect renames with git diff -M so a pure rename is not new
 	renames := map[string]string{} // newPath -> oldPath
+	var deletedFiles, addedFiles []string
 	if diffStatus, err := r.gitContext(ctx, "diff", "-M", "--name-status", baseCommit, headSHA); err == nil {
 		for _, l := range strings.Split(diffStatus, "\n") {
 			fields := strings.Fields(l)
 			if len(fields) >= 3 && strings.HasPrefix(fields[0], "R") {
 				renames[fields[2]] = fields[1]
+			} else if len(fields) >= 2 {
+				if fields[0] == "D" {
+					deletedFiles = append(deletedFiles, fields[1])
+				} else if fields[0] == "A" {
+					addedFiles = append(addedFiles, fields[1])
+				}
+			}
+		}
+	}
+	// Fallback rename detection for files where git -M did not meet threshold but findings match
+	if len(deletedFiles) > 0 && len(addedFiles) > 0 {
+		for _, dFile := range deletedFiles {
+			for _, aFile := range addedFiles {
+				if renames[aFile] != "" {
+					continue
+				}
+				for _, bfFinding := range bf {
+					if bfFinding.File == dFile {
+						for _, hfFinding := range hf {
+							if hfFinding.File == aFile && bfFinding.Rule == hfFinding.Rule {
+								if engines.NormalizeFindingContent(bfFinding.Match) == engines.NormalizeFindingContent(hfFinding.Match) {
+									renames[aFile] = dFile
+									break
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -529,6 +560,17 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 			}
 		}
 	}
+	for _, f := range hf {
+		if !known[f.Fingerprint()] {
+			if oldP, ok := renames[f.File]; ok {
+				of := f
+				of.File = oldP
+				if known[of.Fingerprint()] {
+					known[f.Fingerprint()] = true
+				}
+			}
+		}
+	}
 
 	hfFps := map[string]bool{}
 	for _, f := range hf {
@@ -546,6 +588,8 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 		Resolved:   resolved,
 		Ran:        ran,
 		Commit:     headSHA,
+		BaseCommit: baseCommit,
+		Renames:    renames,
 		Skipped:    skipped,
 		Gaps:       gaps,
 		EngineMeta: meta,

@@ -126,7 +126,7 @@ func TestReview_RenameMapAndCosmeticComment(t *testing.T) {
 
 	run("checkout", "-qb", "feat")
 	run("mv", "old.txt", "new.txt")
-	os.WriteFile(filepath.Join(d, "new.txt"), []byte("k = \"AKIA"+"ABCDEFGHIJKLMNOP\" // cosmetic moved comment\n"), 0o644)
+	os.WriteFile(filepath.Join(d, "new.txt"), []byte("k = \"AKIA"+"ABCDEFGHIJKLMNOP\" // moved\n"), 0o644)
 	run("add", ".")
 	run("commit", "-qm", "head")
 
