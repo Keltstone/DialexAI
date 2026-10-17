@@ -86,17 +86,18 @@ func (ki *KnowledgeItem) Ratify(approver string, codeowners ...[]string) error {
 	if lower == "artix-agent" || lower == "artix-bot" || lower == "bot" || strings.Contains(lower, "[bot]") {
 		return fmt.Errorf("bot identity %q cannot ratify knowledge items; human CODEOWNER approval required", trimmed)
 	}
-	if len(codeowners) > 0 && len(codeowners[0]) > 0 {
-		isOwner := false
-		for _, owner := range codeowners[0] {
-			if strings.EqualFold(strings.TrimSpace(owner), trimmed) {
-				isOwner = true
-				break
-			}
+	if len(codeowners) == 0 || len(codeowners[0]) == 0 {
+		return errors.New("cannot ratify knowledge item: CODEOWNERS list is absent or empty (fail closed)")
+	}
+	isOwner := false
+	for _, owner := range codeowners[0] {
+		if strings.EqualFold(strings.TrimSpace(owner), trimmed) {
+			isOwner = true
+			break
 		}
-		if !isOwner {
-			return fmt.Errorf("approver %q is not authorized in CODEOWNERS list: %v", trimmed, codeowners[0])
-		}
+	}
+	if !isOwner {
+		return fmt.Errorf("approver %q is not authorized in CODEOWNERS list: %v", trimmed, codeowners[0])
 	}
 	now := time.Now()
 	ki.Status = "active"
@@ -183,17 +184,18 @@ func (r *SynthesizedRule) Ratify(approver string, codeowners ...[]string) error 
 	if lower == "artix-agent" || lower == "artix-bot" || lower == "bot" || strings.Contains(lower, "[bot]") {
 		return fmt.Errorf("bot identity %q cannot ratify synthesized rules; human CODEOWNER approval required", trimmed)
 	}
-	if len(codeowners) > 0 && len(codeowners[0]) > 0 {
-		isOwner := false
-		for _, owner := range codeowners[0] {
-			if strings.EqualFold(strings.TrimSpace(owner), trimmed) {
-				isOwner = true
-				break
-			}
+	if len(codeowners) == 0 || len(codeowners[0]) == 0 {
+		return errors.New("cannot ratify rule: CODEOWNERS list is absent or empty (fail closed)")
+	}
+	isOwner := false
+	for _, owner := range codeowners[0] {
+		if strings.EqualFold(strings.TrimSpace(owner), trimmed) {
+			isOwner = true
+			break
 		}
-		if !isOwner {
-			return fmt.Errorf("approver %q is not authorized in CODEOWNERS list: %v", trimmed, codeowners[0])
-		}
+	}
+	if !isOwner {
+		return fmt.Errorf("approver %q is not authorized in CODEOWNERS list: %v", trimmed, codeowners[0])
 	}
 	now := time.Now()
 	r.Status = RuleStatusActive
