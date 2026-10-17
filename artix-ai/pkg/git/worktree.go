@@ -122,6 +122,32 @@ func (m *WorktreeManager) MergeInto(sw *ShadowWorktree, targetBranch string, squ
 	return m.MergeIntoContext(context.Background(), sw, targetBranch, squash)
 }
 
+// IsDirty checks if the repository has uncommitted changes or untracked files (excluding .artix internal files).
+func (m *WorktreeManager) IsDirty() bool {
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = m.repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return true // fail-closed if status cannot be determined
+	}
+	lines := strings.Split(string(out), "\n")
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "" {
+			continue
+		}
+		parts := strings.Fields(trimmed)
+		if len(parts) >= 2 {
+			path := parts[len(parts)-1]
+			if path == ".artix" || strings.HasPrefix(path, ".artix/") {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
 // MergeIntoContext merges the shadow worktree branch into the target branch with context cancellation support.
 // If the context is cancelled or the merge fails, any half-merged state is rolled back and cleaned up.
 func (m *WorktreeManager) MergeIntoContext(ctx context.Context, sw *ShadowWorktree, targetBranch string, squash bool) (string, error) {
@@ -135,13 +161,20 @@ func (m *WorktreeManager) MergeIntoContext(ctx context.Context, sw *ShadowWorktr
 	// File-lock coordination to prevent concurrent collision between multiple artix processes
 	lockPath := filepath.Join(m.repoRoot, ".artix", "merge.lock")
 	_ = os.MkdirAll(filepath.Dir(lockPath), 0755)
-	if lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600); err == nil {
-		unlock := lockFile(lf)
-		defer unlock()
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return "", fmt.Errorf("failed to open merge lock at %s: %w", lockPath, err)
 	}
+	unlock := lockFile(lf)
+	defer unlock()
 
 	if err := ctx.Err(); err != nil {
 		return "", err
+	}
+
+	// Safety check: Never merge into a dirty tree to protect developer uncommitted work
+	if m.IsDirty() {
+		return "", fmt.Errorf("refusing to merge: working tree %s contains uncommitted changes or untracked files (merge refused to preserve developer work)", m.repoRoot)
 	}
 
 	// Record pre-merge HEAD commit
@@ -156,11 +189,8 @@ func (m *WorktreeManager) MergeIntoContext(ctx context.Context, sw *ShadowWorktr
 	cleanupOnFailure := func() {
 		_ = m.runGit("merge", "--abort")
 		if preCommit != "" {
-			_ = m.runGit("reset", "--hard", preCommit)
-		} else {
-			_ = m.runGit("reset", "--hard", "HEAD")
+			_ = m.runGit("update-ref", "HEAD", preCommit)
 		}
-		_ = m.runGit("clean", "-fd")
 	}
 
 	// Re-verification: Check if target branch has advanced since worktree was branched
@@ -230,6 +260,10 @@ func (m *WorktreeManager) MergeIntoContext(ctx context.Context, sw *ShadowWorktr
 // MergeIntoWithVerification merges the shadow branch, executes verifyCmds against the post-merge
 // state, and if any test fails, automatically rolls back the merge and returns a collision error.
 func (m *WorktreeManager) MergeIntoWithVerification(sw *ShadowWorktree, targetBranch string, squash bool, verifyCmds []string, runner func(cmdStr string) error) (string, error) {
+	if m.IsDirty() {
+		return "", fmt.Errorf("refusing to merge: working tree %s contains uncommitted changes or untracked files", m.repoRoot)
+	}
+
 	// Remember pre-merge commit hash for rollback if tests fail
 	revCmd := exec.Command("git", "rev-parse", "HEAD")
 	revCmd.Dir = m.repoRoot
@@ -249,10 +283,11 @@ func (m *WorktreeManager) MergeIntoWithVerification(sw *ShadowWorktree, targetBr
 	if runner != nil && len(verifyCmds) > 0 {
 		for _, cmdStr := range verifyCmds {
 			if vErr := runner(cmdStr); vErr != nil {
-				// Post-merge tests failed: rollback to preCommit
-				resetCmd := exec.Command("git", "reset", "--hard", preCommit)
-				resetCmd.Dir = m.repoRoot
-				_ = resetCmd.Run()
+				// Post-merge tests failed: rollback to preCommit without reset --hard or clean -fd
+				_ = m.runGit("merge", "--abort")
+				_ = m.runGit("update-ref", "HEAD", preCommit)
+				_ = m.runGit("update-ref", fmt.Sprintf("refs/heads/%s", targetBranch), preCommit)
+				_ = m.runGit("checkout", "-f", preCommit)
 				return "", fmt.Errorf("post-merge test verification failed for %q: %w (merge rolled back to %s)", cmdStr, vErr, preCommit)
 			}
 		}
