@@ -1,6 +1,8 @@
 package server
 
 import (
+	"encoding/hex"
+	"crypto/sha256"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -148,9 +150,15 @@ func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
 
 	// Dedupe check: verify signature before touching dedupe table; bound and persist dedupe set
 	delID := deliveryID(r)
-	if delID != "" {
-		seen, _ := a.Store.HasDelivery(delID, 24*3600)
-		if seen {
+	// The delivery-id header is unsigned, so a captured signed body can be replayed under fresh ids.
+	// Also dedupe on the signed content itself (same 24h window).
+	sum := sha256.Sum256(append([]byte(h.Name()+"\x00"), body...))
+	bodyID := "body:" + hex.EncodeToString(sum[:16])
+	for _, id := range []string{delID, bodyID} {
+		if id == "" {
+			continue
+		}
+		if seen, _ := a.Store.HasDelivery(id, 24*3600); seen {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -170,6 +178,7 @@ func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
 	if delID != "" {
 		_ = a.Store.RecordDelivery(delID, 24*3600, 10000)
 	}
+	_ = a.Store.RecordDelivery(bodyID, 24*3600, 10000)
 
 	w.WriteHeader(http.StatusAccepted)
 }
