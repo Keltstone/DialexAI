@@ -110,6 +110,8 @@ func (a *App) engine(project ...string) ([]engines.Engine, error) {
 	return out, nil
 }
 
+const MaxWebhookBodyBytes = 5 << 20 // 5 MiB bounded pre-auth read
+
 func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
 	h, ok := a.Hosts[r.PathValue("name")]
 	if !ok {
@@ -117,7 +119,7 @@ func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 25<<20))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxWebhookBodyBytes))
 	if err != nil {
 		http.Error(w, "bad body", 400)
 		return
@@ -145,8 +147,9 @@ func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Dedupe check: verify signature before touching dedupe table; bound and persist dedupe set
-	if id := deliveryID(r); id != "" {
-		seen, _ := a.Store.CheckAndRecordDelivery(id, 24*3600, 10000)
+	delID := deliveryID(r)
+	if delID != "" {
+		seen, _ := a.Store.HasDelivery(delID, 24*3600)
 		if seen {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -158,10 +161,16 @@ func (a *App) webhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad event", http.StatusBadRequest)
 		return
 	}
+
+	// Enqueue first, then record the delivery ID
 	if _, err := a.Store.EnqueueJob(h.Name(), string(b)); err != nil {
 		http.Error(w, "queue error", http.StatusInternalServerError)
 		return
 	}
+	if delID != "" {
+		_ = a.Store.RecordDelivery(delID, 24*3600, 10000)
+	}
+
 	w.WriteHeader(http.StatusAccepted)
 }
 

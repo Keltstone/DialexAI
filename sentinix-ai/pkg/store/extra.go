@@ -259,14 +259,12 @@ func (s *Store) Verdict(findingID string) (json.RawMessage, error) {
 	return json.RawMessage(b), err
 }
 
-// CheckAndRecordDelivery checks if delivery id was already seen within ttlSeconds, persists it, and bounds the set (TTL + size).
-func (s *Store) CheckAndRecordDelivery(id string, ttlSeconds int64, maxSize int) (bool, error) {
+// HasDelivery checks if a delivery ID was already recorded and valid within ttlSeconds.
+func (s *Store) HasDelivery(id string, ttlSeconds int64) (bool, error) {
 	currentTime := now()
-	// Prune expired
 	if ttlSeconds > 0 {
 		s.db.Exec("delete from webhook_deliveries where ts < $1", currentTime-ttlSeconds)
 	}
-	// Check if already seen
 	var exists int
 	err := s.db.QueryRow("select 1 from webhook_deliveries where id=$1", id).Scan(&exists)
 	if err == nil {
@@ -275,16 +273,29 @@ func (s *Store) CheckAndRecordDelivery(id string, ttlSeconds int64, maxSize int)
 	if err != sql.ErrNoRows {
 		return false, err
 	}
-	// Bound by size
+	return false, nil
+}
+
+// RecordDelivery persists a delivery ID after successful enqueue, bounding the set by TTL and maxSize.
+func (s *Store) RecordDelivery(id string, ttlSeconds int64, maxSize int) error {
+	currentTime := now()
 	if maxSize > 0 {
 		var count int
 		if err := s.db.QueryRow("select count(*) from webhook_deliveries").Scan(&count); err == nil && count >= maxSize {
 			s.db.Exec("delete from webhook_deliveries where id in (select id from webhook_deliveries order by ts asc limit 100)")
 		}
 	}
-	// Persist
-	_, err = s.db.Exec("insert into webhook_deliveries(id, ts) values($1, $2)", id, currentTime)
-	return false, err
+	_, err := s.db.Exec("insert into webhook_deliveries(id, ts) values($1, $2)", id, currentTime)
+	return err
+}
+
+// CheckAndRecordDelivery checks if delivery id was already seen within ttlSeconds, persists it, and bounds the set (TTL + size).
+func (s *Store) CheckAndRecordDelivery(id string, ttlSeconds int64, maxSize int) (bool, error) {
+	seen, err := s.HasDelivery(id, ttlSeconds)
+	if err != nil || seen {
+		return seen, err
+	}
+	return false, s.RecordDelivery(id, ttlSeconds, maxSize)
 }
 
 func (s *Store) EnqueueJob(host string, payload string) (string, error) {
