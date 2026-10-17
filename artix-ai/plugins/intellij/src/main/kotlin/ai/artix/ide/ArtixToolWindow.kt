@@ -245,7 +245,7 @@ class ArtixPanel(private val project: Project) : JBPanel<ArtixPanel>(BorderLayou
             env["ARTIX_MODEL"]?.takeIf { it.isNotBlank() }?.let { add("--model"); add(it) }
         }
 
-        val cmd = GeneralCommandLine(env["ARTIX_BIN"] ?: "artix", sub, "--stream")
+        val cmd = GeneralCommandLine(resolveArtixBin(p), sub, "--stream")
             .withParameters(model)
             .withParameters(*args)
             .withWorkDirectory(p.basePath)
@@ -311,7 +311,7 @@ class ArtixPanel(private val project: Project) : JBPanel<ArtixPanel>(BorderLayou
                 env["ARTIX_PROVIDER"]?.takeIf { it.isNotBlank() }?.let { add("--provider"); add(it) }
                 env["ARTIX_MODEL"]?.takeIf { it.isNotBlank() }?.let { add("--model"); add(it) }
             }
-            val cmd = GeneralCommandLine(env["ARTIX_BIN"] ?: "artix", sub, "--json")
+            val cmd = GeneralCommandLine(resolveArtixBin(p), sub, "--json")
                 .withParameters(model)
                 .withParameters(*args)
                 .withWorkDirectory(p.basePath)

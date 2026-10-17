@@ -17,10 +17,18 @@
     "configuration": {
       "title": "Artix",
       "properties": {
-        "artix.binary": { "type": "string", "default": "artix", "description": "Path to the artix executable." },
+        "artix.binary": { "type": "string", "default": "artix", "scope": "machine", "description": "Path to the artix executable." },
         "artix.provider": { "type": "string", "default": "", "description": "anthropic, openai, gemini, grok, deepseek, mistral, ollama. API key is read from the environment." },
         "artix.model": { "type": "string", "default": "" }
       }
+    }
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "restrictedConfigurations": [
+        "artix.binary"
+      ]
     }
   },
   "scripts": { "build": "tsc -p .", "package": "vsce package" },

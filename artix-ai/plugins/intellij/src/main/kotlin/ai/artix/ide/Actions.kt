@@ -19,6 +19,19 @@ import com.google.gson.JsonParser
 private fun notify(p: Project, type: NotificationType, msg: String) =
     NotificationGroupManager.getInstance().getNotificationGroup("Artix").createNotification("Artix", msg, type).notify(p)
 
+internal fun resolveArtixBin(p: Project): String {
+    val rawBin = System.getenv("ARTIX_BIN")?.takeIf { it.isNotBlank() } ?: "artix"
+    if (rawBin == "artix") return "artix"
+    val f = java.io.File(rawBin)
+    val canonicalBin = runCatching { f.canonicalPath }.getOrNull()
+    val projectDir = p.basePath?.let { runCatching { java.io.File(it).canonicalPath }.getOrNull() }
+    if (projectDir != null && canonicalBin != null && (canonicalBin == projectDir || canonicalBin.startsWith(projectDir + java.io.File.separator))) {
+        // Refuse untrusted binary residing inside the project workspace
+        return "artix"
+    }
+    return rawBin
+}
+
 /** Runs `artix <sub> --json [--provider/--model from env] <args>`; never autonomous. */
 private fun runArtix(p: Project, sub: String, vararg args: String, onDone: (JsonObject?, String) -> Unit) {
     ProgressManager.getInstance().run(object : Task.Backgroundable(p, "Artix $sub", true) {
@@ -28,7 +41,7 @@ private fun runArtix(p: Project, sub: String, vararg args: String, onDone: (Json
                 env["ARTIX_PROVIDER"]?.takeIf { it.isNotBlank() }?.let { add("--provider"); add(it) }
                 env["ARTIX_MODEL"]?.takeIf { it.isNotBlank() }?.let { add("--model"); add(it) }
             }
-            val cmd = GeneralCommandLine(env["ARTIX_BIN"] ?: "artix", sub, "--json").withParameters(model).withParameters(*args)
+            val cmd = GeneralCommandLine(resolveArtixBin(p), sub, "--json").withParameters(model).withParameters(*args)
                 .withWorkDirectory(p.basePath)
             val out = ExecUtil.execAndGetOutput(cmd, 30 * 60 * 1000)
             val json = runCatching { JsonParser.parseString(out.stdout.trim().lines().last()).asJsonObject }.getOrNull()
