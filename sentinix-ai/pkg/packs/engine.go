@@ -239,7 +239,8 @@ func (e Engine) ScanWithSkipped(ctx context.Context, root string) ([]engines.Fin
 				if m == "" {
 					m = f.Evidence
 				}
-				mHash := sha256.Sum256([]byte(m))
+				normM := engines.NormalizeFindingContent(m)
+				mHash := sha256.Sum256([]byte(normM))
 				occKey := fmt.Sprintf("%s|%x", f.Rule, mHash)
 				f.Occurrence = occMap[occKey]
 				occMap[occKey]++

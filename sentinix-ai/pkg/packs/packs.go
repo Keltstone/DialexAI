@@ -90,7 +90,9 @@ func Parse(body []byte) (*Pack, error) {
 		if r.Multiline {
 			pre = "(?s)"
 		}
-		if r.re, err = regexp.Compile(pre + r.Pattern); err != nil {
+		pat := r.Pattern
+		pat = strings.ReplaceAll(pat, `\(\)`, `\(\s*\)`)
+		if r.re, err = regexp.Compile(pre + pat); err != nil {
 			return nil, fmt.Errorf("%s: %w", r.ID, err)
 		}
 		if r.Unless != "" {
@@ -194,10 +196,11 @@ func (r *Rule) hit(f engines.Finding, text string, line int) (engines.Finding, b
 	if r.unless != nil && r.unless.MatchString(text) {
 		return f, false
 	}
+	text = strings.TrimSpace(text)
 	if len(text) > 80 {
 		text = text[:80]
 	}
-	f.Line, f.Evidence = line, strings.TrimSpace(text)
+	f.Line, f.Evidence = line, text
 	return f, true
 }
 
@@ -219,7 +222,14 @@ func (p *Pack) match(file, content, only string) []engines.Finding {
 			continue
 		}
 		for i, l := range strings.Split(content, "\n") {
-			if m := r.re.FindString(l); m != "" {
+			m := r.re.FindString(l)
+			if m == "" {
+				normL := engines.NormalizeFindingContent(l)
+				if r.re.FindString(normL) != "" {
+					m = l
+				}
+			}
+			if m != "" {
 				if f, ok := r.hit(base, l, i+1); ok {
 					out = append(out, f)
 				}

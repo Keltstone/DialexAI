@@ -55,6 +55,28 @@ type Finding struct {
 	Source     string   `json:"source,omitempty"`
 }
 
+var (
+	reCommentBlock = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	reCommentXML   = regexp.MustCompile(`(?s)<!--.*?-->`)
+	reCommentLine  = regexp.MustCompile(`(?m)(^\s*//.*$|\s+//.*$)`)
+	reWhitespace   = regexp.MustCompile(`[ \t\r\n]+`)
+	reSpacePunct   = regexp.MustCompile(`\s*([=/(,),:\[\]{}<>;])\s*`)
+)
+
+func NormalizeFindingContent(s string) string {
+	s = reCommentBlock.ReplaceAllString(s, "")
+	s = reCommentXML.ReplaceAllString(s, "")
+	s = reCommentLine.ReplaceAllString(s, "")
+	s = reWhitespace.ReplaceAllString(s, " ")
+	s = reSpacePunct.ReplaceAllString(s, "$1")
+	return strings.TrimSpace(s)
+}
+
+func NormalizeFindingPath(p string) string {
+	p = filepath.ToSlash(filepath.Clean(p))
+	return filepath.Base(p)
+}
+
 // Fingerprint ignores the line number so baselines survive unrelated edits.
 // It includes version prefix "v2:" and hashes rule, file, content hash, and occurrence.
 func (f Finding) Fingerprint() string {
@@ -63,14 +85,18 @@ func (f Finding) Fingerprint() string {
 		if b, err := hex.DecodeString(f.Match); err == nil && len(b) == 32 {
 			copy(contentHash[:], b)
 		} else {
-			contentHash = sha256.Sum256([]byte(f.Match))
+			norm := NormalizeFindingContent(f.Match)
+			contentHash = sha256.Sum256([]byte(norm))
 		}
 	} else if f.Match != "" {
-		contentHash = sha256.Sum256([]byte(f.Match))
+		norm := NormalizeFindingContent(f.Match)
+		contentHash = sha256.Sum256([]byte(norm))
 	} else {
-		contentHash = sha256.Sum256([]byte(f.Evidence))
+		norm := NormalizeFindingContent(f.Evidence)
+		contentHash = sha256.Sum256([]byte(norm))
 	}
-	h := sha256.Sum256([]byte(fmt.Sprintf("v2|%s|%s|%x|%d", f.Rule, f.File, contentHash, f.Occurrence)))
+	normFile := NormalizeFindingPath(f.File)
+	h := sha256.Sum256([]byte(fmt.Sprintf("v2|%s|%s|%x|%d", f.Rule, normFile, contentHash, f.Occurrence)))
 	return "v2:" + hex.EncodeToString(h[:8])
 }
 
