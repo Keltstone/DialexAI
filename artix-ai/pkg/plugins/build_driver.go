@@ -2,7 +2,9 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -110,11 +112,17 @@ func (g *GoDriver) LintCmd(rootDir string) string {
 }
 
 func (g *GoDriver) Warm(ctx context.Context, rootDir string) error {
-	cmd := exec.CommandContext(ctx, "go", "mod", "download")
-	cmd.Dir = rootDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("go mod download failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	if policy.IsEnterprise() && !sandbox.IsConfinementAvailable() {
+		return fmt.Errorf("warm refused in enterprise mode: confinement is unavailable")
+	}
+	box := sandbox.NewSandbox(rootDir)
+	res := box.RunWithNetwork(ctx, "go mod download", &sandbox.ExecOptions{
+		Cwd:       rootDir,
+		Timeout:   policy.GetTimeout("go", "warm"),
+		Toolchain: "go",
+	})
+	if !res.Success() {
+		return fmt.Errorf("go mod download failed: %s (%s)", res.Error, res.Stderr)
 	}
 	return nil
 }
@@ -325,16 +333,23 @@ func (gr *GradleDriver) fetchAllTasks(ctx context.Context, rootDir string) ([]st
 	}
 	gr.tasksCacheMu.RUnlock()
 
+	if err := gr.ValidateWrapper(rootDir); err != nil {
+		return nil, err
+	}
+
 	gradlew := gr.gradlewCmd(rootDir)
-	cmd := exec.CommandContext(ctx, "sh", "-c", gradlew+" tasks --all")
-	cmd.Dir = rootDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
+	box := sandbox.NewSandbox(rootDir)
+	res := box.Run(ctx, gradlew+" tasks --all", &sandbox.ExecOptions{
+		Cwd:           rootDir,
+		Toolchain:     "gradle",
+		AllowLoopback: true,
+	})
+	if !res.Success() {
 		return []string{"testDebugUnitTest"}, nil
 	}
 
 	var tasks []string
-	lines := strings.Split(string(out), "\n")
+	lines := strings.Split(res.Stdout, "\n")
 	for _, l := range lines {
 		trimmed := strings.TrimSpace(l)
 		if trimmed == "" || strings.HasPrefix(trimmed, "-") || strings.HasPrefix(trimmed, "*") {
@@ -384,20 +399,83 @@ func (gr *GradleDriver) FormatTargetStatusSummary(passedTasks []string, skippedT
 }
 
 func (gr *GradleDriver) ValidateWrapper(rootDir string) error {
+	propsPath := filepath.Join(rootDir, "gradle", "wrapper", "gradle-wrapper.properties")
+	data, err := os.ReadFile(propsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "#") || strings.HasPrefix(l, "!") {
+			continue
+		}
+		if strings.HasPrefix(l, "distributionUrl=") || strings.HasPrefix(l, "distributionUrl =") {
+			parts := strings.SplitN(l, "=", 2)
+			if len(parts) == 2 {
+				rawURL := strings.TrimSpace(parts[1])
+				rawURL = strings.ReplaceAll(rawURL, `\:`, ":")
+				u, err := url.Parse(rawURL)
+				if err != nil || u.Scheme != "https" {
+					return fmt.Errorf("untrusted gradle wrapper distributionUrl: %s", rawURL)
+				}
+				host := strings.ToLower(u.Hostname())
+				if host != "services.gradle.org" && host != "downloads.gradle-dn.com" &&
+					!strings.HasSuffix(host, ".services.gradle.org") &&
+					!strings.HasSuffix(host, ".downloads.gradle-dn.com") {
+					return fmt.Errorf("untrusted gradle wrapper distributionUrl: %s", rawURL)
+				}
+			}
+		}
+	}
 	return nil
 }
 
 func (gr *GradleDriver) ResolveTasksToWarm(ctx context.Context, rootDir string) []string {
-	return []string{"testClasses"}
+	tasks := []string{"testClasses"}
+	allTasks, err := gr.fetchAllTasks(ctx, rootDir)
+	if err == nil {
+		taskMap := make(map[string]bool)
+		for _, t := range allTasks {
+			taskMap[t] = true
+		}
+		if taskMap["downloadKotlinNativeDistribution"] {
+			tasks = append(tasks, "downloadKotlinNativeDistribution")
+		}
+		if taskMap["iosSimulatorArm64TestClasses"] {
+			tasks = append(tasks, "iosSimulatorArm64TestClasses")
+		} else if taskMap["linkDebugTestIosSimulatorArm64"] {
+			tasks = append(tasks, "linkDebugTestIosSimulatorArm64")
+		} else if taskMap["iosSimulatorArm64Test"] {
+			tasks = append(tasks, "iosSimulatorArm64TestClasses")
+		}
+	}
+	return tasks
 }
 
 func (gr *GradleDriver) Warm(ctx context.Context, rootDir string) error {
+	if policy.IsEnterprise() && !sandbox.IsConfinementAvailable() {
+		return fmt.Errorf("warm refused in enterprise mode: confinement is unavailable")
+	}
+	if err := gr.ValidateWrapper(rootDir); err != nil {
+		return err
+	}
 	gradlew := gr.gradlewCmd(rootDir)
-	cmd := exec.CommandContext(ctx, "sh", "-c", gradlew+" --refresh-dependencies dependencies testClasses")
-	cmd.Dir = rootDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("gradle pre-warm failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	warmTasks := gr.ResolveTasksToWarm(ctx, rootDir)
+	cmdStr := gradlew + " --refresh-dependencies dependencies " + strings.Join(warmTasks, " ")
+
+	box := sandbox.NewSandbox(rootDir)
+	res := box.RunWithNetwork(ctx, cmdStr, &sandbox.ExecOptions{
+		Cwd:           rootDir,
+		Timeout:       policy.GetTimeout("gradle", "warm"),
+		Toolchain:     "gradle",
+		AllowLoopback: true,
+	})
+	if !res.Success() {
+		return fmt.Errorf("gradle pre-warm failed: %s (%s)", res.Error, strings.TrimSpace(res.Stderr))
 	}
 	return nil
 }
@@ -405,24 +483,30 @@ func (gr *GradleDriver) Warm(ctx context.Context, rootDir string) error {
 func (gr *GradleDriver) Compile(ctx context.Context, rootDir string) *sandbox.ExecResult {
 	box := sandbox.NewSandbox(rootDir)
 	return box.Run(ctx, gr.CompileCmd(rootDir), &sandbox.ExecOptions{
-		Cwd:     rootDir,
-		Timeout: policy.GetTimeout("gradle", "compile"),
+		Cwd:           rootDir,
+		Timeout:       policy.GetTimeout("gradle", "compile"),
+		Toolchain:     "gradle",
+		AllowLoopback: true,
 	})
 }
 
 func (gr *GradleDriver) Test(ctx context.Context, rootDir string) *sandbox.ExecResult {
 	box := sandbox.NewSandbox(rootDir)
 	return box.Run(ctx, gr.TestCmd(rootDir), &sandbox.ExecOptions{
-		Cwd:     rootDir,
-		Timeout: policy.GetTimeout("gradle", "test"),
+		Cwd:           rootDir,
+		Timeout:       policy.GetTimeout("gradle", "test"),
+		Toolchain:     "gradle",
+		AllowLoopback: true,
 	})
 }
 
 func (gr *GradleDriver) Lint(ctx context.Context, rootDir string) *sandbox.ExecResult {
 	box := sandbox.NewSandbox(rootDir)
 	return box.Run(ctx, gr.LintCmd(rootDir), &sandbox.ExecOptions{
-		Cwd:     rootDir,
-		Timeout: policy.GetTimeout("gradle", "lint"),
+		Cwd:           rootDir,
+		Timeout:       policy.GetTimeout("gradle", "lint"),
+		Toolchain:     "gradle",
+		AllowLoopback: true,
 	})
 }
 
@@ -473,11 +557,17 @@ func (c *CargoDriver) LintCmd(rootDir string) string {
 }
 
 func (c *CargoDriver) Warm(ctx context.Context, rootDir string) error {
-	cmd := exec.CommandContext(ctx, "cargo", "fetch")
-	cmd.Dir = rootDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("cargo fetch failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	if policy.IsEnterprise() && !sandbox.IsConfinementAvailable() {
+		return fmt.Errorf("warm refused in enterprise mode: confinement is unavailable")
+	}
+	box := sandbox.NewSandbox(rootDir)
+	res := box.RunWithNetwork(ctx, "cargo fetch", &sandbox.ExecOptions{
+		Cwd:       rootDir,
+		Timeout:   policy.GetTimeout("cargo", "warm"),
+		Toolchain: "cargo",
+	})
+	if !res.Success() {
+		return fmt.Errorf("cargo fetch failed: %s (%s)", res.Error, strings.TrimSpace(res.Stderr))
 	}
 	return nil
 }
@@ -554,11 +644,17 @@ func (n *NpmDriver) LintCmd(rootDir string) string {
 }
 
 func (n *NpmDriver) Warm(ctx context.Context, rootDir string) error {
-	cmd := exec.CommandContext(ctx, "npm", "ci")
-	cmd.Dir = rootDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("npm ci failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	if policy.IsEnterprise() && !sandbox.IsConfinementAvailable() {
+		return fmt.Errorf("warm refused in enterprise mode: confinement is unavailable")
+	}
+	box := sandbox.NewSandbox(rootDir)
+	res := box.RunWithNetwork(ctx, "npm ci --ignore-scripts", &sandbox.ExecOptions{
+		Cwd:       rootDir,
+		Timeout:   policy.GetTimeout("npm", "warm"),
+		Toolchain: "npm",
+	})
+	if !res.Success() {
+		return fmt.Errorf("npm ci failed: %s (%s)", res.Error, strings.TrimSpace(res.Stderr))
 	}
 	return nil
 }
@@ -683,7 +779,7 @@ func (s *SwiftPMDriver) CompileCmd(rootDir string) string {
 }
 
 func (s *SwiftPMDriver) TestCmd(rootDir string) string {
-	return "swift test"
+	return "swift test --disable-sandbox"
 }
 
 func (s *SwiftPMDriver) LintCmd(rootDir string) string {
@@ -691,11 +787,17 @@ func (s *SwiftPMDriver) LintCmd(rootDir string) string {
 }
 
 func (s *SwiftPMDriver) Warm(ctx context.Context, rootDir string) error {
-	cmd := exec.CommandContext(ctx, "swift", "package", "resolve")
-	cmd.Dir = rootDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("swift package resolve failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	if policy.IsEnterprise() && !sandbox.IsConfinementAvailable() {
+		return fmt.Errorf("warm refused in enterprise mode: confinement is unavailable")
+	}
+	box := sandbox.NewSandbox(rootDir)
+	res := box.RunWithNetwork(ctx, "swift package resolve", &sandbox.ExecOptions{
+		Cwd:       rootDir,
+		Timeout:   policy.GetTimeout("swiftpm", "warm"),
+		Toolchain: "swiftpm",
+	})
+	if !res.Success() {
+		return fmt.Errorf("swift package resolve failed: %s (%s)", res.Error, strings.TrimSpace(res.Stderr))
 	}
 	return nil
 }
@@ -727,8 +829,9 @@ func (s *SwiftPMDriver) ExecuteOnHost(hostOS string, ctx context.Context, rootDi
 		timeout = policy.GetTimeout("swiftpm", "test")
 	}
 	return box.Run(ctx, cmd, &sandbox.ExecOptions{
-		Cwd:     rootDir,
-		Timeout: timeout,
+		Cwd:       rootDir,
+		Timeout:   timeout,
+		Toolchain: "swiftpm",
 	})
 }
 
@@ -783,17 +886,96 @@ func (x *XcodeDriver) Detect(rootDir string) bool {
 	return len(matchesProj) > 0 || len(matchesWs) > 0
 }
 
-func (x *XcodeDriver) DetectScheme(rootDir string) string {
-	matchesProj, _ := filepath.Glob(filepath.Join(rootDir, "*.xcodeproj"))
-	if len(matchesProj) > 0 {
-		base := filepath.Base(matchesProj[0])
-		return strings.TrimSuffix(base, ".xcodeproj")
+var (
+	cachedSimulatorName string
+	cachedSimulatorMu   sync.Mutex
+)
+
+func detectAvailableSimulator() string {
+	cachedSimulatorMu.Lock()
+	defer cachedSimulatorMu.Unlock()
+	if cachedSimulatorName != "" {
+		return cachedSimulatorName
 	}
+
+	if runtime.GOOS == "darwin" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "xcrun", "simctl", "list", "devices", "available", "-j")
+		out, err := cmd.Output()
+		if err == nil {
+			var simData struct {
+				Devices map[string][]struct {
+					Name        string `json:"name"`
+					IsAvailable bool   `json:"isAvailable"`
+					State       string `json:"state"`
+				} `json:"devices"`
+			}
+			if json.Unmarshal(out, &simData) == nil {
+				for _, devList := range simData.Devices {
+					for _, d := range devList {
+						if d.IsAvailable && strings.HasPrefix(d.Name, "iPhone") {
+							cachedSimulatorName = d.Name
+							return cachedSimulatorName
+						}
+					}
+				}
+			}
+		}
+	}
+
+	cachedSimulatorName = "iPhone 17"
+	return cachedSimulatorName
+}
+
+func (x *XcodeDriver) DetectScheme(rootDir string) string {
+	// 1. Check Package.swift
+	pkgSwift := filepath.Join(rootDir, "Package.swift")
+	if data, err := os.ReadFile(pkgSwift); err == nil {
+		re := regexp.MustCompile(`name:\s*"([^"]+)"`)
+		if m := re.FindStringSubmatch(string(data)); len(m) > 1 {
+			return m[1]
+		}
+	}
+
+	// 2. Query xcodebuild -list -json if available on darwin
+	if runtime.GOOS == "darwin" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "xcodebuild", "-list", "-json")
+		cmd.Dir = rootDir
+		if out, err := cmd.Output(); err == nil {
+			var listData struct {
+				Project struct {
+					Schemes []string `json:"schemes"`
+				} `json:"project"`
+				Workspace struct {
+					Schemes []string `json:"schemes"`
+				} `json:"workspace"`
+			}
+			if json.Unmarshal(out, &listData) == nil {
+				if len(listData.Workspace.Schemes) > 0 {
+					return listData.Workspace.Schemes[0]
+				}
+				if len(listData.Project.Schemes) > 0 {
+					return listData.Project.Schemes[0]
+				}
+			}
+		}
+	}
+
+	// 3. Fallback to globbing project/workspace files
 	matchesWs, _ := filepath.Glob(filepath.Join(rootDir, "*.xcworkspace"))
 	if len(matchesWs) > 0 {
 		base := filepath.Base(matchesWs[0])
 		return strings.TrimSuffix(base, ".xcworkspace")
 	}
+	matchesProj, _ := filepath.Glob(filepath.Join(rootDir, "*.xcodeproj"))
+	if len(matchesProj) > 0 {
+		base := filepath.Base(matchesProj[0])
+		return strings.TrimSuffix(base, ".xcodeproj")
+	}
+
 	return "App"
 }
 
@@ -801,7 +983,8 @@ func (x *XcodeDriver) getDestination() string {
 	if x.Destination != "" {
 		return x.Destination
 	}
-	return "platform=iOS Simulator,name=iPhone 16"
+	sim := detectAvailableSimulator()
+	return fmt.Sprintf("platform=iOS Simulator,name=%s", sim)
 }
 
 func (x *XcodeDriver) derivedDataPath(rootDir string) string {
@@ -809,32 +992,60 @@ func (x *XcodeDriver) derivedDataPath(rootDir string) string {
 }
 
 func (x *XcodeDriver) EnsureDerivedDataExcluded(rootDir string) {
+	gitDir := filepath.Join(rootDir, ".git")
+	if _, err := os.Stat(gitDir); err != nil {
+		return
+	}
+	infoDir := filepath.Join(gitDir, "info")
+	_ = os.MkdirAll(infoDir, 0755)
+	excludePath := filepath.Join(infoDir, "exclude")
+	data, _ := os.ReadFile(excludePath)
+	if !strings.Contains(string(data), ".derivedData") {
+		f, err := os.OpenFile(excludePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			defer f.Close()
+			if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
+				_, _ = f.WriteString("\n")
+			}
+			_, _ = f.WriteString(".derivedData\n")
+		}
+	}
 }
 
 func (x *XcodeDriver) CompileCmd(rootDir string) string {
+	x.EnsureDerivedDataExcluded(rootDir)
 	scheme := x.DetectScheme(rootDir)
-	return fmt.Sprintf("xcodebuild build -scheme %s -destination '%s' -derivedDataPath %s",
+	return fmt.Sprintf("xcodebuild build -scheme %s -destination '%s' -derivedDataPath %s -IDEPackageSupportDisableManifestSandbox=1",
 		scheme, x.getDestination(), x.derivedDataPath(rootDir))
 }
 
 func (x *XcodeDriver) TestCmd(rootDir string) string {
+	x.EnsureDerivedDataExcluded(rootDir)
 	scheme := x.DetectScheme(rootDir)
-	return fmt.Sprintf("xcodebuild test -scheme %s -destination '%s' -derivedDataPath %s",
+	return fmt.Sprintf("xcodebuild test -scheme %s -destination '%s' -derivedDataPath %s -IDEPackageSupportDisableManifestSandbox=1",
 		scheme, x.getDestination(), x.derivedDataPath(rootDir))
 }
 
 func (x *XcodeDriver) LintCmd(rootDir string) string {
+	x.EnsureDerivedDataExcluded(rootDir)
 	scheme := x.DetectScheme(rootDir)
-	return fmt.Sprintf("xcodebuild analyze -scheme %s -destination '%s' -derivedDataPath %s",
+	return fmt.Sprintf("xcodebuild analyze -scheme %s -destination '%s' -derivedDataPath %s -IDEPackageSupportDisableManifestSandbox=1",
 		scheme, x.getDestination(), x.derivedDataPath(rootDir))
 }
 
 func (x *XcodeDriver) Warm(ctx context.Context, rootDir string) error {
-	cmd := exec.CommandContext(ctx, "xcodebuild", "-resolvePackageDependencies")
-	cmd.Dir = rootDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("xcode dependency resolve failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	if policy.IsEnterprise() && !sandbox.IsConfinementAvailable() {
+		return fmt.Errorf("warm refused in enterprise mode: confinement is unavailable")
+	}
+	x.EnsureDerivedDataExcluded(rootDir)
+	box := sandbox.NewSandbox(rootDir)
+	res := box.RunWithNetwork(ctx, "xcodebuild -resolvePackageDependencies", &sandbox.ExecOptions{
+		Cwd:       rootDir,
+		Timeout:   policy.GetTimeout("xcode", "warm"),
+		Toolchain: "xcode",
+	})
+	if !res.Success() {
+		return fmt.Errorf("xcode dependency resolve failed: %s (%s)", res.Error, strings.TrimSpace(res.Stderr))
 	}
 	return nil
 }
@@ -848,6 +1059,7 @@ func (x *XcodeDriver) ExecuteOnHost(hostOS string, ctx context.Context, rootDir,
 			Error:    "SKIPPED_HOST_UNSUPPORTED",
 		}
 	}
+	x.EnsureDerivedDataExcluded(rootDir)
 	box := sandbox.NewSandbox(rootDir)
 	var cmd string
 	var timeout time.Duration
@@ -866,8 +1078,9 @@ func (x *XcodeDriver) ExecuteOnHost(hostOS string, ctx context.Context, rootDir,
 		timeout = policy.GetTimeout("xcode", "test")
 	}
 	return box.Run(ctx, cmd, &sandbox.ExecOptions{
-		Cwd:     rootDir,
-		Timeout: timeout,
+		Cwd:       rootDir,
+		Timeout:   timeout,
+		Toolchain: "xcode",
 	})
 }
 
