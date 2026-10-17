@@ -13,8 +13,8 @@ import (
 
 func TestInlineSuppressionWorkflow_Governance(t *testing.T) {
 	e := setup(t)
-	e.st.UpsertUser("author@example.test", "Author", auth.Developer)
-	e.st.UpsertUser("author+alias@example.test", "Author Alias", auth.Developer)
+	e.st.UpsertUser("author@example.test", "Author", auth.Reviewer)
+	e.st.UpsertUser("author+alias@example.test", "Author Alias", auth.Reviewer)
 	e.st.UpsertUser("reviewer@example.test", "Reviewer", auth.Reviewer)
 
 	// Register project

@@ -192,6 +192,25 @@ func (s *Store) Decide(approvalID, approver string, approve bool) (Approval, err
 			}
 		}
 	}
+	if a.Kind == "ignore" || a.Kind == "sentinix:ignore" {
+		var ignPayload struct {
+			Owner  string `json:"owner"`
+			Author string `json:"author"`
+			Until  int64  `json:"until"`
+		}
+		if json.Unmarshal(a.Payload, &ignPayload) == nil {
+			author := ignPayload.Owner
+			if author == "" {
+				author = ignPayload.Author
+			}
+			if author != "" && (approver == author || isSameActorOrAlias(approver, author)) {
+				return a, fmt.Errorf("author cannot approve their own suppression")
+			}
+			if ignPayload.Until > 0 && ignPayload.Until <= time.Now().Unix() {
+				return a, fmt.Errorf("suppression has expired")
+			}
+		}
+	}
 
 	newStatus := "rejected"
 	if approve {
