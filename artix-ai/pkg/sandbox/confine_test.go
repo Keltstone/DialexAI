@@ -92,7 +92,7 @@ func TestEnterpriseModeBlocksSandboxEscape(t *testing.T) {
 }
 
 func TestR13_6_EnterpriseMode_ViaPolicyIsEnterprise_BlocksSandboxEscape(t *testing.T) {
-	policy.EnforceSignedPolicy()
+	policy.RequireSignedPolicyFlag = "true"
 	defer func() {
 		policy.RequireSignedPolicyFlag = "false"
 		policy.ResetCachedPolicy()
@@ -104,7 +104,7 @@ func TestR13_6_EnterpriseMode_ViaPolicyIsEnterprise_BlocksSandboxEscape(t *testi
 	t.Setenv("ARTIX_SANDBOX", "off")
 
 	if !policy.IsEnterprise() {
-		t.Fatalf("policy.IsEnterprise() must be true when EnforceSignedPolicy() is active")
+		t.Fatalf("policy.IsEnterprise() must be true when RequireSignedPolicyFlag is active")
 	}
 
 	_, iso := confine(t.TempDir(), "echo hi")

@@ -71,8 +71,13 @@ Most AI coding tools operate under the **"Solo Sycophant Problem"**: a single LL
 To build and install the native binary locally:
 ```bash
 cd artix-ai
+# Default local build (autonomous operations refused without compiled or root-owned Ed25519 key):
 go build -ldflags="-s -w" -o /usr/local/bin/artix ./cli/main.go
 go build -ldflags="-s -w" -o /usr/local/bin/artixd ./cmd/artixd/main.go
+
+# Production enterprise release build (compiles in trusted Ed25519 policy public key):
+go build -ldflags="-s -w -X artix/pkg/policy.RequireSignedPolicyFlag=true -X artix/pkg/policy.CompiledTrustedPublicKeyHex=${POLICY_PUBKEY}" -o /usr/local/bin/artix ./cli/main.go
+go build -ldflags="-s -w -X artix/pkg/policy.RequireSignedPolicyFlag=true -X artix/pkg/policy.CompiledTrustedPublicKeyHex=${POLICY_PUBKEY}" -o /usr/local/bin/artixd ./cmd/artixd/main.go
 
 # Verify installation:
 artix version

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"artix/pkg/persona"
+	"artix/pkg/policy"
 	"artix/pkg/repo"
 	"artix/pkg/reviewer"
 	"artix/pkg/sandbox"
@@ -136,7 +137,10 @@ func mustCoder(t *testing.T) *DomainCoder {
 }
 
 func TestAutonomousModeRefusesToCommitUnverifiedChange(t *testing.T) {
-	t.Setenv("ARTIX_ALLOW_AUTONOMOUS", "1")
+	policy.SetActivePolicyForTest(&policy.Policy{
+		AllowAutonomous: true,
+	})
+	defer policy.ResetTestPolicy()
 	coord, _, s, rc, _ := liveFixture(t)
 	s.TestCommands = nil // nothing verifies the change
 	res := coord.Run(context.Background(), s, rc, nil, nil, &LoopOptions{
