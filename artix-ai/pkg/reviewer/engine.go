@@ -284,11 +284,28 @@ func (r *AdversarialReviewer) Evaluate(ctx *ReviewContext) *ReviewVerdict {
 	}
 	if hasNonGo {
 		hasRunner := ctx.SemanticRunnerConfigured && ctx.SemanticRunnerExecuted
-		if !hasRunner {
+		hasRequiredPacks := false
+		if hasRunner {
+			hasTaboo := false
+			hasIntegrity := false
+			for _, pack := range ctx.RulePacksRan {
+				p := strings.ToLower(strings.TrimSpace(pack))
+				if strings.Contains(p, "taboo") || strings.Contains(p, "security") {
+					hasTaboo = true
+				}
+				if strings.Contains(p, "test-integrity") || strings.Contains(p, "integrity") {
+					hasIntegrity = true
+				}
+			}
+			if hasTaboo && hasIntegrity {
+				hasRequiredPacks = true
+			}
+		}
+		if !hasRunner || !hasRequiredPacks {
 			if verdict.Status != StatusRejected {
 				verdict.Approved = false
 				verdict.Status = StatusUnreviewed
-				verdict.BlockingIssues = append(verdict.BlockingIssues, "UNREVIEWED: diff touches non-Go / non-allowlisted files and no semantic rule runner (Konsist/Detekt/Semgrep/SwiftLint) is configured and executed; fail-closed")
+				verdict.BlockingIssues = append(verdict.BlockingIssues, "UNREVIEWED: diff touches non-Go / non-allowlisted files and required semantic rule packs (taboo, test-integrity) did not execute; fail-closed")
 				return verdict
 			}
 		}
