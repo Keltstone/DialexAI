@@ -338,9 +338,25 @@ func scanAll(ctx context.Context, root string, extra []engines.Engine) ([]engine
 	meta := make(map[string]engines.EngineMetadata)
 	occ := map[string]int{}
 
-	for _, e := range engines.Bundled(extra...) {
+	es := engines.Bundled(extra...)
+	// Engines run concurrently but results are folded in bundle order, so output stays deterministic.
+	type scanOut struct {
+		fs  []engines.Finding
+		err error
+	}
+	outs := make([]scanOut, len(es))
+	var wg sync.WaitGroup
+	for i, e := range es {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			outs[i].fs, outs[i].err = e.Scan(ctx, root)
+		}()
+	}
+	wg.Wait()
+	for i, e := range es {
 		m := engines.EngineMeta(e.Name())
-		fs, err := e.Scan(ctx, root)
+		fs, err := outs[i].fs, outs[i].err
 		if err != nil {
 			if errors.Is(err, engines.ErrEngineUnavailable) {
 				m.Status = "ENGINE_UNAVAILABLE"
@@ -363,7 +379,7 @@ func scanAll(ctx context.Context, root string, extra []engines.Engine) ([]engine
 					m = rf.Evidence
 				}
 				h := sha256.Sum256([]byte(m))
-				key := rf.Rule + ":" + hex.EncodeToString(h[:])
+				key := rf.Rule + ":" + rf.File + ":" + hex.EncodeToString(h[:]) // per-path so scoped scans number occurrences like full scans
 				rf.Occurrence = occ[key]
 				occ[key]++
 			}
@@ -450,6 +466,18 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 		return nil, err
 	}
 
+	// Both sides are scanned for the changed paths only; findings elsewhere are identical on both sides
+	// and cancel out of New/Resolved. A diff failure falls back to a full scan.
+	if names, err := r.gitContext(ctx, "diff", "--name-only", "--no-renames", "-z", baseCommit, headSHA); err == nil {
+		scope := map[string]bool{}
+		for _, f := range strings.Split(names, "\x00") {
+			if f = strings.TrimSpace(f); f != "" {
+				scope[f] = true
+			}
+		}
+		ctx = engines.WithScope(ctx, scope)
+	}
+
 	head, err := r.worktree(ctx, "wt-head", headSHA)
 	if err != nil {
 		return nil, err
@@ -459,29 +487,48 @@ func Review(ctx context.Context, ev *githost.Event, user, token string, extra ..
 		return nil, err
 	}
 
-	hf, ran, skipped, gaps, meta, err := scanAll(ctx, head, extra)
-	if err != nil {
-		return nil, err
-	}
 	baseKey := fmt.Sprintf("%s", baseCommit)
+	if sc := engines.ScopeFrom(ctx); sc != nil {
+		ks := make([]string, 0, len(sc))
+		for k := range sc {
+			ks = append(ks, k)
+		}
+		sort.Strings(ks)
+		sh := sha256.Sum256([]byte(strings.Join(ks, "\x00")))
+		baseKey += ":scope=" + hex.EncodeToString(sh[:8])
+	}
 	for _, e := range engines.Bundled(extra...) {
 		m := engines.EngineMeta(e.Name())
 		baseKey += fmt.Sprintf(":%s@%s(%s)", m.Name, m.Version, m.RulesetHash)
 	}
 
+
+	// Base scan is independent of the head scan: start it now unless cached.
 	var bf []engines.Finding
+	var baseErr error
+	baseDone := make(chan struct{})
 	if cached, ok := GetBaseCache(baseKey); ok {
 		bf = cached
 		if OnBaseCacheHit != nil {
 			OnBaseCacheHit()
 		}
+		close(baseDone)
 	} else {
-		var err error
-		bf, _, _, _, _, err = scanAll(ctx, base, extra)
-		if err != nil {
-			return nil, err
-		}
-		SetBaseCache(baseKey, bf)
+		go func() {
+			defer close(baseDone)
+			bf, _, _, _, _, baseErr = scanAll(ctx, base, extra)
+			if baseErr == nil {
+				SetBaseCache(baseKey, bf)
+			}
+		}()
+	}
+	hf, ran, skipped, gaps, meta, err := scanAll(ctx, head, extra)
+	<-baseDone
+	if err != nil {
+		return nil, err
+	}
+	if baseErr != nil {
+		return nil, baseErr
 	}
 
 	// detect renames with git diff -M so a pure rename is not new

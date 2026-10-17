@@ -136,6 +136,25 @@ func resolveSemgrepConfig() (string, bool) {
 	return "", false
 }
 
+var versionCache sync.Map // bin -> version; `semgrep --version` costs ~0.8s and EngineMeta runs several times per PR
+// ponytail: cached for process life (key includes resolved path); a binary upgraded in place needs a restart.
+
+func binVersion(bin string, arg string) string {
+	path, err := exec.LookPath(bin)
+	if err != nil {
+		return "unknown"
+	}
+	if v, ok := versionCache.Load(path); ok {
+		return v.(string)
+	}
+	ver := "unknown"
+	if out, err := exec.Command(path, arg).Output(); err == nil {
+		ver = strings.TrimSpace(string(out))
+	}
+	versionCache.Store(path, ver)
+	return ver
+}
+
 func EngineMeta(name string) EngineMetadata {
 	switch name {
 	case "secrets":
@@ -155,22 +174,13 @@ func EngineMeta(name string) EngineMetadata {
 		} else {
 			hashStr = "rules"
 		}
-		ver := "unknown"
-		if out, err := exec.Command("semgrep", "--version").Output(); err == nil {
-			ver = strings.TrimSpace(string(out))
-		}
+		ver := binVersion("semgrep", "--version")
 		return EngineMetadata{Name: "semgrep", Version: ver, RulesetHash: hashStr, Status: "active"}
 	case "gitleaks":
-		ver := "unknown"
-		if out, err := exec.Command("gitleaks", "version").Output(); err == nil {
-			ver = strings.TrimSpace(string(out))
-		}
+		ver := binVersion("gitleaks", "version")
 		return EngineMetadata{Name: "gitleaks", Version: ver, RulesetHash: "default", Status: "active"}
 	case "osv-scanner":
-		ver := "unknown"
-		if out, err := exec.Command("osv-scanner", "--version").Output(); err == nil {
-			ver = strings.TrimSpace(string(out))
-		}
+		ver := binVersion("osv-scanner", "--version")
 		return EngineMetadata{Name: "osv-scanner", Version: ver, RulesetHash: "default", Status: "active"}
 	default:
 		return EngineMetadata{Name: name, Version: "1.0.0", RulesetHash: "default", Status: "active"}
@@ -231,7 +241,7 @@ func (e External) Scan(ctx context.Context, root string) ([]Finding, error) {
 	return e.ScanContext(ctx, root)
 }
 
-func copyTreeForScan(src, dst string) error {
+func copyTreeForScan(src, dst string, keep func(rel string) bool) error {
 	inRepoIgnores := map[string]bool{
 		".semgrepignore":   true,
 		".gitleaks.toml":   true,
@@ -277,6 +287,9 @@ func copyTreeForScan(src, dst string) error {
 		if inRepoIgnores[fi.Name()] {
 			return nil
 		}
+		if keep != nil && !keep(filepath.ToSlash(rel)) {
+			return nil
+		}
 		if fi.Mode()&os.ModeSymlink != 0 {
 			linkTarget, err := os.Readlink(p)
 			if err != nil {
@@ -296,6 +309,37 @@ func copyTreeForScan(src, dst string) error {
 		err = firstErr
 	}
 	return err
+}
+
+// isDependencyFile reports whether osv-scanner could read this file. Deliberately broad.
+// ponytail: filename allow-list; an ecosystem missing here silently loses SCA coverage, so extend it when osv-scanner gains one.
+func isDependencyFile(rel string) bool {
+	b := rel[strings.LastIndex(rel, "/")+1:]
+	switch b {
+	case "package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "go.mod", "go.sum",
+		"pom.xml", "Pipfile", "Pipfile.lock", "pyproject.toml", "Gemfile", "composer.json", "deps.json", "packages.lock.json",
+		"Package.resolved", "Podfile.lock", "pubspec.yaml", "conanfile.txt", "conanfile.py", "mix.exs", "renv.lock", "bun.lockb":
+		return true
+	}
+	for _, suf := range []string{".gradle", ".gradle.kts", ".lock", ".lockfile", ".toml", ".csproj", ".cdx.json", ".spdx.json", ".cdx.xml", ".spdx"} {
+		if strings.HasSuffix(b, suf) {
+			return true
+		}
+	}
+	return strings.HasPrefix(b, "requirements") && strings.HasSuffix(b, ".txt")
+}
+
+type scopeKey struct{}
+
+// WithScope limits per-file engines (semgrep, gitleaks) to these repo-relative paths.
+// osv-scanner always sees the whole tree: manifests/lockfiles are cross-file. A nil set means no scoping.
+func WithScope(ctx context.Context, files map[string]bool) context.Context {
+	return context.WithValue(ctx, scopeKey{}, files)
+}
+
+func ScopeFrom(ctx context.Context) map[string]bool {
+	m, _ := ctx.Value(scopeKey{}).(map[string]bool)
+	return m
 }
 
 type copyJob struct {
@@ -326,13 +370,23 @@ func (e External) ScanContext(ctx context.Context, root string) ([]Finding, erro
 		return nil, fmt.Errorf("%w: %s has no configuration", ErrEngineUnavailable, e.Bin)
 	}
 
+	scope := ScopeFrom(ctx)
+	var keep func(string) bool
+	if e.Bin == "osv-scanner" {
+		keep = isDependencyFile // manifests/lockfiles are cross-file: all of them, not just the changed ones
+	} else if scope != nil {
+		if len(scope) == 0 {
+			return nil, nil // nothing changed: nothing for a per-file engine to scan
+		}
+		keep = func(rel string) bool { return scope[rel] }
+	}
 	isoDir, err := os.MkdirTemp("", "sentinix-isolated-*")
 	if err != nil {
 		return nil, err
 	}
 	defer removeAllParallel(isoDir)
 
-	if err := copyTreeForScan(root, isoDir); err != nil {
+	if err := copyTreeForScan(root, isoDir, keep); err != nil {
 		return nil, err
 	}
 

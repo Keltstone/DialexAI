@@ -21,7 +21,7 @@ func TestCopyTreeForScan_FailsClosedOnUnreadableFile(t *testing.T) {
 	}
 	defer os.Chmod(unreadable, 0o600)
 
-	err := copyTreeForScan(src, dst)
+	err := copyTreeForScan(src, dst, nil)
 	if err == nil {
 		t.Fatal("expected copyTreeForScan to fail closed on unreadable file, but got nil")
 	}
