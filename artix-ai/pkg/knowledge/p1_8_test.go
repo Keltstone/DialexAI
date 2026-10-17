@@ -31,8 +31,8 @@ func TestP1_8_RatifyFailsClosedWhenCodeownersAbsentOrEmpty(t *testing.T) {
 	if err := rule.Ratify("mallory"); err == nil {
 		t.Fatalf("SECURITY FLAW: Rule.Ratify('mallory') succeeded with absent CODEOWNERS!")
 	}
-	if err := rule.Approve("mallory"); err == nil {
-		t.Fatalf("SECURITY FLAW: Rule.Approve('mallory') succeeded with absent CODEOWNERS!")
+	if err := rule.Ratify("mallory", []string{}); err == nil {
+		t.Fatalf("SECURITY FLAW: Rule.Ratify('mallory') succeeded with empty CODEOWNERS!")
 	}
 }
 
