@@ -76,6 +76,11 @@ func (a *App) Handler() http.Handler {
 	a.webhookSem = make(chan struct{}, 32)
 	if a.Store != nil {
 		a.Store.ReclaimStaleJobs()
+		go func() {
+			for range time.Tick(30 * time.Second) {
+				a.Store.ReclaimStaleJobs()
+			}
+		}()
 		for i := 0; i < a.Workers; i++ {
 			go func() {
 				for {
@@ -84,12 +89,26 @@ func (a *App) Handler() http.Handler {
 						time.Sleep(50 * time.Millisecond)
 						continue
 					}
+					hbDone := make(chan struct{})
+					go func() { // heartbeat: a dead replica stops renewing and its job gets reclaimed
+						t := time.NewTicker(30 * time.Second)
+						defer t.Stop()
+						for {
+							select {
+							case <-hbDone:
+								return
+							case <-t.C:
+								a.Store.ExtendJobLease(jobID)
+							}
+						}
+					}()
 					if h, ok := a.Hosts[hostName]; ok {
 						var ev githost.Event
 						if json.Unmarshal([]byte(payload), &ev) == nil {
 							a.review(context.Background(), h, &ev)
 						}
 					}
+					close(hbDone)
 					a.Store.FinishJob(jobID)
 				}
 			}()
