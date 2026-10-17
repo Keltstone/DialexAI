@@ -277,7 +277,7 @@ func TestG8_CLI_Review_JSON_Approved_Rejected_Unreviewed(t *testing.T) {
 	stdoutStr := strings.TrimSpace(stdout.String())
 	lines := strings.Split(stdoutStr, "\n")
 	if len(lines) != 1 || stdoutStr == "" {
-		t.Fatalf("expected exactly 1 JSON line on stdout for review --json, got: %q (code %d)", stdoutStr, code)
+		t.Fatalf("expected exactly 1 JSON line on stdout for review --json, got: %q (code %d, stderr: %q)", stdoutStr, code, stderr.String())
 	}
 
 	var revRes map[string]any

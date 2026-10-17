@@ -215,3 +215,90 @@ func TestLSPServer_CancelRequest(t *testing.T) {
 	_ = clientInW.Close()
 	_ = serverOutW.Close()
 }
+
+func TestP2_LSP_ExecuteCommandAndGovernance(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "artix-lsp-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	clientInR, clientInW := io.Pipe()
+	serverOutR, serverOutW := io.Pipe()
+	bufReader := bufio.NewReader(serverOutR)
+
+	server := NewServer(tempDir, clientInR, serverOutW)
+	go func() { _ = server.Serve() }()
+
+	// 1. Initialize: assert executeCommandProvider advertises commands
+	initReq := LSPRequest{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "initialize",
+		Params:  json.RawMessage(`{}`),
+	}
+	_, _ = clientInW.Write(formatLSPMessage(initReq))
+	resp, err := readLSPMessage(bufReader)
+	if err != nil {
+		t.Fatalf("failed to read initialize response: %v", err)
+	}
+	result, _ := resp["result"].(map[string]any)
+	caps, _ := result["capabilities"].(map[string]any)
+	cmdProv, _ := caps["executeCommandProvider"].(map[string]any)
+	if cmdProv == nil {
+		t.Fatalf("SECURITY/LSP FLAW: executeCommandProvider not advertised in capabilities!")
+	}
+	cmds, _ := cmdProv["commands"].([]any)
+	foundPlan, foundDelib, foundFix := false, false, false
+	for _, c := range cmds {
+		switch c {
+		case "artix.plan":
+			foundPlan = true
+		case "artix.deliberate":
+			foundDelib = true
+		case "artix.fixTaboo":
+			foundFix = true
+		}
+	}
+	if !foundPlan || !foundDelib || !foundFix {
+		t.Fatalf("missing advertised commands in capabilities: %v", cmds)
+	}
+
+	// 2. Execute command artix.deliberate through the gate
+	execReq := LSPRequest{
+		JSONRPC: "2.0",
+		ID:      2,
+		Method:  "workspace/executeCommand",
+		Params:  json.RawMessage(`{"command": "artix.deliberate", "arguments": []}`),
+	}
+	_, _ = clientInW.Write(formatLSPMessage(execReq))
+	execResp, err := readLSPMessage(bufReader)
+	if err != nil {
+		t.Fatalf("failed to read executeCommand response: %v", err)
+	}
+	execRes, _ := execResp["result"].(map[string]any)
+	if execRes == nil || execRes["ok"] != true || execRes["governed"] != true {
+		t.Fatalf("expected governed execution result, got: %+v", execResp)
+	}
+
+	// 3. Unknown command returns -32601
+	unknownReq := LSPRequest{
+		JSONRPC: "2.0",
+		ID:      3,
+		Method:  "workspace/executeCommand",
+		Params:  json.RawMessage(`{"command": "artix.unknown", "arguments": []}`),
+	}
+	_, _ = clientInW.Write(formatLSPMessage(unknownReq))
+	unkResp, err := readLSPMessage(bufReader)
+	if err != nil {
+		t.Fatalf("failed to read unknown command response: %v", err)
+	}
+	errObj, _ := unkResp["error"].(map[string]any)
+	if errObj == nil || errObj["code"].(float64) != -32601 {
+		t.Fatalf("expected -32601 error for unknown command, got: %+v", unkResp)
+	}
+
+	_ = clientInW.Close()
+	_ = serverOutW.Close()
+}
+
