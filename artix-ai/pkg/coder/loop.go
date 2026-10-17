@@ -748,6 +748,7 @@ func (c *ConvergenceCoordinator) Run(
 		var analyzerFindings []reviewer.AnalyzerFinding
 		hasAnalyzers := opts != nil && len(opts.AnalyzerCommands) > 0
 		analyzersRanSuccessfully := false
+		var rulePacksRan []string
 		if hasAnalyzers {
 			findings, execResults := reviewer.RunAnalyzers(ctx, repoCtx.RootDir, c.sandbox, opts.AnalyzerCommands)
 			analyzerFindings = findings
@@ -756,6 +757,13 @@ func (c *ConvergenceCoordinator) Run(
 			for i, cmd := range opts.AnalyzerCommands {
 				if policy.IsAllowedSemanticRunner(cmd) {
 					hasRealTool = true
+					cmdLower := strings.ToLower(cmd)
+					if strings.Contains(cmdLower, "taboo") || strings.Contains(cmdLower, "security") || strings.Contains(cmdLower, "semgrep") || strings.Contains(cmdLower, "detekt") || strings.Contains(cmdLower, "konsist") || strings.Contains(cmdLower, "swiftlint") {
+						rulePacksRan = append(rulePacksRan, "taboo")
+					}
+					if strings.Contains(cmdLower, "test") || strings.Contains(cmdLower, "integrity") || strings.Contains(cmdLower, "konsist") || strings.Contains(cmdLower, "detekt") || strings.Contains(cmdLower, "semgrep") {
+						rulePacksRan = append(rulePacksRan, "test-integrity")
+					}
 				}
 				if i < len(execResults) && !execResults[i].Success() {
 					allSuccess = false
@@ -810,6 +818,7 @@ func (c *ConvergenceCoordinator) Run(
 			RequiresTestGates:        initialTestCount > 0,
 			SemanticRunnerConfigured: hasAnalyzers,
 			SemanticRunnerExecuted:   analyzersRanSuccessfully,
+			RulePacksRan:             rulePacksRan,
 		}
 		verdict := c.reviewer.Evaluate(rCtx)
 		res.FinalVerdict = verdict

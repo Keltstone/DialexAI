@@ -87,11 +87,79 @@ func stripStringLiterals(s string) string {
 	return reStringLit.ReplaceAllString(s, `""`)
 }
 
-var reTautology1 = regexp.MustCompile(`(?:^|[^a-zA-Z0-9_&|^+\-*/%])1\s*==\s*1\b|(?:^|[^a-zA-Z0-9_&|^+\-*/%])1\s*!=\s*1\b|\bassert\.True\(t,\s*true\)|\bassert\.False\(t,\s*false\)|\bassert\.Equal\(t,\s*1,\s*1\)|\bif\s+!true\b`)
-var reImpossibleLen = regexp.MustCompile(`(?:len|size)\([^)]*\)\s*(?:<\s*0|<=\s*-1|==\s*-1|>\s*1\s*<<\s*6[0-9])`)
+var (
+	reTautology1       = regexp.MustCompile(`(?:^|[^a-zA-Z0-9_&|^+\-*/%])1\s*==\s*1\b|(?:^|[^a-zA-Z0-9_&|^+\-*/%])1\s*!=\s*1\b|\bassert\.True\(t,\s*true\)|\bassert\.False\(t,\s*false\)|\bassert\.Equal\(t,\s*1,\s*1\)|\bif\s+!true\b`)
+	reImpossibleLen    = regexp.MustCompile(`(?:len|size)\([^)]*\)\s*(?:<\s*0|<=\s*-1|==\s*-1|>\s*1\s*<<\s*6[0-9])`)
+	reTautologyLiteral = regexp.MustCompile(`(?i)\b(assertTrue|XCTAssertTrue|require\.True|assert\.True)\s*\(\s*(?:t,\s*)?true\s*\)|\b(assertFalse|XCTAssertFalse|require\.False|assert\.False)\s*\(\s*(?:t,\s*)?false\s*\)|\bassert\s+True\b|\bassert\s+False\b|\bassert\s+1\s*==\s*1\b|\bassert\s+true\b`)
+
+	reAssertFunc = regexp.MustCompile(`\b(assertEquals|assertNotEquals|assertSame|XCTAssertEqual|XCTAssertNotEqual|XCTAssertIdentical)\s*\(([^)]+)\)`)
+	reExpectFunc = regexp.MustCompile(`\bexpect\s*\(([^)]+)\)\s*\.(toEqual|toBe|toStrictEqual)\s*\(([^)]+)\)`)
+	reGoTestify  = regexp.MustCompile(`\b(require|assert)\.(Equal|NotEqual|Same|EqualValues)\s*\(([^)]+)\)`)
+	rePyAssert   = regexp.MustCompile(`\bassert\s+([^=]+)==\s*([^=\n;]+)`)
+	rePySelf     = regexp.MustCompile(`\bself\.(assertEqual|assertNotEqual)\s*\(([^)]+)\)`)
+)
+
+func matchSameSideAssert(s string) bool {
+	if m := reAssertFunc.FindStringSubmatch(s); len(m) > 2 {
+		parts := strings.Split(m[2], ",")
+		if len(parts) >= 2 {
+			arg1 := strings.TrimSpace(parts[0])
+			arg2 := strings.TrimSpace(parts[1])
+			if arg1 != "" && arg1 == arg2 {
+				return true
+			}
+		}
+	}
+	if m := reExpectFunc.FindStringSubmatch(s); len(m) > 3 {
+		arg1 := strings.TrimSpace(m[1])
+		arg2 := strings.TrimSpace(m[3])
+		if arg1 != "" && arg1 == arg2 {
+			return true
+		}
+	}
+	if m := reGoTestify.FindStringSubmatch(s); len(m) > 3 {
+		parts := strings.Split(m[3], ",")
+		if len(parts) == 3 {
+			arg1 := strings.TrimSpace(parts[1])
+			arg2 := strings.TrimSpace(parts[2])
+			if arg1 != "" && arg1 == arg2 {
+				return true
+			}
+		} else if len(parts) == 2 {
+			arg1 := strings.TrimSpace(parts[0])
+			arg2 := strings.TrimSpace(parts[1])
+			if arg1 != "" && arg1 == arg2 {
+				return true
+			}
+		}
+	}
+	if m := rePyAssert.FindStringSubmatch(s); len(m) > 2 {
+		arg1 := strings.TrimSpace(m[1])
+		arg2 := strings.TrimSpace(m[2])
+		if arg1 != "" && arg1 == arg2 {
+			return true
+		}
+	}
+	if m := rePySelf.FindStringSubmatch(s); len(m) > 2 {
+		parts := strings.Split(m[2], ",")
+		if len(parts) >= 2 {
+			arg1 := strings.TrimSpace(parts[0])
+			arg2 := strings.TrimSpace(parts[1])
+			if arg1 != "" && arg1 == arg2 {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func matchedTautology(s string) bool {
-	return reTautology1.MatchString(s)
+	return reTautology1.MatchString(s) || reTautologyLiteral.MatchString(s) || matchSameSideAssert(s)
+}
+
+func isTestFileName(f string) bool {
+	lower := strings.ToLower(f)
+	return strings.HasSuffix(lower, "_test.go") || strings.Contains(lower, "test")
 }
 
 // CheckTestIntegrity ensures tests are not deleted, assertions gutted, or test skipping introduced.
@@ -102,16 +170,19 @@ func CheckTestIntegrity(diff string) []string {
 	var deletedAssertions int
 	var addedAssertions int
 
+	currentFile := ""
 	for i, line := range lines {
-		// Ignore diff header lines
-		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
+		if strings.HasPrefix(line, "+++ b/") {
+			currentFile = strings.TrimPrefix(line, "+++ b/")
+			continue
+		} else if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
 			continue
 		}
 
 		// Detect test deletions
 		if strings.HasPrefix(line, "-") {
 			trimmed := strings.TrimSpace(line[1:])
-			if strings.HasPrefix(trimmed, "func Test") {
+			if strings.HasPrefix(trimmed, "func Test") || strings.HasPrefix(trimmed, "func test") {
 				violations = append(violations, fmt.Sprintf("test integrity violation: test function deletion detected: %s", trimmed))
 			} else if strings.HasPrefix(trimmed, "@Test") || strings.HasPrefix(trimmed, "fun test") {
 				violations = append(violations, fmt.Sprintf("test integrity violation: test method deletion detected: %s", trimmed))
@@ -130,6 +201,10 @@ func CheckTestIntegrity(diff string) []string {
 		// Detect test skips & gutted bodies
 		if strings.HasPrefix(line, "+") {
 			trimmed := strings.TrimSpace(line[1:])
+			if isTestFileName(currentFile) && (strings.Contains(trimmed, "//go:build ignore") || strings.Contains(trimmed, "// +build ignore")) {
+				violations = append(violations, fmt.Sprintf("test integrity violation: test file %s marked with build ignore", currentFile))
+			}
+
 			// Exclude comments
 			if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "#") {
 				continue
@@ -144,6 +219,8 @@ func CheckTestIntegrity(diff string) []string {
 				violations = append(violations, "test integrity violation: test skipping is forbidden (.skip/xit/xtest/xdescribe)")
 			} else if strings.Contains(trimmed, "@pytest.mark.skip") || strings.Contains(trimmed, "@unittest.skip") {
 				violations = append(violations, "test integrity violation: test skipping is forbidden (@skip)")
+			} else if strings.Contains(trimmed, "throw XCTSkip") || strings.Contains(trimmed, "XCTSkip(") || strings.Contains(trimmed, "XCTSkip") {
+				violations = append(violations, "test integrity violation: Swift test skipping is forbidden (XCTSkip)")
 			}
 
 			// Detect gutted test function bodies e.g. func TestFoo(t *testing.T) {} or func TestFoo(t *testing.T) { return }
@@ -1361,6 +1438,35 @@ func inspectMultiLanguageSemantics(code string, taboos []string) []string {
 	}
 	if strings.Contains(diffLower, "require(") && (strings.Contains(diffLower, `"child"`) || strings.Contains(diffLower, `'child'`)) && (strings.Contains(diffLower, `"_process"`) || strings.Contains(diffLower, `'_process'`)) {
 		violations = append(violations, "Security Taboo: forbidden arbitrary command execution in TypeScript/JavaScript (child_process require concatenation)")
+	}
+
+	// Kotlin & Swift secret reads
+	if strings.Contains(diffLower, "system.getenv") {
+		violations = append(violations, "Security Taboo: forbidden environment secret access (System.getenv)")
+	}
+	if strings.Contains(diffLower, ".ssh") || strings.Contains(diffLower, "id_rsa") || strings.Contains(diffLower, "id_ed25519") {
+		violations = append(violations, "Security Taboo: forbidden SSH key access (~/.ssh)")
+	}
+	if strings.Contains(diffLower, "processinfo.processinfo.environment") || strings.Contains(diffLower, "processinfo().environment") {
+		violations = append(violations, "Security Taboo: forbidden environment secret access (ProcessInfo environment)")
+	}
+
+	// Kotlin & Swift network exfil
+	if strings.Contains(diffLower, ".openstream()") || strings.Contains(diffLower, ".openstream") {
+		violations = append(violations, "Security Taboo: forbidden network exfiltration (URL.openStream)")
+	}
+	if strings.Contains(diffLower, "urlsession") {
+		violations = append(violations, "Security Taboo: forbidden network exfiltration (URLSession)")
+	}
+
+	// Native process execution: posix_spawn
+	if strings.Contains(diffLower, "posix_spawn") {
+		violations = append(violations, "Security Taboo: forbidden process execution (posix_spawn)")
+	}
+
+	// Swift Package Plugin
+	if strings.Contains(diffLower, ".plugin(") || strings.Contains(diffLower, "packageplugin") {
+		violations = append(violations, "Security Taboo: forbidden Package.swift plugin capability execution")
 	}
 
 	for _, taboo := range tabooListCanonical(taboos) {
