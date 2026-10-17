@@ -1,6 +1,9 @@
 package mcp
 
-import "fmt"
+import (
+	"encoding/base64"
+	"fmt"
+)
 
 // ConnectorConfig configures external MCP tool connectors.
 type ConnectorConfig struct {
@@ -15,8 +18,9 @@ type ConnectorConfig struct {
 // JiraConnector creates a client configured for Jira MCP server.
 func JiraConnector(host, email, apiToken string) Client {
 	endpoint := fmt.Sprintf("https://%s/rest/mcp/v1", host)
+	auth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", email, apiToken)))
 	headers := map[string]string{
-		"Authorization": fmt.Sprintf("Basic %s:%s", email, apiToken),
+		"Authorization": "Basic " + auth,
 	}
 	return NewHTTPClient(endpoint, headers)
 }

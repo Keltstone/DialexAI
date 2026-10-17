@@ -5,6 +5,8 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	"artix/pkg/audit"
 )
 
 // StreamEventType defines the category of real-time lifecycle event.
@@ -59,6 +61,12 @@ func (e *StreamEmitter) Emit(event StreamEvent) {
 	}
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now().UTC()
+	}
+	event.Message = audit.RedactSecrets(event.Message)
+	if event.Payload != nil {
+		if redacted, ok := audit.RedactValue(event.Payload).(map[string]any); ok {
+			event.Payload = redacted
+		}
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()

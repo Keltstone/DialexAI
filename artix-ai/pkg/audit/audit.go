@@ -23,9 +23,10 @@ import (
 
 var (
 	bearerRegex    = regexp.MustCompile(`(?i)\b(bearer\s+)[A-Za-z0-9_\-\.]{16,}`)
-	githubPatRegex = regexp.MustCompile(`\b(gh[pous]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{40,})\b`)
+	githubPatRegex = regexp.MustCompile(`\b(gh[pous]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{22,})\b`)
 	kvSecretRegex  = regexp.MustCompile(`(?i)\b(api[_-]?key|secret|password|access[_-]?token|auth[_-]?token)(\s*[:=]\s*["']?)[A-Za-z0-9_\-\.]{8,}(["']?)`)
 	privKeyRegex   = regexp.MustCompile(`-----BEGIN [A-Z ]+ PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+ PRIVATE KEY-----`)
+	awsKeyRegex    = regexp.MustCompile(`\b(AKIA[0-9A-Z]{16})\b`)
 )
 
 // RedactSecrets replaces sensitive tokens, API keys, passwords, and private keys with redaction markers.
@@ -36,8 +37,14 @@ func RedactSecrets(input string) string {
 	out := privKeyRegex.ReplaceAllString(input, "[REDACTED PRIVATE KEY]")
 	out = bearerRegex.ReplaceAllString(out, "$1[REDACTED]")
 	out = githubPatRegex.ReplaceAllString(out, "[REDACTED TOKEN]")
+	out = awsKeyRegex.ReplaceAllString(out, "[REDACTED AWS KEY]")
 	out = kvSecretRegex.ReplaceAllString(out, "$1$2[REDACTED]$3")
 	return out
+}
+
+// RedactValue recursively redacts secrets in strings, maps, and slices.
+func RedactValue(val any) any {
+	return redactValue(val)
 }
 
 func redactValue(val any) any {
