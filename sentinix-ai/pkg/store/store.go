@@ -79,6 +79,7 @@ func Open(dsn string) (*Store, error) {
 		"alter table projects add column enforcement text not null default 'block'",
 		"alter table projects add column fail_on text not null default ''",
 		"alter table durable_queue add column lease_until bigint not null default 0",
+		"alter table users add column revoked_before bigint not null default 0",
 		"alter table audit add column seq bigint not null default 0",
 		"alter table audit add column source text not null default ''",
 		"alter table audit add column before_val text not null default ''",

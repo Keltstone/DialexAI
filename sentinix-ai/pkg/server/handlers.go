@@ -1044,3 +1044,25 @@ func (a *App) ticket(w http.ResponseWriter, r *http.Request) {
 	a.audit_(r, "ticket:"+in.Tracker, f.ID)
 	writeJSON(w, map[string]string{"ticket": in.Tracker + ":" + key})
 }
+
+// revokeUser ends every session a user holds (deprovisioning). It does not need a second approver:
+// it only removes access, and the audit log records who did it.
+func (a *App) revokeUser(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Email string }
+	if !readJSON(w, r, &in) {
+		return
+	}
+	us, _ := a.Store.Users()
+	for _, u := range us {
+		if u.Email == in.Email && u.Role == auth.Owner && who(r).Role != auth.Owner {
+			http.Error(w, "only an owner can revoke an owner", 403)
+			return
+		}
+	}
+	if err := a.Store.RevokeSessions(in.Email); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	a.audit_(r, "session:revoke", in.Email)
+	w.WriteHeader(http.StatusNoContent)
+}

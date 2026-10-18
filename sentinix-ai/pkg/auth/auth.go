@@ -66,6 +66,7 @@ const cookie = "sx_session"
 type claims struct {
 	Email string `json:"e"`
 	Exp   int64  `json:"x"`
+	Iat   int64  `json:"i,omitempty"` // issue time, unix ms; lets the server revoke sessions issued before a cutoff
 }
 
 func (s Sessions) sign(p string) string {
@@ -75,7 +76,7 @@ func (s Sessions) sign(p string) string {
 }
 
 func (s Sessions) Issue(w http.ResponseWriter, email string, ttl time.Duration) {
-	b, _ := json.Marshal(claims{email, time.Now().Add(ttl).Unix()})
+	b, _ := json.Marshal(claims{email, time.Now().Add(ttl).Unix(), time.Now().UnixMilli()})
 	p := base64.RawURLEncoding.EncodeToString(b)
 	http.SetCookie(w, &http.Cookie{Name: cookie, Value: p + "." + s.sign(p), Path: "/", HttpOnly: true,
 		Secure: s.Secure, SameSite: http.SameSiteLaxMode, MaxAge: int(ttl.Seconds())})
@@ -86,20 +87,26 @@ func (s Sessions) Clear(w http.ResponseWriter) {
 }
 
 func (s Sessions) Email(r *http.Request) (string, bool) {
+	e, _, ok := s.Issued(r)
+	return e, ok
+}
+
+// Issued returns the session's email and issue time (unix ms; 0 for cookies minted before revocation support).
+func (s Sessions) Issued(r *http.Request) (string, int64, bool) {
 	c, err := r.Cookie(cookie)
 	if err != nil {
-		return "", false
+		return "", 0, false
 	}
 	p, mac, ok := strings.Cut(c.Value, ".")
 	if !ok || subtle.ConstantTimeCompare([]byte(mac), []byte(s.sign(p))) != 1 {
-		return "", false
+		return "", 0, false
 	}
 	b, err := base64.RawURLEncoding.DecodeString(p)
 	var cl claims
 	if err != nil || json.Unmarshal(b, &cl) != nil || cl.Exp < time.Now().Unix() || cl.Email == "" {
-		return "", false
+		return "", 0, false
 	}
-	return cl.Email, true
+	return cl.Email, cl.Iat, true
 }
 
 // OIDC does the authorization-code login. OnLogin maps the verified identity to a stored user.

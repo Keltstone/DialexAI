@@ -476,6 +476,19 @@ func (s *Store) Approvals(status string) ([]Approval, error) {
 
 type User struct {
 	ID, Email, Name, Role string
+	RevokedBefore         int64 // sessions issued before this (unix ms) are dead
+}
+
+// RevokeSessions kills every session the user holds now. They can sign in again unless the IdP stops them.
+func (s *Store) RevokeSessions(email string) error {
+	r, err := s.db.Exec("update users set revoked_before=$2 where email=$1", email, time.Now().UnixMilli()+1)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // UpsertUser creates the user with role if new; an existing user keeps their role.
@@ -494,7 +507,7 @@ func (s *Store) SetRole(email, role string) error {
 }
 
 func (s *Store) Users() ([]User, error) {
-	rows, err := s.db.Query("select id,email,name,role from users order by email")
+	rows, err := s.db.Query("select id,email,name,role,revoked_before from users order by email")
 	if err != nil {
 		return nil, err
 	}
@@ -502,7 +515,7 @@ func (s *Store) Users() ([]User, error) {
 	var out []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.RevokedBefore); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
