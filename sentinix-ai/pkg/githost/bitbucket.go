@@ -52,6 +52,7 @@ func (b bitbucket) Parse(r *http.Request, body []byte) (*Event, error) {
 }
 
 func (b bitbucket) Status(ctx context.Context, e *Event, s State, desc string) error {
+	desc = clip(desc)
 	st := "INPROGRESS"
 	switch s {
 	case Success:

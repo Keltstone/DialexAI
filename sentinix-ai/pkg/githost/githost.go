@@ -154,3 +154,13 @@ func (c Config) request(ctx context.Context, method, url string, hdr map[string]
 	}
 	return nil
 }
+
+// clip keeps status descriptions under the strictest host limit (GitHub: 140 chars); an over-long
+// description is rejected with 422 and the PR would be left pending forever.
+func clip(desc string) string {
+	r := []rune(strings.Join(strings.Fields(desc), " "))
+	if len(r) > 140 {
+		return string(r[:137]) + "..."
+	}
+	return string(r)
+}
