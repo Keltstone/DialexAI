@@ -121,7 +121,13 @@ func (a *App) Handler() http.Handler {
 		m.HandleFunc("GET /auth/login", a.OIDC.Login)
 		m.HandleFunc("GET /auth/callback", a.OIDC.Callback)
 	}
-	m.HandleFunc("POST /auth/logout", func(w http.ResponseWriter, _ *http.Request) { a.Sess.Clear(w) })
+	m.HandleFunc("POST /auth/logout", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Requested-With") != "sentinix" { // blocks cross-site logout CSRF
+			http.Error(w, "missing X-Requested-With", http.StatusForbidden)
+			return
+		}
+		a.Sess.Clear(w)
+	})
 	m.HandleFunc("GET /readyz", a.readyz)
 	m.HandleFunc("GET /metrics", a.metrics)
 
@@ -156,6 +162,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/audit", api("audit", a.audit))
 	m.HandleFunc("GET /api/users", api("manage", a.users))
 	m.HandleFunc("PUT /api/users/role", api("manage", a.setRole))
+	m.HandleFunc("POST /api/users/revoke", api("manage", a.revokeUser))
 	m.HandleFunc("GET /api/packs", api("read", a.packList))
 	m.HandleFunc("GET /api/projects/{id}/report/{fmt}", api("read", a.report))
 	if a.Static != nil {
@@ -272,7 +279,7 @@ func (a *App) who(r *http.Request) (principal, bool) {
 		proj, ok := a.Store.TokenProject(tok)
 		return principal{Project: proj, Email: "token:" + proj}, ok
 	}
-	email, ok := a.Sess.Email(r)
+	email, iat, ok := a.Sess.Issued(r)
 	if !ok {
 		return principal{}, false
 	}
@@ -282,6 +289,9 @@ func (a *App) who(r *http.Request) (principal, bool) {
 	}
 	for _, u := range us {
 		if u.Email == email {
+			if iat < u.RevokedBefore { // revoked (also rejects pre-revocation cookies with no iat once a cutoff exists)
+				return principal{}, false
+			}
 			return principal{Email: email, Role: u.Role}, true
 		}
 	}
