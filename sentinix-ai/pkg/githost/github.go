@@ -58,6 +58,7 @@ func (g github) Parse(r *http.Request, body []byte) (*Event, error) {
 }
 
 func (g github) Status(ctx context.Context, e *Event, s State, desc string) error {
+	desc = clip(desc)
 	if s == Neutral {
 		return g.post(ctx, fmt.Sprintf("%s/repos/%s/check-runs", g.API, e.Repo), g.hdr(),
 			map[string]any{

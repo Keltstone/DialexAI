@@ -29,6 +29,8 @@ import (
 var (
 	FetchTimeout          = 5 * time.Minute
 	MaxFetchBytes int64   = 500 << 20 // 500 MiB
+	// MaxTreeFiles bounds file count: a tree of millions of empty files passes the byte limit but exhausts inodes and time.
+	MaxTreeFiles = 250000
 
 	// AllowLocalForTest allows local directory paths or file:// in tests when set.
 	AllowLocalForTest = false
@@ -187,9 +189,13 @@ func (r *repo) checkTreeSize(ctx context.Context, commit string) error {
 		return err
 	}
 	var totalSize int64
+	var files int
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 4 && fields[1] == "blob" {
+			if files++; files > MaxTreeFiles {
+				return fmt.Errorf("working-tree file count exceeded limit (%d)", MaxTreeFiles)
+			}
 			sizeStr := fields[3]
 			if sizeStr != "-" {
 				if sz, err := strconv.ParseInt(sizeStr, 10, 64); err == nil {
@@ -791,4 +797,22 @@ func WithTree(ctx context.Context, cloneURL, branch, user, token, configuredHost
 		return err
 	}
 	return fn(wt)
+}
+
+// SweepStaleTemp removes scan temp dirs left by a killed process (kill -9 skips the deferred cleanup).
+// Run once at startup; the age guard keeps another replica's live scans safe.
+func SweepStaleTemp(olderThan time.Duration) int {
+	es, _ := os.ReadDir(os.TempDir())
+	n := 0
+	for _, e := range es {
+		if !strings.HasPrefix(e.Name(), "sentinix-") {
+			continue
+		}
+		if fi, err := e.Info(); err == nil && time.Since(fi.ModTime()) > olderThan {
+			if os.RemoveAll(filepath.Join(os.TempDir(), e.Name())) == nil {
+				n++
+			}
+		}
+	}
+	return n
 }

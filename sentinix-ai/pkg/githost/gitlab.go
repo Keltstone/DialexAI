@@ -58,6 +58,7 @@ func (g gitlab) Parse(r *http.Request, body []byte) (*Event, error) {
 
 // ponytail: fork MRs have their commit in the source project, so the status call may 404; the comment still posts.
 func (g gitlab) Status(ctx context.Context, e *Event, s State, desc string) error {
+	desc = clip(desc)
 	st := "pending"
 	switch s {
 	case Success:

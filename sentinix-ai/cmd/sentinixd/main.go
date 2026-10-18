@@ -73,6 +73,9 @@ func main() {
 	if len(key) < 32 {
 		log.Fatal("SENTINIX_SESSION_KEY must be at least 32 characters")
 	}
+	if n := scheduler.SweepStaleTemp(time.Hour); n > 0 {
+		log.Printf("removed %d stale scan temp dir(s)", n)
+	}
 	st.StartAuditVerifier(15*time.Minute, log.Printf)
 	var requiredEngines []string
 	if *reqEngines != "" {

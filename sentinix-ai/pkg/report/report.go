@@ -2,6 +2,7 @@
 package report
 
 import (
+	"unicode"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,18 @@ import (
 
 // SanitizeField escapes backticks, newlines, and markdown brackets to prevent code fence breakout and injection.
 func SanitizeField(s string) string {
+	// Drop control, bidi-override and line/paragraph separators (filename spoofing), cap length.
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029' {
+			return ' '
+		}
+		return r
+	}, s)
+	if rs := []rune(s); len(rs) > 300 {
+		s = string(rs[:300]) + "..."
+	}
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, "@", "&#64;")
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "```", `\x60\x60\x60`)
