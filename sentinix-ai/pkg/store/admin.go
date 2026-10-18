@@ -209,6 +209,9 @@ func (s *Store) VerifyAuditChain() error {
 }
 
 
+// ApprovalTTLSeconds: a pending approval older than this can no longer be decided (state it was proposed against has moved on).
+const ApprovalTTLSeconds = 7 * 24 * 3600
+
 // Approvals: anything that loosens a rule, removes a test or accepts a risk waits here for a second person.
 type Approval struct {
 	ID, Kind, Proposer, Status, Approver string
@@ -280,9 +283,21 @@ func (s *Store) Decide(approvalID, approver string, approve bool) (Approval, err
 	if a.Proposer == approver || isSameActorOrAlias(a.Proposer, approver) {
 		return a, fmt.Errorf("proposer cannot approve their own change")
 	}
+	if now()-a.TS > ApprovalTTLSeconds {
+		return a, fmt.Errorf("approval expired; propose again")
+	}
 	if a.Kind == "role_change" || a.Kind == "role" {
 		var rolePayload struct{ Email, Role string }
 		if json.Unmarshal(a.Payload, &rolePayload) == nil {
+			if approve && rolePayload.Role != "owner" {
+				var curRole string
+				var owners int
+				tx.QueryRow("select role from users where email=$1", rolePayload.Email).Scan(&curRole)
+				tx.QueryRow("select count(*) from users where role='owner'").Scan(&owners)
+				if curRole == "owner" && owners <= 1 {
+					return a, fmt.Errorf("cannot remove the last owner")
+				}
+			}
 			if approver == rolePayload.Email || isSameActorOrAlias(approver, rolePayload.Email) {
 				return a, fmt.Errorf("user cannot approve their own role change")
 			}

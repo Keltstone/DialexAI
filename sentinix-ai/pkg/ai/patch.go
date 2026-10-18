@@ -44,15 +44,29 @@ func CheckPatch(out, file string) (string, error) {
 	if len(out) > 20000 || !strings.Contains(out, "@@") {
 		return "", fmt.Errorf("model did not return a usable diff")
 	}
+	plus := 0
 	for _, l := range strings.Split(out, "\n") {
+		// Extended git headers can rename, copy, chmod, add symlinks or carry binary payloads: none are a plain edit.
+		for _, bad := range []string{"rename ", "copy ", "similarity ", "dissimilarity ", "old mode", "new mode", "new file mode", "deleted file mode", "GIT binary patch", "Binary files"} {
+			if strings.HasPrefix(l, bad) {
+				return "", fmt.Errorf("patch uses %q, only a plain edit of %q is allowed", strings.TrimSpace(bad), file)
+			}
+		}
+		if p, ok := strings.CutPrefix(l, "diff --git "); ok && p != "a/"+file+" b/"+file {
+			return "", fmt.Errorf("patch touches %q, not %q", p, file)
+		}
 		if p, ok := strings.CutPrefix(l, "+++ "); ok {
-			if strings.TrimPrefix(strings.TrimSpace(p), "b/") != file {
+			plus++
+			if strings.TrimSpace(p) != "b/"+file {
 				return "", fmt.Errorf("patch touches %q, not %q", p, file)
 			}
 		}
-		if p, ok := strings.CutPrefix(l, "--- "); ok && !strings.HasSuffix(strings.TrimSpace(p), file) && strings.TrimSpace(p) != "/dev/null" {
+		if p, ok := strings.CutPrefix(l, "--- "); ok && strings.TrimSpace(p) != "a/"+file {
 			return "", fmt.Errorf("patch touches %q, not %q", p, file)
 		}
+	}
+	if plus != 1 {
+		return "", fmt.Errorf("patch must edit exactly one file, found %d", plus)
 	}
 	return out + "\n", nil
 }

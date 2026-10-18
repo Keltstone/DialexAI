@@ -123,3 +123,17 @@ func TestCloudRedacted_CorruptedRedactionSendsZeroBytes(t *testing.T) {
 	}
 }
 
+
+func TestCheckPatchRejectsModeAndRenameHeaders(t *testing.T) {
+	for _, p := range []string{
+		"diff --git a/f.kt b/f.kt\nnew file mode 120000\n--- a/f.kt\n+++ b/f.kt\n@@ -1 +1 @@\n-x\n+y\n",
+		"diff --git a/f.kt b/f.kt\nrename from f.kt\nrename to f.kt\n--- a/f.kt\n+++ b/f.kt\n@@ -1 +1 @@\n-x\n+y\n",
+	} {
+		if _, err := CheckPatch(p, "f.kt"); err == nil {
+			t.Fatalf("accepted:\n%s", p)
+		}
+	}
+	if _, err := CheckPatch("--- a/f.kt\n+++ b/f.kt\n@@ -1 +1 @@\n-x\n+y\n", "f.kt"); err != nil {
+		t.Fatal(err)
+	}
+}
