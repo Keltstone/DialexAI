@@ -54,7 +54,15 @@ create table if not exists webhook_deliveries(id text primary key, ts bigint not
 create table if not exists durable_queue(id text primary key, host text not null, payload text not null, status text not null, created bigint not null);
 create table if not exists leader_election(lock_key text primary key, holder text not null, expires_at bigint not null);
 create table if not exists skipped_file_overrides(project_id text not null default '*', file text not null, expires_at bigint not null, reason text not null default '', approver text not null default '', ts bigint not null default 0, primary key(project_id, file));
-create table if not exists project_grants(project_id text not null, grantee text not null, primary key(project_id, grantee))`
+create table if not exists project_grants(project_id text not null, grantee text not null, primary key(project_id, grantee));
+create index if not exists idx_findings_project on findings(project_id);
+create index if not exists idx_findings_status on findings(status);
+create index if not exists idx_findings_severity on findings(severity);
+create index if not exists idx_scans_project on scans(project_id);
+create index if not exists idx_durable_queue_status on durable_queue(status);
+create index if not exists idx_audit_seq on audit(seq);
+create index if not exists idx_audit_target on audit(target);
+create index if not exists idx_audit_actor on audit(actor)`
 
 // Open takes "postgres://…" or "sqlite:<path>" (":memory:" works for tests).
 func Open(dsn string) (*Store, error) {

@@ -538,12 +538,30 @@ var reAssignedSecret = regexp.MustCompile(`(?i)((?:pass(?:word|wd)?|pwd|secret|t
 
 var rePEMBlock = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)`)
 
+var reStringConcat = regexp.MustCompile(`"([^"\n]+)"\s*\+\s*"([^"\n]+)"`)
+
 var wordRe = regexp.MustCompile(`[A-Za-z0-9+/=_\-]{20,}`)
 
 func RedactSafe(s string) (string, error) {
 	if len(secretRules) == 0 {
 		return "", fmt.Errorf("redaction unavailable: no rules loaded")
 	}
+	// Detect split string concatenations (e.g. "AKIA" + "IOSFODNN7EXAMPLQ") attempting to evade rules
+	s = reStringConcat.ReplaceAllStringFunc(s, func(m string) string {
+		sub := reStringConcat.FindStringSubmatch(m)
+		if len(sub) == 3 {
+			combined := sub[1] + sub[2]
+			for _, r := range secretRules {
+				if r.Regex.MatchString(combined) {
+					return mask(combined)
+				}
+			}
+			if len(combined) >= 20 && ShannonEntropy(combined) >= 3.6 {
+				return mask(combined)
+			}
+		}
+		return m
+	})
 	for _, r := range secretRules {
 		s = r.Regex.ReplaceAllStringFunc(s, func(m string) string { return mask(m) })
 	}

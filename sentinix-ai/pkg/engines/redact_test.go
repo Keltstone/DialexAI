@@ -83,3 +83,11 @@ func TestRedact_FailClosedWhenCorrupted(t *testing.T) {
 		t.Fatalf("expected empty/refused output on redaction failure, got %q", res)
 	}
 }
+
+func TestRedact_SplitConcat(t *testing.T) {
+	input := `val k = "AKIA" + "IOSFODNN7EXAMPLQ"`
+	out := Redact(input)
+	if strings.Contains(out, "IOSFODNN7EXAMPLQ") {
+		t.Fatalf("expected split concat secret to be redacted, got: %s", out)
+	}
+}

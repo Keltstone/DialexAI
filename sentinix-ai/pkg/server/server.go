@@ -283,19 +283,14 @@ func (a *App) who(r *http.Request) (principal, bool) {
 	if !ok {
 		return principal{}, false
 	}
-	us, err := a.Store.Users()
+	u, err := a.Store.UserByEmail(email)
 	if err != nil {
 		return principal{}, false
 	}
-	for _, u := range us {
-		if u.Email == email {
-			if iat < u.RevokedBefore { // revoked (also rejects pre-revocation cookies with no iat once a cutoff exists)
-				return principal{}, false
-			}
-			return principal{Email: email, Role: u.Role}, true
-		}
+	if iat < u.RevokedBefore { // revoked (also rejects pre-revocation cookies with no iat once a cutoff exists)
+		return principal{}, false
 	}
-	return principal{}, false
+	return principal{Email: email, Role: u.Role}, true
 }
 
 func who(r *http.Request) principal { return r.Context().Value(ctxKey{}).(principal) }
