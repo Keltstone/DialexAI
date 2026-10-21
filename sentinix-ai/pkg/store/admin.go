@@ -232,6 +232,60 @@ func (s *Store) Propose(kind string, payload any, proposer string) (string, erro
 	return i, err
 }
 
+var confusableMap = map[rune]rune{
+	// Cyrillic
+	'\u0430': 'a', '\u0410': 'a', // а, А
+	'\u0432': 'b', '\u0412': 'b', // в, В
+	'\u0441': 'c', '\u0421': 'c', // с, С
+	'\u0434': 'd', '\u0414': 'd', // д, Д
+	'\u0435': 'e', '\u0415': 'e', // е, Е
+	'\u0451': 'e', '\u0401': 'e', // ё, Ё
+	'\u0433': 'r', '\u0413': 'r', // г, Г
+	'\u04bb': 'h', '\u04ba': 'h', // һ, Һ
+	'\u0456': 'i', '\u0406': 'i', // і, І
+	'\u0458': 'j', '\u0408': 'j', // ј, Ј
+	'\u043a': 'k', '\u041a': 'k', // к, К
+	'\u043c': 'm', '\u041c': 'm', // м, М
+	'\u043d': 'h', '\u041d': 'h', // н, Н
+	'\u043e': 'o', '\u041e': 'o', // о, О
+	'\u0440': 'p', '\u0420': 'p', // р, Р
+	'\u0455': 's', '\u0405': 's', // ѕ, Ѕ
+	'\u0442': 't', '\u0422': 't', // т, Т
+	'\u0443': 'y', '\u0423': 'y', // у, У
+	'\u0445': 'x', '\u0425': 'x', // х, Х
+	'\u0501': 'd', '\u0500': 'd', // ԁ, Ԁ
+	'\u051b': 'q', '\u051a': 'q', // ԛ, Ԛ
+	'\u051d': 'w', '\u051c': 'w', // ԝ, Ԝ
+
+	// Greek
+	'\u03b1': 'a', '\u0391': 'a', // α, Α
+	'\u03b2': 'b', '\u0392': 'b', // β, Β
+	'\u03b3': 'y', '\u0393': 'y', // γ, Γ
+	'\u03b4': 'd', '\u0394': 'd', // δ, Δ
+	'\u03b5': 'e', '\u0395': 'e', // ε, Ε
+	'\u03b6': 'z', '\u0396': 'z', // ζ, Ζ
+	'\u03b7': 'n', '\u0397': 'h', // η, Η
+	'\u03b9': 'i', '\u0399': 'i', // ι, Ι
+	'\u03ba': 'k', '\u039a': 'k', // κ, Κ
+	'\u03bd': 'v', '\u039d': 'n', // ν, Ν
+	'\u03bf': 'o', '\u039f': 'o', // ο, Ο
+	'\u03c1': 'p', '\u03a1': 'p', // ρ, Ρ
+	'\u03c2': 's', '\u03c3': 's', '\u03a3': 's', // ς, σ, Σ
+	'\u03c4': 't', '\u03a4': 't', // τ, Τ
+	'\u03c5': 'u', '\u03a5': 'y', // υ, Υ
+	'\u03c7': 'x', '\u03a7': 'x', // χ, Χ
+	'\u03c9': 'w', '\u03a9': 'w', // ω, Ω
+}
+
+func foldHomoglyphs(s string) string {
+	return strings.Map(func(r rune) rune {
+		if c, ok := confusableMap[r]; ok {
+			return c
+		}
+		return r
+	}, s)
+}
+
 func canonicalEmail(e string) string {
 	// NFKC folds fullwidth/compat forms; drop invisible format runes (zero-width joiners, BOM, bidi marks).
 	e = strings.Map(func(r rune) rune {
@@ -241,6 +295,7 @@ func canonicalEmail(e string) string {
 		return r
 	}, norm.NFKC.String(e))
 	e = strings.TrimSpace(strings.ToLower(e))
+	e = foldHomoglyphs(e)
 	user, domain, ok := strings.Cut(e, "@")
 	if !ok {
 		return e
@@ -289,10 +344,10 @@ func (s *Store) Decide(approvalID, approver string, approve bool) (Approval, err
 	if a.Kind == "role_change" || a.Kind == "role" {
 		var rolePayload struct{ Email, Role string }
 		if json.Unmarshal(a.Payload, &rolePayload) == nil {
+			var curRole string
+			tx.QueryRow("select role from users where email=$1", rolePayload.Email).Scan(&curRole)
 			if approve && rolePayload.Role != "owner" {
-				var curRole string
 				var owners int
-				tx.QueryRow("select role from users where email=$1", rolePayload.Email).Scan(&curRole)
 				tx.QueryRow("select count(*) from users where role='owner'").Scan(&owners)
 				if curRole == "owner" && owners <= 1 {
 					return a, fmt.Errorf("cannot remove the last owner")
@@ -300,6 +355,11 @@ func (s *Store) Decide(approvalID, approver string, approve bool) (Approval, err
 			}
 			if approver == rolePayload.Email || isSameActorOrAlias(approver, rolePayload.Email) {
 				return a, fmt.Errorf("user cannot approve their own role change")
+			}
+			var approverRole string
+			tx.QueryRow("select role from users where email=$1", approver).Scan(&approverRole)
+			if (curRole == "owner" || rolePayload.Role == "owner") && approverRole != "owner" {
+				return a, fmt.Errorf("only an owner can approve role changes involving the owner role")
 			}
 		}
 	}
