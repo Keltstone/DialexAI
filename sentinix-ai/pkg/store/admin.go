@@ -597,3 +597,10 @@ func (s *Store) Users() ([]User, error) {
 	}
 	return out, rows.Err()
 }
+
+func (s *Store) UserByEmail(email string) (User, error) {
+	var u User
+	err := s.db.QueryRow("select id,email,name,role,revoked_before from users where email=$1", email).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.RevokedBefore)
+	return u, err
+}
+

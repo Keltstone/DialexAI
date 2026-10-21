@@ -747,85 +747,6 @@ func (a *App) decide(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, ap)
 }
 
-// apply performs an approved change. Kinds are validated when proposed.
-func (a *App) apply(ap store.Approval) error {
-	var raw map[string]any
-	if err := json.Unmarshal(ap.Payload, &raw); err != nil {
-		return err
-	}
-	getString := func(k string) string {
-		v, _ := raw[k].(string)
-		return v
-	}
-	getInt64 := func(k string) int64 {
-		switch v := raw[k].(type) {
-		case float64:
-			return int64(v)
-		case int64:
-			return v
-		case int:
-			return int64(v)
-		case json.Number:
-			n, _ := v.Int64()
-			return n
-		case string:
-			if t, err := time.Parse(time.RFC3339, v); err == nil {
-				return t.Unix()
-			} else if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-				return n
-			}
-		}
-		return 0
-	}
-	getBool := func(k string) bool {
-		b, _ := raw[k].(bool)
-		return b
-	}
-
-	switch ap.Kind {
-	case "accept_risk":
-		return a.Store.Triage(getString("finding"), "accepted", getString("owner"), getString("reason"), getInt64("until"))
-	case "disable_rule":
-		return a.Store.SetRuleOverrideScoped(getString("rule"), true, -1, getString("scope"), getInt64("until"))
-	case "loosen_severity":
-		s, _ := engines.ParseSeverity(getString("severity"))
-		return a.Store.SetRuleOverride(getString("rule"), false, int(s))
-	case "demote_rule", "rule_demotion":
-		return a.Store.SetRuleOverride(getString("rule"), false, int(engines.Info))
-	case "enforcement":
-		proj, err := a.Store.Project(getString("project"))
-		if err != nil {
-			return err
-		}
-		proj.Enforcement = getString("enforcement")
-		return a.Store.UpdateProject(proj)
-	case "fail_on":
-		proj, err := a.Store.Project(getString("project"))
-		if err != nil {
-			return err
-		}
-		proj.FailOn = getString("fail_on")
-		return a.Store.UpdateProject(proj)
-	case "model_policy":
-		proj, err := a.Store.Project(getString("project"))
-		if err != nil {
-			return err
-		}
-		proj.ModelPolicy = getString("model_policy")
-		return a.Store.UpdateProject(proj)
-	case "ai":
-		proj, err := a.Store.Project(getString("project"))
-		if err != nil {
-			return err
-		}
-		proj.AI = getBool("ai")
-		return a.Store.UpdateProject(proj)
-	case "ignore", "sentinix:ignore":
-		return nil
-	}
-	return fmt.Errorf("unknown approval kind %q", ap.Kind)
-}
-
 func (a *App) audit(w http.ResponseWriter, r *http.Request) {
 	n, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if n < 1 || n > 1000 {
@@ -858,17 +779,12 @@ func (a *App) setRole(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad role", 400)
 		return
 	}
-	cur := ""
-	us, _ := a.Store.Users()
-	for _, u := range us {
-		if u.Email == in.Email {
-			cur = u.Role
-		}
-	}
-	if cur == "" {
+	u, err := a.Store.UserByEmail(in.Email)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
+	cur := u.Role
 	if (in.Role == auth.Owner || cur == auth.Owner) && who(r).Role != auth.Owner {
 		http.Error(w, "only an owner can change owner roles", 403)
 		return
