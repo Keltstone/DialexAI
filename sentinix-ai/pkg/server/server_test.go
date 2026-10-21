@@ -77,7 +77,7 @@ func TestAuthAndApprovalFlow(t *testing.T) {
 	e.ok(e.call(tok, "", "GET", "/api/projects", ""), 403) // tokens cannot list projects
 
 	var fs []store.Finding
-	w := e.call("dev@example.test", auth.Developer, "GET", "/api/findings", "")
+	w := e.call("dev@example.test", auth.Developer, "GET", "/api/findings?project="+p.ID, "")
 	json.Unmarshal(w.Body.Bytes(), &fs)
 	if len(fs) != 1 {
 		t.Fatalf("findings: %s", w.Body)

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"sort"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -447,15 +446,25 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) findings(w http.ResponseWriter, r *http.Request) {
+	p := who(r)
 	q := r.URL.Query()
-	projID := q.Get("project")
-	if projID != "" && !a.canReadProject(r, projID) {
-		http.NotFound(w, r)
-		return
+	projID := strings.TrimSpace(q.Get("project"))
+	// Developers and project tokens must always specify an explicit project
+	if p.Role == auth.Developer || p.Project != "" {
+		if projID == "" {
+			http.Error(w, "project query parameter is required", http.StatusBadRequest)
+			return
+		}
+	}
+	if projID != "" {
+		if !a.canReadProject(r, projID) {
+			http.NotFound(w, r)
+			return
+		}
 	}
 	f := store.Filter{Project: projID, Status: q.Get("status"), Owner: q.Get("owner")}
-	if p := who(r); p.Project != "" {
-		f.Project = p.Project // tokens see only their own project
+	if p.Project != "" {
+		f.Project = p.Project
 	}
 	if s := q.Get("severity"); s != "" {
 		sev, err := engines.ParseSeverity(s)
@@ -466,40 +475,10 @@ func (a *App) findings(w http.ResponseWriter, r *http.Request) {
 		f.MinSeverity = sev
 	}
 	f.Limit, _ = strconv.Atoi(q.Get("limit"))
-	fs := []store.Finding{}
-	var err error
-	if f.Project == "" && who(r).Role == auth.Developer {
-		// developers see only granted projects: query each, never the unfiltered table
-		ps, perr := a.Store.Projects()
-		if perr != nil {
-			fail(w, perr, 500)
-			return
-		}
-		for _, proj := range ps {
-			if !a.canReadProject(r, proj.ID) {
-				continue
-			}
-			pf := f
-			pf.Project = proj.ID
-			got, ferr := a.Store.Findings(pf)
-			if ferr != nil {
-				fail(w, ferr, 500)
-				return
-			}
-			fs = append(fs, got...)
-		}
-		sort.SliceStable(fs, func(i, j int) bool { return fs[i].Severity > fs[j].Severity })
-		if lim := f.Limit; lim > 0 && len(fs) > lim {
-			fs = fs[:lim]
-		} else if lim <= 0 && len(fs) > 500 {
-			fs = fs[:500]
-		}
-	} else {
-		fs, err = a.Store.Findings(f)
-		if err != nil {
-			fail(w, err, 500)
-			return
-		}
+	fs, err := a.Store.Findings(f)
+	if err != nil {
+		fail(w, err, 500)
+		return
 	}
 	writeJSON(w, fs)
 }
