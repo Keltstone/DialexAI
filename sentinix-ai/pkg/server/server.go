@@ -302,11 +302,11 @@ func who(r *http.Request) principal { return r.Context().Value(ctxKey{}).(princi
 
 func (a *App) canReadProject(r *http.Request, projectID string) bool {
 	p := who(r)
-	if p.Role != auth.Developer {
-		return true
-	}
 	if p.Project != "" {
 		return p.Project == projectID
+	}
+	if p.Role != auth.Developer {
+		return true
 	}
 	if a.Store == nil {
 		return true
