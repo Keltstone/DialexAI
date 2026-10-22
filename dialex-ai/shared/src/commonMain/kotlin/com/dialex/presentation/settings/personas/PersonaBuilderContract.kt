@@ -4,7 +4,7 @@ import com.dialex.domain.model.PersonaChatMessage
 import com.dialex.model.PredefinedPersona
 import com.dialex.model.Provider
 import com.dialex.model.RunMode
-import io.github.koltalabs.kolt.utils.state.AsyncState
+import kolt.utils.state.AsyncState
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 // Persona Builder Contract — State / Intent / Effect

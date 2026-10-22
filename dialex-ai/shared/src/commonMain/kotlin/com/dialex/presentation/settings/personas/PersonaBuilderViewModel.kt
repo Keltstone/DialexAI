@@ -11,7 +11,7 @@ import com.dialex.model.RunMode
 import com.dialex.model.SystemPersonas
 import com.dialex.model.buildComposedSystemPrompt
 import com.dialex.presentation.base.MviViewModel
-import io.github.koltalabs.kolt.utils.state.AsyncState
+import kolt.utils.state.AsyncState
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.launch

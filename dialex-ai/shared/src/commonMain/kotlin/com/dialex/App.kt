@@ -525,7 +525,7 @@ fun App(
                                         }
                                         reloadSidebarData()
                                     } catch (e: Exception) {
-                                        io.github.koltalabs.kolt.logutils.printLog("Failed to create project: ${e.message}", isError = true)
+                                        kolt.logutils.printLog("Failed to create project: ${e.message}", isError = true)
                                     }
                                 }
                             },
@@ -535,7 +535,7 @@ fun App(
                                         projectRepository?.updateProject(updatedProject)
                                         reloadSidebarData()
                                     } catch (e: Exception) {
-                                        io.github.koltalabs.kolt.logutils.printLog("Failed to update project: ${e.message}", isError = true)
+                                        kolt.logutils.printLog("Failed to update project: ${e.message}", isError = true)
                                     }
                                 }
                             },
@@ -550,7 +550,7 @@ fun App(
                                         }
                                         reloadSidebarData()
                                     } catch (e: Exception) {
-                                        io.github.koltalabs.kolt.logutils.printLog("Failed to delete project: ${e.message}", isError = true)
+                                        kolt.logutils.printLog("Failed to delete project: ${e.message}", isError = true)
                                     }
                                 }
                             },
@@ -565,7 +565,7 @@ fun App(
                                         }
                                         reloadSidebarData()
                                     } catch (e: Exception) {
-                                        io.github.koltalabs.kolt.logutils.printLog("Failed to delete discussion: ${e.message}", isError = true)
+                                        kolt.logutils.printLog("Failed to delete discussion: ${e.message}", isError = true)
                                     }
                                 }
                             },
@@ -581,7 +581,7 @@ fun App(
                                             reloadSidebarData()
                                         }
                                     } catch (e: Exception) {
-                                        io.github.koltalabs.kolt.logutils.printLog("Failed to rename discussion $discId: ${e.message}", isError = true)
+                                        kolt.logutils.printLog("Failed to rename discussion $discId: ${e.message}", isError = true)
                                     }
                                 }
                             },
@@ -594,7 +594,7 @@ fun App(
                                             reloadSidebarData()
                                         }
                                     } catch (e: Exception) {
-                                        io.github.koltalabs.kolt.logutils.printLog("Failed to move discussion to project: ${e.message}", isError = true)
+                                        kolt.logutils.printLog("Failed to move discussion to project: ${e.message}", isError = true)
                                     }
                                 }
                             },
@@ -687,7 +687,7 @@ fun App(
                                                         discussions = discussions.map { if (it.id == updated.id) updated else it }
                                                     }
                                                 } catch (e: Exception) {
-                                                    io.github.koltalabs.kolt.logutils.printLog("Failed to rename discussion ${currentDisc.id}: ${e.message}", isError = true)
+                                                    kolt.logutils.printLog("Failed to rename discussion ${currentDisc.id}: ${e.message}", isError = true)
                                                 }
                                             }
                                         }
@@ -743,7 +743,7 @@ fun App(
                                                     val updatedDisc = disc.copy(credenceLedger = updatedLedger)
                                                     discussions = discussions.map { if (it.id == updatedDisc.id) updatedDisc else it }
                                                 } catch (e: Exception) {
-                                                    io.github.koltalabs.kolt.logutils.printLog("Failed to recalculate credence: ${e.message}", isError = true)
+                                                    kolt.logutils.printLog("Failed to recalculate credence: ${e.message}", isError = true)
                                                 }
                                             }
                                         }

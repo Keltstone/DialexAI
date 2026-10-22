@@ -9,7 +9,7 @@ import com.dialex.model.Project
 import com.dialex.model.Provider
 import com.dialex.model.PresetArchetype
 import com.dialex.orchestrator.DeliberationEstimator
-import io.github.koltalabs.kolt.utils.state.AsyncState
+import kolt.utils.state.AsyncState
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.ImmutableSet

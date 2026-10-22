@@ -1,8 +1,8 @@
 package com.dialex.presentation.connect
 
 import androidx.lifecycle.viewModelScope
-import io.github.koltalabs.kolt.utils.state.AsyncState
 import com.dialex.presentation.base.MviViewModel
+import kolt.utils.state.AsyncState
 import kotlinx.coroutines.launch
 
 class ConnectViewModel(

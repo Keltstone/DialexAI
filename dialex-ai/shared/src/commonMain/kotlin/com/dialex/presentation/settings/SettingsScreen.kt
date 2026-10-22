@@ -92,7 +92,6 @@ import com.dialex.model.CliCommands
 import com.dialex.model.CompactionSettings
 import com.dialex.model.PredefinedPersona
 import com.dialex.model.brandName
-import io.github.koltalabs.kolt.utils.state.AsyncState
 import com.dialex.theme.LocalCcColors
 import com.dialex.theme.ThemeMode
 import com.dialex.model.Provider
@@ -103,6 +102,7 @@ import com.dialex.model.InterventionStyle
 import com.dialex.model.DeliverableFormat
 import com.dialex.ui.AestheticSlider
 import com.dialex.ui.AestheticSwitch
+import kolt.utils.state.AsyncState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 

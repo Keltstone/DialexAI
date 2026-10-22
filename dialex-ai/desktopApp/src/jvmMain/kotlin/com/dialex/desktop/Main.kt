@@ -64,7 +64,7 @@ fun main(args: Array<String>) {
     System.setProperty("apple.laf.useScreenMenuBar", "true")
     System.setProperty("com.apple.mrj.application.apple.menu.about.name", "Dialex")
 
-    io.github.koltalabs.kolt.logutils.Log.init(true)
+    kolt.logutils.Log.init(true)
     installCrashLogger(File(System.getProperty("user.home"), ".dialex/crash.log"))
     if (args.contains("--persona-studio") || args.contains("--studio")) {
         com.dialex.desktop.personastudio.main(args)

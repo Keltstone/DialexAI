@@ -26,8 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dialex.theme.CcPalette
 import com.dialex.theme.LocalCcColors
-import io.github.koltalabs.kolt.composekmp.components.core.dropdowns.models.DropDownItem
-import io.github.koltalabs.kolt.composekmp.wrappers.toUiText
+import kolt.composekmp.components.core.dropdowns.models.DropDownItem
+import kolt.composekmp.wrappers.toUiText
 
 data class ThemedDropdownOption(
     val id: String,

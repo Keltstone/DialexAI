@@ -6,8 +6,8 @@ import com.dialex.domain.model.TensionPair
 import com.dialex.model.Discussion
 import com.dialex.model.DeliverableFormat
 import com.dialex.model.Provider
-import io.github.koltalabs.kolt.utils.state.AsyncState
 import com.dialex.presentation.setup.TokenWarningLevel
+import kolt.utils.state.AsyncState
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 // Chat Screen Contract — State / Intent / Effect

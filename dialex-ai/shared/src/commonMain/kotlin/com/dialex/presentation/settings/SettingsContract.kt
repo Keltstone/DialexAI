@@ -5,8 +5,8 @@ import com.dialex.model.CliCommands
 import com.dialex.model.CompactionSettings
 import com.dialex.model.PredefinedPersona
 import com.dialex.model.Provider
-import io.github.koltalabs.kolt.utils.state.AsyncState
 import com.dialex.theme.ThemeMode
+import kolt.utils.state.AsyncState
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.persistentListOf
