@@ -74,19 +74,25 @@ git clone https://github.com/Kolta-Labs/DialexAI.git
 ```
 
 ### 2.3 Gradle Composite Build Wiring
-In `DialexAI/settings.gradle.kts`, Gradle is configured to automatically substitute maven coordinates with the local composite build:
+In `dialex-ai/settings.gradle.kts`, Gradle is configured to use the shared Kolt composite build script:
 
 ```kotlin
-includeBuild("../KoltLibs") {
-    dependencySubstitution {
-        substitute(module("io.github.koltalabs.kolt:utils")).using(project(":libs:utils"))
-        substitute(module("io.github.koltalabs.kolt:logutils")).using(project(":libs:logutils"))
-        substitute(module("io.github.koltalabs.kolt:compose-kmp")).using(project(":libs:compose-kmp"))
-    }
+// gradle.properties
+koltLibsDir=../../KoltLibs
+
+// settings.gradle.kts
+pluginManagement {
+    includeBuild("${settings.providers.gradleProperty("koltLibsDir").get()}/build-logic")
+    ...
 }
+
+val koltLibsDir = providers.gradleProperty("koltLibsDir").get()
+...
+// chained builds first, Kolt last (hard rule, see kolt-libs.md)
+apply(from = "$koltLibsDir/gradle/kolt-consumer.settings.gradle.kts")
 ```
 
-*Note: If your local development environment places Kolt in a different relative path (e.g. `../Kolt/KoltLibs`), simply update the `includeBuild` path in `settings.gradle.kts`.*
+*Note: If your local development environment places Kolt in a different relative path, simply update `koltLibsDir` in `gradle.properties`.*
 
 ---
 

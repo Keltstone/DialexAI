@@ -1,6 +1,6 @@
 package com.dialex.presentation.connect
 
-import io.github.koltalabs.kolt.utils.state.AsyncState
+import kolt.utils.state.AsyncState
 // Connect Screen Contract — State / Intent / Effect
 data class ConnectState(
     val supportsLocalEngine: Boolean = false,

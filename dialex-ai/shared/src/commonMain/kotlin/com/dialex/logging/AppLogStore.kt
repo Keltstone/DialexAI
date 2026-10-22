@@ -51,9 +51,9 @@ object AppLogStore {
         // Also print to console for terminal debugging
         val consoleMsg = "[Dialex] [${level.label}] [$tag] $message"
         if (level == AppLogLevel.ERROR) {
-            io.github.koltalabs.kolt.logutils.printLog(consoleMsg, isError = true)
+            kolt.logutils.printLog(consoleMsg, isError = true)
         } else {
-            io.github.koltalabs.kolt.logutils.printLog(consoleMsg, isError = false)
+            kolt.logutils.printLog(consoleMsg, isError = false)
         }
 
         // Update in-memory reactive list

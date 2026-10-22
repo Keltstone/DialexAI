@@ -16,7 +16,7 @@ actual fun writeTextFile(folderPath: String, fileName: String, content: String, 
         }
         true
     } catch (e: Exception) {
-        io.github.koltalabs.kolt.logutils.printLog("Failed to write file to $folderPath/$fileName: ${e.message}", isError = true)
+        kolt.logutils.printLog("Failed to write file to $folderPath/$fileName: ${e.message}", isError = true)
         false
     }
 }

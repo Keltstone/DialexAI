@@ -24,11 +24,11 @@ import com.dialex.model.DiscussionStatus
 import com.dialex.model.Provider
 import com.dialex.model.isFrom
 import com.dialex.model.label
-import io.github.koltalabs.kolt.utils.state.AsyncState
 import com.dialex.presentation.base.MviViewModel
 import com.dialex.presentation.chat.components.resolveAllArtifacts
 import com.dialex.presentation.setup.TokenWarningLevel
 import com.dialex.util.formatTokenCount
+import kolt.utils.state.AsyncState
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay

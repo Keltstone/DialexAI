@@ -99,7 +99,6 @@ import com.dialex.model.Provider
 import com.dialex.model.RoundMode
 import com.dialex.model.brandName
 import com.dialex.model.label
-import io.github.koltalabs.kolt.utils.state.AsyncState
 import com.dialex.presentation.setup.TokenWarningLevel
 import com.dialex.domain.model.TensionStatus
 import com.dialex.theme.CcPalette
@@ -108,6 +107,7 @@ import com.dialex.ui.MarkdownText
 import com.dialex.presentation.workspace.WorkspaceHeader
 import com.dialex.service.isPlatformCliSupported
 import com.dialex.service.checkPlatformCliLogins
+import kolt.utils.state.AsyncState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 

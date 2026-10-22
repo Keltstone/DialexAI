@@ -19,8 +19,8 @@ import com.dialex.model.knownModels
 import com.dialex.model.DiscussionPresets
 import com.dialex.model.PresetArchetype
 import com.dialex.orchestrator.DeliberationEstimator
-import io.github.koltalabs.kolt.utils.state.AsyncState
 import com.dialex.presentation.base.MviViewModel
+import kolt.utils.state.AsyncState
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.toImmutableMap
