@@ -57,17 +57,17 @@ func (g github) Parse(r *http.Request, body []byte) (*Event, error) {
 		Fork: h.Repo.FullName != b.Repo.FullName, ConfiguredHost: g.Config.web()}, nil
 }
 
-func (g github) Status(ctx context.Context, e *Event, s State, desc string) error {
+func (g github) StatusNamed(ctx context.Context, e *Event, name string, s State, desc string) error {
 	desc = clip(desc)
 	if s == Neutral {
 		return g.post(ctx, fmt.Sprintf("%s/repos/%s/check-runs", g.API, e.Repo), g.hdr(),
 			map[string]any{
-				"name":       "sentinix",
+				"name":       name,
 				"head_sha":   e.HeadSHA,
 				"status":     "completed",
 				"conclusion": "neutral",
 				"output": map[string]string{
-					"title":   "sentinix",
+					"title":   name,
 					"summary": desc,
 				},
 			})
@@ -82,7 +82,11 @@ func (g github) Status(ctx context.Context, e *Event, s State, desc string) erro
 		st = "error"
 	}
 	return g.post(ctx, fmt.Sprintf("%s/repos/%s/statuses/%s", g.API, e.Repo, e.HeadSHA), g.hdr(),
-		map[string]string{"state": st, "description": desc, "context": "sentinix"})
+		map[string]string{"state": st, "description": desc, "context": name})
+}
+
+func (g github) Status(ctx context.Context, e *Event, s State, desc string) error {
+	return g.StatusNamed(ctx, e, "sentinix", s, desc)
 }
 
 func (g github) Comment(ctx context.Context, e *Event, body string) error {

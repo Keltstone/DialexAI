@@ -57,7 +57,7 @@ func (g gitlab) Parse(r *http.Request, body []byte) (*Event, error) {
 }
 
 // ponytail: fork MRs have their commit in the source project, so the status call may 404; the comment still posts.
-func (g gitlab) Status(ctx context.Context, e *Event, s State, desc string) error {
+func (g gitlab) StatusNamed(ctx context.Context, e *Event, name string, s State, desc string) error {
 	desc = clip(desc)
 	st := "pending"
 	switch s {
@@ -70,7 +70,11 @@ func (g gitlab) Status(ctx context.Context, e *Event, s State, desc string) erro
 		st = "failed"
 	}
 	return g.post(ctx, fmt.Sprintf("%s/projects/%s/statuses/%s", g.API, e.Repo, e.HeadSHA), g.hdr(),
-		map[string]string{"state": st, "name": "sentinix", "description": desc})
+		map[string]string{"state": st, "name": name, "description": desc})
+}
+
+func (g gitlab) Status(ctx context.Context, e *Event, s State, desc string) error {
+	return g.StatusNamed(ctx, e, "sentinix", s, desc)
 }
 
 func (g gitlab) Comment(ctx context.Context, e *Event, body string) error {

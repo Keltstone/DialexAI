@@ -134,7 +134,7 @@ func (c Client) Match(ctx context.Context, comps []Component) ([]engines.Finding
 			if msg == "" {
 				msg = "known vulnerability"
 			}
-			out = append(out, engines.Finding{Rule: "advisory/" + id, Engine: "advisories", File: k.File, Line: 1,
+			out = append(out, engines.Finding{Rule: "advisory/" + id, Engine: "advisories", Category: engines.CategorySecurity, File: k.File, Line: 1,
 				Severity: severity(v.DatabaseSpecific.Severity), Message: k.Name + ": " + msg,
 				Evidence: k.Name + "@" + k.Version, Fix: fix})
 		}

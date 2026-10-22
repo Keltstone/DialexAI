@@ -1,0 +1,49 @@
+# Sample GitLab CI configuration for running Gradle checks and uploading to Sentinix.
+# Include in your repository's .gitlab-ci.yml. Set SENTINIX_TOKEN and SENTINIX_URL in CI/CD Variables.
+
+stages:
+  - test
+  - review-orchestration
+
+gradle-checks:
+  stage: test
+  image: eclipse-temurin:17-jdk
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - ./gradlew check --continue || true
+  artifacts:
+    when: always
+    paths:
+      - build/reports/
+      - build/test-results/
+
+sentinix-upload:
+  stage: review-orchestration
+  image: curlimages/curl:latest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  dependencies:
+    - gradle-checks
+  script:
+    - |
+      if [ -f build/reports/detekt/detekt.sarif ]; then
+        curl -s -f -X POST \
+          -H "Authorization: Bearer $SENTINIX_TOKEN" \
+          "$SENTINIX_URL/api/projects/$SENTINIX_PROJECT_ID/ingest?engine=detekt&format=sarif&commit=$CI_COMMIT_SHA&pr=$CI_MERGE_REQUEST_IID" \
+          --data-binary @build/reports/detekt/detekt.sarif
+      fi
+    - |
+      if [ -f build/reports/ktlint/ktlint.sarif ]; then
+        curl -s -f -X POST \
+          -H "Authorization: Bearer $SENTINIX_TOKEN" \
+          "$SENTINIX_URL/api/projects/$SENTINIX_PROJECT_ID/ingest?engine=ktlint&format=sarif&commit=$CI_COMMIT_SHA&pr=$CI_MERGE_REQUEST_IID" \
+          --data-binary @build/reports/ktlint/ktlint.sarif
+      fi
+    - |
+      find build/test-results -type f -name "*Konsist*.xml" 2>/dev/null | while read -r xmlFile; do
+        curl -s -f -X POST \
+          -H "Authorization: Bearer $SENTINIX_TOKEN" \
+          "$SENTINIX_URL/api/projects/$SENTINIX_PROJECT_ID/ingest?engine=konsist&format=junit&commit=$CI_COMMIT_SHA&pr=$CI_MERGE_REQUEST_IID" \
+          --data-binary @"$xmlFile"
+      done

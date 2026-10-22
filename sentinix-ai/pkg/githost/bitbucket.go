@@ -51,7 +51,7 @@ func (b bitbucket) Parse(r *http.Request, body []byte) (*Event, error) {
 		Fork: s.Repo.FullName != d.Repo.FullName, ConfiguredHost: b.Config.web()}, nil
 }
 
-func (b bitbucket) Status(ctx context.Context, e *Event, s State, desc string) error {
+func (b bitbucket) StatusNamed(ctx context.Context, e *Event, name string, s State, desc string) error {
 	desc = clip(desc)
 	st := "INPROGRESS"
 	switch s {
@@ -63,7 +63,11 @@ func (b bitbucket) Status(ctx context.Context, e *Event, s State, desc string) e
 		st = "FAILED"
 	}
 	return b.post(ctx, fmt.Sprintf("%s/repositories/%s/commit/%s/statuses/build", b.API, e.Repo, e.HeadSHA), b.hdr(),
-		map[string]string{"key": "sentinix", "name": "sentinix", "state": st, "description": desc, "url": b.PublicURL})
+		map[string]string{"key": name, "name": name, "state": st, "description": desc, "url": b.PublicURL})
+}
+
+func (b bitbucket) Status(ctx context.Context, e *Event, s State, desc string) error {
+	return b.StatusNamed(ctx, e, "sentinix", s, desc)
 }
 
 func (b bitbucket) Comment(ctx context.Context, e *Event, body string) error {

@@ -502,12 +502,53 @@ func applyTx(tx *sql.Tx, a Approval) error {
 		_, err := tx.Exec("insert into rule_overrides(rule,disabled,severity,scope,expires_at) values($1,0,$2,'*',0) on conflict(rule, scope) do update set disabled=0, severity=$2",
 			getString("rule"), int(engines.Info))
 		return err
+	case "category_policy":
+		projID := getString("project")
+		cat := getString("category")
+		mode := getString("mode")
+		thresh := getString("threshold")
+		_, err := tx.Exec("delete from project_policies where project_id=$1 and category=$2", projID, cat)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec("insert into project_policies(project_id, category, mode, threshold) values($1, $2, $3, $4)",
+			projID, cat, mode, thresh)
+		if err != nil {
+			return err
+		}
+		if cat == engines.CategorySecurity {
+			enf := "block"
+			if mode == "comment" || mode == "off" {
+				enf = "report"
+			}
+			_, err = tx.Exec("update projects set enforcement=$1, fail_on=$2 where id=$3", enf, thresh, projID)
+			return err
+		}
+		return nil
 	case "enforcement":
-		_, err := tx.Exec("update projects set enforcement=$1 where id=$2", getString("enforcement"), getString("project"))
-		return err
+		enf := getString("enforcement")
+		projID := getString("project")
+		_, err := tx.Exec("update projects set enforcement=$1 where id=$2", enf, projID)
+		if err != nil {
+			return err
+		}
+		mode := "block"
+		if enf == "report" {
+			mode = "comment"
+		}
+		_, _ = tx.Exec("delete from project_policies where project_id=$1 and category='security'", projID)
+		_, _ = tx.Exec("insert into project_policies(project_id, category, mode, threshold) values($1, 'security', $2, 'high')", projID, mode)
+		return nil
 	case "fail_on":
-		_, err := tx.Exec("update projects set fail_on=$1 where id=$2", getString("fail_on"), getString("project"))
-		return err
+		fo := getString("fail_on")
+		projID := getString("project")
+		_, err := tx.Exec("update projects set fail_on=$1 where id=$2", fo, projID)
+		if err != nil {
+			return err
+		}
+		_, _ = tx.Exec("delete from project_policies where project_id=$1 and category='security'", projID)
+		_, _ = tx.Exec("insert into project_policies(project_id, category, mode, threshold) values($1, 'security', 'block', $2)", projID, fo)
+		return nil
 	case "model_policy":
 		_, err := tx.Exec("update projects set model_policy=$1 where id=$2", getString("model_policy"), getString("project"))
 		return err

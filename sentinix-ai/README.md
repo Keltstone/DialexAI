@@ -332,6 +332,32 @@ Set it in the dashboard (**Settings**, then *Enforcement* and *Fail at*), throug
 
 A sensible rollout is to run in **report only** for a couple of weeks so the team sees real findings and you can tune noisy rules, then switch the important projects to **block** at `high` and later at `medium`.
 
+### Review categories and per-category gating
+
+Sentinix classifies findings into five categories: `security`, `architecture`, `style`, `accessibility`, and `quality`.
+
+Each category can be configured with its own `mode` (`block`, `comment`, or `off`) and severity `threshold` (`info`, `low`, `medium`, `high`, `critical`):
+
+| Category | Default Mode | Default Threshold | Description |
+| --- | --- | --- | --- |
+| **security** | `block` | `high` (or project `FailOn`) | Security vulnerabilities and secret leaks |
+| **architecture** | `comment` | `medium` | Structural and layer boundary rules (Konsist, packs) |
+| **accessibility** | `comment` | `medium` | Accessibility violations (contentDescription, touch targets) |
+| **style** | `comment` | `low` | Linter formatting and style warnings (Detekt, ktlint), collapsed in comments |
+| **quality** | `comment` | `medium` | Code quality and general lint warnings |
+
+- **Backward compatibility:** Existing `Enforcement` (`block` | `report`) and `FailOn` remain fully supported as the `security` category configuration.
+- **PR comment grouping:** Pull request review comments group findings by category. Security findings are shown open by default; non-security findings are collapsed in expandable `<details>` sections to reduce noise.
+- **Coverage footer:** The comment includes a coverage footer showing the status of expected tools. Unsigned ingest uploads are explicitly labeled as `uploaded by CI (unverified)` rather than claiming proof of execution, and missing uploads are marked as `not received`. Attested uploads (cryptographically verified server-side with an ed25519 `X-Signature` bound to `project_id|commit|pr|engine|format|sha256(body)`) display `received (<timestamp>)`. Replaying a signed body across different projects, commits, PRs, or engines is rejected as `ci-unattested`.
+- **Fallback comment:** Before a scan exists, Sentinix posts a comment stating `scan pending`, omitting the blocked/clean line until scan results arrive.
+- **Status checks & signed vs unsigned gating:**
+  - Sentinix publishes the overall `sentinix` check for security gating, plus per-category checks (`sentinix/security`, `sentinix/architecture`, `sentinix/style`, `sentinix/accessibility`, `sentinix/quality`).
+  - **Security gate (`sentinix`):** Only server-run scanners or cryptographically signed uploads (`X-Signature`) can fail the security status. Unsigned/unattested CI uploads are capped at Medium, excluded from the primary security check, and excluded from AI context to prevent merge DoS.
+  - **Non-security category checks (`sentinix/<cat>`):** By default, unsigned uploads are comment-only for `style`, `quality`, and `accessibility` to prevent merge DoS from unverified CI scripts. Only compiled architecture tests (Konsist in `architecture` category) may block from unsigned uploads when configured with `mode: block`. Unsigned callers cannot choose `category=architecture` for other engines to gain blocking. Gating other non-security categories requires cryptographically signed uploads (`X-Signature`).
+  - **Lifecycle closure & link table:** Ingest uploads only close findings for engines that are NOT server-owned (never `secrets`, `gitleaks`, `semgrep`, `osv-scanner`, `packs`, or `advisories`), only findings belonging to the same ingest origin, and tracked per-PR via a link table (`finding_prs`). A clean upload on PR 2 removes PR 2's association but never closes a finding that PR 1 still reports; findings are only marked fixed when no other PR/branch still reports them. Unsigned uploads cannot reopen fixed findings or close server findings.
+  - **Engine allowlist & SARIF resilience:** Engine names must match `^(pack:[a-z0-9._-]+(@[a-z0-9._+-]+)?|[a-z0-9._-]{1,64})$` (others rejected with 400), supporting standard tools and CLI pack engines. SARIF results containing path traversal (`..`) are dropped per finding instead of aborting the whole report.
+- **Safeguards:** Loosening any category mode (e.g. `block` -> `comment`), raising a severity threshold in block mode, or turning a check `off` requires two-person approval. Validation ensures only valid categories, modes, and severities can be written.
+
 ### Make blocking real
 
 The status only stops a merge if the git host is told to require it. Mark the `sentinix` status as a **required check** in your branch protection rules (GitHub, GitLab) or as a required build (Bitbucket). Note that required checks should treat Sentinix as blocking only in block mode. For report-only projects, scanner errors post a non-red status across git hosts (GitHub: neutral check-run; GitLab: success with "scanner unavailable"; Bitbucket: STOPPED) so that merges are never blocked on report-only projects when scanners are unavailable.
@@ -705,11 +731,13 @@ Authenticate with a session cookie (the dashboard) or `Authorization: Bearer <pr
 | `GET /api/me` | read | The current user |
 | `GET /api/posture?project=` | read | Posture numbers |
 | `GET /api/projects`, `POST /api/projects` | read, manage | List, create |
-| `PATCH /api/projects/{id}` | manage | `Enforcement` (`block`\|`report`), `FailOn`, `Branch`, `Schedule`, `TZ`, `ModelPolicy`, `AI`, `PackPins` |
+| `PATCH /api/projects/{id}` | manage | `Enforcement` (`block`\|`report`), `FailOn`, `Policy`, `Branch`, `Schedule`, `TZ`, `ModelPolicy`, `AI`, `PackPins` |
+| `GET /api/projects/{id}/policy` | read | Get effective per-category policies |
+| `PATCH /api/projects/{id}/policy` | manage | Update category policies (loosening requires approval) |
 | `POST /api/projects/{id}/scan` | scan | Queue a full scan (`{"Branch": "x"}` optional) |
 | `GET /api/projects/{id}/scans`, `/surface`, `/sbom` | read | Run history, attack surface, components |
 | `POST /api/projects/{id}/tokens` | manage | Create a CI token (`{"Name": "ci"}`) |
-| `POST /api/projects/{id}/ingest` | project token | Upload CLI scan results |
+| `POST /api/projects/{id}/ingest` | project token | Upload CLI scan results, SARIF (Detekt, ktlint, Lint), or JUnit XML (Konsist) |
 | `GET /api/projects/{id}/report/{format}` | read | [Reports](#10-reports-and-exports) |
 | `GET /api/findings` | read | Filters: `project`, `status`, `severity` (minimum), `owner`, `limit` |
 | `GET /api/findings/{id}` | read | The finding, plus its AI verdict if any |

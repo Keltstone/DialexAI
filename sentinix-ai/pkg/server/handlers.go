@@ -12,12 +12,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"sentinix/pkg/auth"
 	"sentinix/pkg/engines"
+	"sentinix/pkg/policy"
 	"sentinix/pkg/report"
 	"sentinix/pkg/store"
 )
@@ -88,7 +91,7 @@ func (a *App) updateProject(w http.ResponseWriter, r *http.Request) {
 	allowedKeys := map[string]bool{
 		"branch": true, "schedule": true, "tz": true, "pack_pins": true,
 		"enforcement": true, "fail_on": true, "model_policy": true, "ai": true,
-		"false_positive": true,
+		"false_positive": true, "policy": true, "category_policy": true,
 	}
 	for k := range raw {
 		if !allowedKeys[k] {
@@ -202,6 +205,58 @@ func (a *App) updateProject(w http.ResponseWriter, r *http.Request) {
 		}
 		approvalIDs = append(approvalIDs, appID)
 	}
+	var polRaw map[string]any
+	if pr, ok := raw["policy"].(map[string]any); ok {
+		polRaw = pr
+	} else if cpr, ok := raw["category_policy"].(map[string]any); ok {
+		polRaw = cpr
+	}
+	if polRaw != nil {
+		curPols, _ := a.Store.CategoryPolicies(p.ID)
+		for cat, v := range polRaw {
+			if !engines.IsValidCategory(cat) {
+				http.Error(w, "invalid category: "+cat, 400)
+				return
+			}
+			if vm, ok := v.(map[string]any); ok {
+				mode, _ := vm["mode"].(string)
+				thresh, _ := vm["threshold"].(string)
+				if mode == "" {
+					mode = "comment"
+				}
+				if thresh == "" {
+					thresh = "medium"
+				}
+				if mode != "block" && mode != "comment" && mode != "off" {
+					http.Error(w, "invalid mode: "+mode, 400)
+					return
+				}
+				if _, err := engines.ParseSeverity(thresh); err != nil {
+					http.Error(w, "invalid threshold: "+thresh, 400)
+					return
+				}
+				oldPol := curPols[cat]
+				oldThresh, _ := engines.ParseSeverity(oldPol.Threshold)
+				newThresh, _ := engines.ParseSeverity(thresh)
+				if policy.IsLoosening(policy.CategoryPolicy{Mode: oldPol.Mode, Threshold: oldThresh}, policy.CategoryPolicy{Mode: mode, Threshold: newThresh}) {
+					appID, err := a.Store.Propose("category_policy", map[string]any{
+						"project":   p.ID,
+						"category":  cat,
+						"mode":      mode,
+						"threshold": thresh,
+					}, user)
+					if err != nil {
+						fail(w, err, 500)
+						return
+					}
+					approvalIDs = append(approvalIDs, appID)
+				} else {
+					_ = a.Store.SetCategoryPolicy(p.ID, cat, mode, thresh)
+					a.audit_(r, "policy:tighten", p.Name, cat+"="+mode+"/"+thresh)
+				}
+			}
+		}
+	}
 
 	hasNonSec := false
 	if t := getString("tz"); t != nil && *t != p.TZ {
@@ -228,6 +283,112 @@ func (a *App) updateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, p)
+}
+
+func (a *App) getProjectPolicy(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !a.canReadProject(r, id) {
+		http.NotFound(w, r)
+		return
+	}
+	p, err := a.Store.Project(id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	pols, err := a.Store.CategoryPolicies(id)
+	if err != nil {
+		fail(w, err, 500)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"project":     p.ID,
+		"enforcement": p.Enforcement,
+		"fail_on":     p.FailOn,
+		"policies":    pols,
+	})
+}
+
+func (a *App) updateProjectPolicy(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	p, err := a.Store.Project(id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	var raw map[string]any
+	if !readJSON(w, r, &raw) {
+		return
+	}
+	user := who(r).Email
+
+	// Support either {"style": {...}} or {"policies": {"style": {...}}}
+	polMap := raw
+	if pRaw, ok := raw["policies"].(map[string]any); ok {
+		polMap = pRaw
+	} else if pRaw, ok := raw["policy"].(map[string]any); ok {
+		polMap = pRaw
+	}
+
+	curPols, _ := a.Store.CategoryPolicies(p.ID)
+	var approvalIDs []string
+
+	for cat, v := range polMap {
+		if !engines.IsValidCategory(cat) {
+			http.Error(w, "invalid category: "+cat, http.StatusBadRequest)
+			return
+		}
+		if vm, ok := v.(map[string]any); ok {
+			mode, _ := vm["mode"].(string)
+			thresh, _ := vm["threshold"].(string)
+			if mode == "" {
+				mode = "comment"
+			}
+			if thresh == "" {
+				thresh = "medium"
+			}
+			if mode != "block" && mode != "comment" && mode != "off" {
+				http.Error(w, "invalid mode: "+mode, http.StatusBadRequest)
+				return
+			}
+			if _, err := engines.ParseSeverity(thresh); err != nil {
+				http.Error(w, "invalid threshold: "+thresh, http.StatusBadRequest)
+				return
+			}
+			oldPol := curPols[cat]
+			oldThresh, _ := engines.ParseSeverity(oldPol.Threshold)
+			newThresh, _ := engines.ParseSeverity(thresh)
+
+			if policy.IsLoosening(policy.CategoryPolicy{Mode: oldPol.Mode, Threshold: oldThresh}, policy.CategoryPolicy{Mode: mode, Threshold: newThresh}) {
+				appID, err := a.Store.Propose("category_policy", map[string]any{
+					"project":   p.ID,
+					"category":  cat,
+					"mode":      mode,
+					"threshold": thresh,
+				}, user)
+				if err != nil {
+					fail(w, err, 500)
+					return
+				}
+				approvalIDs = append(approvalIDs, appID)
+			} else {
+				_ = a.Store.SetCategoryPolicy(p.ID, cat, mode, thresh)
+				a.audit_(r, "policy:tighten", p.Name, cat+"="+mode+"/"+thresh)
+			}
+		}
+	}
+
+	if len(approvalIDs) > 0 {
+		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, map[string]any{
+			"approval_id":  approvalIDs[0],
+			"approval_ids": approvalIDs,
+			"status":       "approval_required",
+		})
+		return
+	}
+	updated, _ := a.Store.CategoryPolicies(p.ID)
+	writeJSON(w, updated)
 }
 
 func (a *App) scanNow(w http.ResponseWriter, r *http.Request) {
@@ -333,19 +494,20 @@ func (a *App) deleteToken(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ingest takes a CI scan from the CLI. Only a token for the same project may post.
+// ingest takes a CI scan or ingested tool output (SARIF, JUnit XML). Only a token for the same project may post.
 func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 	p, ok := a.who(r)
 	if !ok || p.Project == "" || p.Project != r.PathValue("id") {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	var in struct {
-		Commit   string            `json:"commit"`
-		Ran      []string          `json:"ran"`
-		Findings []engines.Finding `json:"findings"`
+	proj, err := a.Store.Project(p.Project)
+	if err != nil {
+		http.NotFound(w, r)
+		return
 	}
-	bodyBytes, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4<<20))
+
+	bodyBytes, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) || strings.Contains(err.Error(), "request body too large") {
@@ -355,25 +517,144 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	dec := json.NewDecoder(bytes.NewReader(bodyBytes))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&in); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+
+	var validEngineName = regexp.MustCompile(`^(pack:[a-z0-9._-]+(@[a-z0-9._+-]+)?|[a-z0-9._-]{1,64})$`)
+
+	q := r.URL.Query()
+	engine := strings.TrimSpace(q.Get("engine"))
+	if engine != "" && !validEngineName.MatchString(engine) {
+		http.Error(w, "invalid engine name", http.StatusBadRequest)
 		return
 	}
+	category := strings.TrimSpace(q.Get("category"))
+	commit := strings.TrimSpace(q.Get("commit"))
+	pr := strings.TrimSpace(q.Get("pr"))
+	format := strings.ToLower(strings.TrimSpace(q.Get("format")))
 
-	knownEngines := map[string]bool{
-		"secrets": true, "semgrep": true, "gitleaks": true,
-		"osv-scanner": true, "packs": true, "advisories": true,
+	var env struct {
+		Project   string            `json:"project"`
+		ProjectID string            `json:"project_id"`
+		Commit    string            `json:"commit"`
+		PR        any               `json:"pr"`
+		Engine    string            `json:"engine"`
+		Category  string            `json:"category"`
+		Format    string            `json:"format"`
+		Data      string            `json:"data"`
+		Raw       string            `json:"raw"`
+		Ran       []string          `json:"ran"`
+		Findings  []engines.Finding `json:"findings"`
+	}
+
+	trimmedBody := bytes.TrimSpace(bodyBytes)
+	isJSON := len(trimmedBody) > 0 && trimmedBody[0] == '{' && json.Unmarshal(bodyBytes, &env) == nil
+
+	if isJSON {
+		if commit == "" && env.Commit != "" {
+			commit = env.Commit
+		}
+		if pr == "" && env.PR != nil {
+			pr = fmt.Sprintf("%v", env.PR)
+		}
+		if engine == "" && env.Engine != "" {
+			engine = env.Engine
+		}
+		if engine != "" && !validEngineName.MatchString(engine) {
+			http.Error(w, "invalid engine name", http.StatusBadRequest)
+			return
+		}
+		if category == "" && env.Category != "" {
+			category = env.Category
+		}
+		if format == "" && env.Format != "" {
+			format = strings.ToLower(strings.TrimSpace(env.Format))
+		}
+	}
+
+	if format == "" {
+		switch {
+		case len(env.Findings) > 0:
+			format = "findings"
+		case bytes.HasPrefix(trimmedBody, []byte("<")):
+			format = "junit"
+		case strings.Contains(engine, "konsist"):
+			format = "junit"
+		case strings.Contains(engine, "detekt") || strings.Contains(engine, "ktlint") || strings.Contains(engine, "lint"):
+			format = "sarif"
+		case bytes.Contains(bodyBytes, []byte(`"runs"`)) || bytes.Contains(bodyBytes, []byte(`"$schema"`)):
+			format = "sarif"
+		default:
+			format = "findings"
+		}
+	}
+
+	if engine == "" {
+		switch format {
+		case "junit", "xml":
+			engine = "konsist"
+		case "sarif":
+			engine = "sarif"
+		default:
+			engine = "secrets"
+		}
+	}
+	if !validEngineName.MatchString(engine) {
+		http.Error(w, "invalid engine name", http.StatusBadRequest)
+		return
 	}
 
 	var signedUpload bool
 	if sigHeader := r.Header.Get("X-Signature"); sigHeader != "" && len(a.TrustedKeys) > 0 {
 		if sigBytes, err := base64.StdEncoding.DecodeString(sigHeader); err == nil {
-			for _, k := range a.TrustedKeys {
-				if ed25519.Verify(k, bodyBytes, sigBytes) {
-					signedUpload = true
-					break
+			bodyHash := sha256.Sum256(bodyBytes)
+			contextMsg := fmt.Sprintf("%s|%s|%s|%s|%s|%x", proj.ID, commit, pr, engine, format, bodyHash)
+
+			// Check timestamp/nonce if provided
+			tsHeader := r.Header.Get("X-Signature-Timestamp")
+			if tsHeader == "" {
+				tsHeader = r.Header.Get("X-Timestamp")
+			}
+			tsValid := true
+			if tsHeader != "" {
+				if tsInt, err := strconv.ParseInt(tsHeader, 10, 64); err == nil {
+					nowUnix := time.Now().Unix()
+					if nowUnix-tsInt > 900 || tsInt-nowUnix > 300 { // 15 min expiry, 5 min clock skew
+						tsValid = false
+					}
+				} else {
+					tsValid = false
+				}
+			}
+
+			if tsValid {
+				contextMsgWithTS := ""
+				if tsHeader != "" {
+					contextMsgWithTS = fmt.Sprintf("%s|%s|%s|%s|%s|%s|%x", proj.ID, commit, pr, engine, format, tsHeader, bodyHash)
+				}
+
+				// Check if body itself binds context
+				validContextBody := false
+				if isJSON && env.Commit != "" && env.Commit == commit {
+					projectMatches := (env.Project == "" || env.Project == proj.ID) && (env.ProjectID == "" || env.ProjectID == proj.ID)
+					prMatches := (pr == "" || (env.PR != nil && fmt.Sprintf("%v", env.PR) == pr))
+					engineMatches := (engine == "" || env.Engine == "" || env.Engine == engine)
+					if projectMatches && prMatches && engineMatches {
+						validContextBody = true
+					}
+				}
+
+				for _, k := range a.TrustedKeys {
+					if ed25519.Verify(k, []byte(contextMsg), sigBytes) {
+						signedUpload = true
+						break
+					}
+					if contextMsgWithTS != "" && ed25519.Verify(k, []byte(contextMsgWithTS), sigBytes) {
+						signedUpload = true
+						break
+					}
+					if validContextBody && ed25519.Verify(k, bodyBytes, sigBytes) {
+						signedUpload = true
+						break
+					}
 				}
 			}
 		}
@@ -384,8 +665,97 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		source = "ci-attested"
 	}
 
-	for i := range in.Findings {
-		f := &in.Findings[i]
+	if !signedUpload && category == engines.CategoryArchitecture && strings.ToLower(engine) != "konsist" {
+		category = engines.CategoryQuality
+	}
+
+	var findings []engines.Finding
+	var parseErr error
+
+	switch format {
+	case "junit", "xml":
+		payload := bodyBytes
+		if isJSON && (env.Data != "" || env.Raw != "") {
+			if env.Data != "" {
+				payload = []byte(env.Data)
+			} else {
+				payload = []byte(env.Raw)
+			}
+		}
+		findings, parseErr = engines.ParseJUnit(engine, payload, category)
+
+	case "sarif":
+		payload := bodyBytes
+		if isJSON && (env.Data != "" || env.Raw != "") {
+			if env.Data != "" {
+				payload = []byte(env.Data)
+			} else {
+				payload = []byte(env.Raw)
+			}
+		}
+		findings, parseErr = engines.ParseSARIFWithCategory(engine, payload, category)
+
+	default: // findings
+		if !isJSON {
+			http.Error(w, "invalid json findings payload", http.StatusBadRequest)
+			return
+		}
+		findings = env.Findings
+	}
+
+	if parseErr != nil {
+		if commit != "" && engine != "" {
+			_ = a.Store.RecordIngestUpload(store.IngestUpload{
+				ProjectID:    proj.ID,
+				Commit:       commit,
+				PR:           pr,
+				Engine:       engine,
+				Category:     category,
+				Format:       format,
+				ReceivedAt:   time.Now().Unix(),
+				ParseStatus:  "failed",
+				FindingCount: 0,
+				ErrorMessage: parseErr.Error(),
+			})
+			if pr != "" {
+				_ = a.RefreshPRReview(r.Context(), &proj, commit, pr)
+			}
+		}
+		http.Error(w, fmt.Sprintf("parse error: %v", parseErr), http.StatusBadRequest)
+		return
+	}
+
+	knownEngines := map[string]bool{
+		"secrets": true, "semgrep": true, "gitleaks": true,
+		"osv-scanner": true, "packs": true, "advisories": true,
+		"detekt": true, "ktlint": true, "android-lint": true, "androidlint": true,
+		"lint": true, "konsist": true, "sarif": true, "junit": true,
+	}
+
+	var sanitizedFindings []engines.Finding
+	for i := range findings {
+		f := &findings[i]
+		if f.Engine == "" {
+			f.Engine = engine
+		}
+		if !validEngineName.MatchString(f.Engine) {
+			http.Error(w, fmt.Sprintf("invalid engine name %q", f.Engine), http.StatusBadRequest)
+			return
+		}
+		if f.Category == "" {
+			if category != "" {
+				f.Category = category
+			} else if format == "junit" {
+				f.Category = engines.CategoryArchitecture
+			} else {
+				f.Category = engines.CategorySecurity
+			}
+		}
+		f.Category = engines.NormalizeCategory(f.Category)
+		if !signedUpload && f.Category == engines.CategoryArchitecture && strings.ToLower(f.Engine) != "konsist" {
+			f.Category = engines.CategoryQuality
+		}
+
 		if !signedUpload && !knownEngines[f.Engine] && !strings.HasPrefix(f.Engine, "pack:") {
 			http.Error(w, fmt.Sprintf("unattested engine %q", f.Engine), http.StatusBadRequest)
 			return
@@ -396,7 +766,7 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if !signedUpload && f.Severity > engines.Medium {
+		if !signedUpload && format != "sarif" && format != "junit" && f.Severity > engines.Medium {
 			f.Severity = engines.Medium
 		}
 		f.Source = source
@@ -411,6 +781,7 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		if len(f.Message) > 500 {
 			f.Message = f.Message[:500]
 		}
+		f.Message = engines.Redact(f.Message)
 		if len(f.Evidence) > 200 {
 			f.Evidence = f.Evidence[:200]
 		}
@@ -427,21 +798,57 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		if len(f.File) > 255 {
 			f.File = f.File[:255]
 		}
+
+		// Validate path against path traversal: drop hostile finding instead of failing whole report
+		cleanFile := filepath.ToSlash(filepath.Clean(f.File))
+		if strings.Contains(f.File, "..") || strings.HasPrefix(cleanFile, "../") || cleanFile == ".." || (filepath.IsAbs(f.File) && strings.Contains(f.File, "..")) {
+			continue
+		}
+		cleanFile = strings.TrimPrefix(cleanFile, "/")
+		f.File = cleanFile
+		sanitizedFindings = append(sanitizedFindings, *f)
+	}
+	findings = sanitizedFindings
+
+	uploadCat := category
+	if uploadCat == "" && len(findings) > 0 {
+		uploadCat = findings[0].Category
+	}
+	findingsJSON, _ := json.Marshal(findings)
+	if commit != "" && engine != "" {
+		_ = a.Store.RecordIngestUpload(store.IngestUpload{
+			ProjectID:    proj.ID,
+			Commit:       commit,
+			PR:           pr,
+			Engine:       engine,
+			Category:     uploadCat,
+			Format:       format,
+			ReceivedAt:   time.Now().Unix(),
+			ParseStatus:  "success",
+			FindingCount: len(findings),
+			FindingsJSON: string(findingsJSON),
+			Attested:     signedUpload,
+		})
 	}
 
-	proj, err := a.Store.Project(p.Project)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	// Coverage ("ran") is never taken from the client and dummy findings must not close other findings: pass nil for ran
-	sc, err := a.Store.RecordScan(store.Scan{ProjectID: proj.ID, Mode: "ci", Commit: in.Commit, Source: source}, nil, in.Findings)
+	sc, err := a.Store.RecordScan(store.Scan{ProjectID: proj.ID, Mode: "ci", Commit: commit, Source: source, PR: pr}, nil, findings)
 	if err != nil {
 		fail(w, err, 500)
 		return
 	}
+
+	var currentFps []string
+	for _, f := range findings {
+		currentFps = append(currentFps, f.Fingerprint())
+	}
+	_ = a.Store.CloseEngineFindings(proj.ID, engine, pr, source, currentFps)
+
+	if pr != "" && commit != "" {
+		_ = a.RefreshPRReview(r.Context(), &proj, commit, pr)
+	}
+
 	src := a.clientIP(r)
-	a.Store.AddAudit(store.Audit{Actor: p.Email, Action: "scan:ci", Target: proj.Name, Commit: in.Commit, Source: src})
+	a.Store.AddAudit(store.Audit{Actor: p.Email, Action: "scan:ci", Target: proj.Name, Commit: commit, Source: src})
 	writeJSON(w, sc)
 }
 

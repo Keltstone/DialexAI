@@ -41,9 +41,35 @@ func ParseSeverity(v string) (Severity, error) {
 	return 0, fmt.Errorf("unknown severity %q", v)
 }
 
+const (
+	CategorySecurity      = "security"
+	CategoryArchitecture  = "architecture"
+	CategoryStyle         = "style"
+	CategoryAccessibility = "accessibility"
+	CategoryQuality       = "quality"
+)
+
+var ValidCategories = []string{
+	CategorySecurity,
+	CategoryArchitecture,
+	CategoryStyle,
+	CategoryAccessibility,
+	CategoryQuality,
+}
+
+func IsValidCategory(c string) bool {
+	for _, v := range ValidCategories {
+		if c == v {
+			return true
+		}
+	}
+	return false
+}
+
 type Finding struct {
 	Rule       string   `json:"rule"`
 	Engine     string   `json:"engine"`
+	Category   string   `json:"category"`
 	File       string   `json:"file"`
 	Line       int      `json:"line"`
 	Severity   Severity `json:"severity"`
@@ -54,6 +80,17 @@ type Finding struct {
 	Match      string   `json:"match,omitempty"`
 	Occurrence int      `json:"occurrence,omitempty"`
 	Source     string   `json:"source,omitempty"`
+}
+
+func NormalizeCategory(c string) string {
+	if c == "" || !IsValidCategory(c) {
+		return CategorySecurity
+	}
+	return c
+}
+
+func (f Finding) NormalizedCategory() string {
+	return NormalizeCategory(f.Category)
 }
 
 var (
@@ -417,16 +454,108 @@ func (e External) ScanContext(ctx context.Context, root string) ([]Finding, erro
 	if err != nil {
 		return nil, err
 	}
+	realIso, _ := filepath.EvalSymlinks(isoDir)
+	realIsoClean := strings.TrimPrefix(filepath.ToSlash(realIso), "/")
+	isoDirClean := strings.TrimPrefix(filepath.ToSlash(isoDir), "/")
 	for i := range fs {
 		cleanFile := strings.TrimPrefix(fs[i].File, "file://")
-		cleanFile = strings.TrimPrefix(cleanFile, isoDir)
+		cleanFile = strings.TrimPrefix(filepath.ToSlash(cleanFile), "/")
+		if realIsoClean != "" {
+			cleanFile = strings.TrimPrefix(cleanFile, realIsoClean)
+			cleanFile = strings.TrimPrefix(cleanFile, "/")
+		}
+		cleanFile = strings.TrimPrefix(cleanFile, isoDirClean)
 		cleanFile = strings.TrimPrefix(cleanFile, "/")
 		fs[i].File = cleanFile
 	}
 	return fs, nil
 }
 
+func MapSARIFSeverityAndCategory(tool, ruleID, level, message, defaultCategory string) (Severity, string) {
+	t := strings.ToLower(tool)
+	ruleLower := strings.ToLower(ruleID)
+	msgLower := strings.ToLower(message)
+	lvl := strings.ToLower(level)
+
+	cat := defaultCategory
+
+	switch {
+	case strings.Contains(t, "detekt") || strings.Contains(t, "ktlint"):
+		if cat == "" {
+			cat = CategoryStyle
+		}
+		// Spec section 3: Detekt / ktlint warning, style -> low
+		return Low, cat
+
+	case strings.Contains(t, "android-lint") || strings.Contains(t, "androidlint") || strings.Contains(t, "lint"):
+		isA11y := strings.Contains(ruleLower, "accessibility") ||
+			strings.Contains(ruleLower, "contentdescription") ||
+			strings.Contains(ruleLower, "touchtarget") ||
+			strings.Contains(ruleLower, "clickableview") ||
+			strings.Contains(msgLower, "accessibility") ||
+			strings.Contains(msgLower, "contentdescription")
+		if isA11y {
+			if cat == "" {
+				cat = CategoryAccessibility
+			}
+			// Spec section 3: Android Lint a11y error -> high; warning -> medium
+			if lvl == "error" {
+				return High, cat
+			}
+			return Medium, cat
+		}
+
+		isSec := strings.Contains(ruleLower, "security") ||
+			strings.Contains(ruleLower, "exported") ||
+			strings.Contains(ruleLower, "cleartext") ||
+			strings.Contains(ruleLower, "trustall") ||
+			strings.Contains(ruleLower, "debuggable")
+		if isSec {
+			if cat == "" {
+				cat = CategorySecurity
+			}
+			if lvl == "error" {
+				return High, cat
+			}
+			return Medium, cat
+		}
+
+		if cat == "" {
+			cat = CategoryQuality
+		}
+		// Spec section 3: Lint other error / warning -> medium / low
+		if lvl == "error" {
+			return Medium, cat
+		}
+		return Low, cat
+
+	case strings.Contains(t, "konsist"):
+		if cat == "" {
+			cat = CategoryArchitecture
+		}
+		// Spec section 3: Konsist failure (architecture) -> high
+		return High, cat
+
+	default:
+		if cat == "" {
+			cat = CategorySecurity
+		}
+		switch lvl {
+		case "error":
+			return High, cat
+		case "note":
+			return Low, cat
+		default:
+			return Medium, cat
+		}
+	}
+}
+
 func ParseSARIF(engine string, data []byte) ([]Finding, error) {
+	return ParseSARIFWithCategory(engine, data, "")
+}
+
+func ParseSARIFWithCategory(engine string, data []byte, defaultCategory string) ([]Finding, error) {
 	type notification struct {
 		Level   string `json:"level"`
 		Message struct {
@@ -435,6 +564,11 @@ func ParseSARIF(engine string, data []byte) ([]Finding, error) {
 	}
 	var s struct {
 		Runs []struct {
+			Tool struct {
+				Driver struct {
+					Name string `json:"name"`
+				} `json:"driver"`
+			} `json:"tool"`
 			Invocations []struct {
 				ExecutionSuccessful        *bool          `json:"executionSuccessful"`
 				ToolExecutionNotifications []notification `json:"toolExecutionNotifications"`
@@ -477,14 +611,13 @@ func ParseSARIF(engine string, data []byte) ([]Finding, error) {
 
 	var fs []Finding
 	for _, r := range s.Runs {
+		toolName := engine
+		if r.Tool.Driver.Name != "" {
+			toolName = r.Tool.Driver.Name
+		}
 		for _, x := range r.Results {
-			f := Finding{Rule: x.RuleID, Engine: engine, Message: x.Message.Text, Severity: Medium}
-			switch x.Level {
-			case "error":
-				f.Severity = High
-			case "note":
-				f.Severity = Low
-			}
+			sev, cat := MapSARIFSeverityAndCategory(toolName, x.RuleID, x.Level, x.Message.Text, defaultCategory)
+			f := Finding{Rule: x.RuleID, Engine: engine, Category: cat, Message: x.Message.Text, Severity: sev}
 			if fp, ok := x.PartialFingerprints["primaryLocationLineHash"]; ok && fp != "" {
 				f.Match = fp
 			} else if len(x.PartialFingerprints) > 0 {
@@ -497,7 +630,17 @@ func ParseSARIF(engine string, data []byte) ([]Finding, error) {
 			}
 			if len(x.Locations) > 0 {
 				loc := x.Locations[0]
-				f.File = loc.Physical.Artifact.URI
+				uri := loc.Physical.Artifact.URI
+				uri = strings.TrimPrefix(uri, "file://")
+				cleanFile := filepath.ToSlash(filepath.Clean(uri))
+				if strings.Contains(uri, "..") || strings.HasPrefix(cleanFile, "../") || cleanFile == ".." || (filepath.IsAbs(uri) && strings.Contains(uri, "..")) {
+					// Drop hostile result per finding instead of failing whole report
+					continue
+				}
+				if !filepath.IsAbs(uri) {
+					cleanFile = strings.TrimPrefix(cleanFile, "/")
+				}
+				f.File = cleanFile
 				f.Line = loc.Physical.Region.StartLine
 				snip := loc.Physical.Region.Snippet.Text
 				if snip == "" {

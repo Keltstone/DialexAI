@@ -9,11 +9,11 @@ import (
 
 type Finding struct {
 	engines.Finding
-	ID, ProjectID, Fingerprint, Status, Owner, FirstCommit string
-	FirstSeen, LastSeen                                    int64
-	AcceptedReason                                         string
-	AcceptedUntil                                          int64 // unix; accepted risks reopen after this
-	Ticket                                                 string
+	ID, ProjectID, Fingerprint, Status, Owner, FirstCommit, PR string
+	FirstSeen, LastSeen                                        int64
+	AcceptedReason                                             string
+	AcceptedUntil                                              int64 // unix; accepted risks reopen after this
+	Ticket                                                     string
 }
 
 type Scan struct {
@@ -25,14 +25,17 @@ type Scan struct {
 	Source                          string
 }
 
-const findCols = "id,project_id,fingerprint,rule,engine,file,line,severity,message,evidence,cwe,fix,status,owner,first_commit,first_seen,last_seen,accepted_reason,accepted_until,ticket,source"
+const findCols = "id,project_id,fingerprint,rule,engine,file,line,severity,message,evidence,cwe,fix,status,owner,first_commit,first_seen,last_seen,accepted_reason,accepted_until,ticket,source,category,pr"
 
 func scanFinding(r interface{ Scan(...any) error }) (Finding, error) {
 	var f Finding
 	var sev int
 	err := r.Scan(&f.ID, &f.ProjectID, &f.Fingerprint, &f.Rule, &f.Engine, &f.File, &f.Line, &sev, &f.Message, &f.Evidence,
-		&f.CWE, &f.Fix, &f.Status, &f.Owner, &f.FirstCommit, &f.FirstSeen, &f.LastSeen, &f.AcceptedReason, &f.AcceptedUntil, &f.Ticket, &f.Source)
+		&f.CWE, &f.Fix, &f.Status, &f.Owner, &f.FirstCommit, &f.FirstSeen, &f.LastSeen, &f.AcceptedReason, &f.AcceptedUntil, &f.Ticket, &f.Source, &f.Category, &f.PR)
 	f.Severity = engines.Severity(sev)
+	if f.Category == "" {
+		f.Category = "security"
+	}
 	return f, err
 }
 
@@ -67,23 +70,39 @@ func (s *Store) RecordScan(sc Scan, ran []string, fs []engines.Finding) (Scan, e
 		if src == "" {
 			src = sc.Source
 		}
+		cat := f.Category
+		if cat == "" {
+			cat = "security"
+		}
 		var st string
 		err := tx.QueryRow("select status from findings where project_id=$1 and fingerprint=$2", sc.ProjectID, fp).Scan(&st)
 		switch {
 		case err != nil: // not found
-			_, err = tx.Exec("insert into findings("+findCols+",updated) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'open','',$13,$14,$14,'',0,'',$15,$14)",
-				id(), sc.ProjectID, fp, f.Rule, f.Engine, f.File, f.Line, int(f.Severity), f.Message, f.Evidence, f.CWE, f.Fix, sc.Commit, t, src)
+			_, err = tx.Exec("insert into findings("+findCols+",updated) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'open','',$13,$14,$14,'',0,'',$15,$16,$17,$14)",
+				id(), sc.ProjectID, fp, f.Rule, f.Engine, f.File, f.Line, int(f.Severity), f.Message, f.Evidence, f.CWE, f.Fix, sc.Commit, t, src, cat, sc.PR)
+			if err == nil && sc.PR != "" {
+				_, _ = tx.Exec("insert into finding_prs(project_id,fingerprint,pr,engine) values($1,$2,$3,$4) on conflict do nothing",
+					sc.ProjectID, fp, sc.PR, f.Engine)
+			}
 			sc.New++
 		case st == "fixed":
 			if src == "ci-unattested" || sc.Source == "ci-unattested" {
 				// Reopening a fixed finding from an unattested upload is refused.
 				continue
 			}
-			_, err = tx.Exec("update findings set status='open',line=$3,last_seen=$4,updated=$4,severity=$5,source=$6 where project_id=$1 and fingerprint=$2",
-				sc.ProjectID, fp, f.Line, t, int(f.Severity), src)
+			_, err = tx.Exec("update findings set status='open',line=$3,last_seen=$4,updated=$4,severity=$5,source=$6,category=$7,pr=$8 where project_id=$1 and fingerprint=$2",
+				sc.ProjectID, fp, f.Line, t, int(f.Severity), src, cat, sc.PR)
+			if err == nil && sc.PR != "" {
+				_, _ = tx.Exec("insert into finding_prs(project_id,fingerprint,pr,engine) values($1,$2,$3,$4) on conflict do nothing",
+					sc.ProjectID, fp, sc.PR, f.Engine)
+			}
 			sc.New++
 		default:
-			_, err = tx.Exec("update findings set line=$3,last_seen=$4 where project_id=$1 and fingerprint=$2", sc.ProjectID, fp, f.Line, t)
+			_, err = tx.Exec("update findings set line=$3,last_seen=$4,category=$5,pr=$6 where project_id=$1 and fingerprint=$2", sc.ProjectID, fp, f.Line, t, cat, sc.PR)
+			if err == nil && sc.PR != "" {
+				_, _ = tx.Exec("insert into finding_prs(project_id,fingerprint,pr,engine) values($1,$2,$3,$4) on conflict do nothing",
+					sc.ProjectID, fp, sc.PR, f.Engine)
+			}
 			sc.Unchanged++
 		}
 		if err != nil {
@@ -107,12 +126,26 @@ func (s *Store) RecordScan(sc Scan, ran []string, fs []engines.Finding) (Scan, e
 		}
 	}
 	rows.Close()
+	var reallyFixed int
 	for _, fp := range gone {
+		if sc.PR != "" {
+			_, _ = tx.Exec("delete from finding_prs where project_id=$1 and pr=$2 and fingerprint=$3", sc.ProjectID, sc.PR, fp)
+			var remaining int
+			var otherPR string
+			_ = tx.QueryRow("select count(*), coalesce(max(pr), '') from finding_prs where project_id=$1 and fingerprint=$2", sc.ProjectID, fp).Scan(&remaining, &otherPR)
+			if remaining > 0 {
+				if otherPR != "" {
+					_, _ = tx.Exec("update findings set pr=$1, updated=$2 where project_id=$3 and fingerprint=$4 and status='open'", otherPR, t, sc.ProjectID, fp)
+				}
+				continue
+			}
+		}
 		if _, err := tx.Exec("update findings set status='fixed',updated=$3 where project_id=$1 and fingerprint=$2", sc.ProjectID, fp, t); err != nil {
 			return sc, err
 		}
+		reallyFixed++
 	}
-	sc.Fixed = len(gone)
+	sc.Fixed = reallyFixed
 	sc.Engines = strings.Join(ran, ",")
 	_, err = tx.Exec("insert into scans(id,project_id,mode,commit_sha,pr,started,duration_ms,new_count,fixed_count,unchanged_count,packs,engines) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
 		sc.ID, sc.ProjectID, sc.Mode, sc.Commit, sc.PR, sc.Started, sc.DurationMS, sc.New, sc.Fixed, sc.Unchanged, sc.Packs, sc.Engines)
@@ -141,14 +174,14 @@ func (s *Store) Scans(project string, limit int) ([]Scan, error) {
 }
 
 type Filter struct {
-	Project, Status, Owner string
-	MinSeverity            engines.Severity
-	Limit                  int
+	Project, Status, Owner, Category string
+	MinSeverity                      engines.Severity
+	Limit                            int
 }
 
 func (s *Store) Findings(f Filter) ([]Finding, error) {
 	q, args := "select "+findCols+" from findings where severity>=$1", []any{int(f.MinSeverity)}
-	for col, v := range map[string]string{"project_id": f.Project, "status": f.Status, "owner": f.Owner} {
+	for col, v := range map[string]string{"project_id": f.Project, "status": f.Status, "owner": f.Owner, "category": f.Category} {
 		if v != "" {
 			args = append(args, v)
 			q += fmt.Sprintf(" and %s=$%d", col, len(args))

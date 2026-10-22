@@ -138,6 +138,7 @@ func (s Secrets) ScanWithSkipped(ctx context.Context, root string) ([]Finding, [
 				out = append(out, Finding{
 					Rule:     "file/nul-byte",
 					Engine:   "secrets",
+					Category: CategorySecurity,
 					File:     rel,
 					Line:     1,
 					Severity: Info,
@@ -190,6 +191,7 @@ func (s Secrets) ScanWithSkipped(ctx context.Context, root string) ([]Finding, [
 						fCandidate := Finding{
 							Rule:       rRule.ID,
 							Engine:     "secrets",
+							Category:   CategorySecurity,
 							File:       rel,
 							Line:       n,
 							Severity:   sev,
@@ -225,6 +227,7 @@ func (s Secrets) ScanWithSkipped(ctx context.Context, root string) ([]Finding, [
 							fCandidate := Finding{
 								Rule:       "secret.high-entropy",
 								Engine:     "secrets",
+								Category:   CategorySecurity,
 								File:       rel,
 								Line:       n,
 								Severity:   High,
