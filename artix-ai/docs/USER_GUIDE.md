@@ -463,7 +463,7 @@ jobs:
 
 **YES! Artix AI features a 100% full-parity Graphical User Interface (GUI).**
 
-For Product Owners, Engineering Managers, and developers who prefer a modern visual workbench over terminal commands, Artix provides a standalone Desktop Cockpit built natively with **Compose Multiplatform** and **KoltLibs** (`io.github.koltalabs.kolt:compose-kmp`, `utils`, `logutils`).
+For Product Owners, Engineering Managers, and developers who prefer a modern visual workbench over terminal commands, Artix provides a standalone Desktop Cockpit built natively with **Compose Multiplatform** and **KoltLibs** (`io.github.keltstone.kolt:compose-kmp`, `utils`, `logutils`).
 
 Every capability available in the CLI and LSP—from Socratic alignment interviews to shadow worktree time-travel scrubbers—is accessible visually with clicks, sliders, and toggles.
 

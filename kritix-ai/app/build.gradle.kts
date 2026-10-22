@@ -22,9 +22,9 @@ kotlin {
             implementation(libs.lifecycle.viewmodel)
             implementation(libs.lifecycle.viewmodel.compose)
             implementation(libs.lifecycle.runtime.compose)
-            implementation("io.github.koltalabs.kolt:utils")
-            implementation("io.github.koltalabs.kolt:logutils")
-            implementation("io.github.koltalabs.kolt:compose-kmp")
+            implementation("io.github.keltstone.kolt:utils")
+            implementation("io.github.keltstone.kolt:logutils")
+            implementation("io.github.keltstone.kolt:compose-kmp")
         }
     }
 }

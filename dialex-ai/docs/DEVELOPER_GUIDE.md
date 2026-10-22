@@ -50,9 +50,9 @@ DialexAI/
 
 ### 2.1 Why KoltLibs is Required
 Kolt provides the foundational architecture across all Kolta Labs multiplatform projects:
-- **`io.github.koltalabs.kolt:compose-kmp`**: The design system architecture (`CcPalette`, `LocalCcColors`, `ThemeMode`), elevation tokens, button styles, and fluid typography.
-- **`io.github.koltalabs.kolt:utils`**: The canonical `AsyncState<T>` reactive monad (`Uninitialized`, `Loading`, `Success`, `Error`) used across all ViewModels and domain repositories.
-- **`io.github.koltalabs.kolt:logutils`**: Release-gated multiplatform structured logging with level filters and telemetry sinks.
+- **`io.github.keltstone.kolt:compose-kmp`**: The design system architecture (`CcPalette`, `LocalCcColors`, `ThemeMode`), elevation tokens, button styles, and fluid typography.
+- **`io.github.keltstone.kolt:utils`**: The canonical `AsyncState<T>` reactive monad (`Uninitialized`, `Loading`, `Success`, `Error`) used across all ViewModels and domain repositories.
+- **`io.github.keltstone.kolt:logutils`**: Release-gated multiplatform structured logging with level filters and telemetry sinks.
 
 ### 2.2 How to Obtain & Clone KoltLibs
 To build Dialex AI from source, follow this workspace layout:
@@ -62,7 +62,7 @@ To build Dialex AI from source, follow this workspace layout:
 mkdir -p ~/Workspace && cd ~/Workspace
 
 # 2. Clone the Kolt repository
-git clone https://github.com/Kolta-Labs/Kolt.git
+git clone https://github.com/keltstone/Kolt.git
 
 # 3. Clone DialexAI alongside Kolt
 git clone https://github.com/Kolta-Labs/DialexAI.git

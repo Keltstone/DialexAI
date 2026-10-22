@@ -182,4 +182,4 @@ We want real contributors on scoped pieces of work (docs, a runner, a platform p
 
 ## Development & Engineering Standards
 
-All modules adhere to the [Kolta KMP & Go Engineering Standards](https://github.com/Kolta-Labs/Kolt). Personas, agents, and tooling are governed by rules symlinked in `.standards/`.
+All modules adhere to the [Kolta KMP & Go Engineering Standards](https://github.com/keltstone/Kolt). Personas, agents, and tooling are governed by rules symlinked in `.standards/`.
