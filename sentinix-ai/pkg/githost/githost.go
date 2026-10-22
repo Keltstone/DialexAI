@@ -55,6 +55,7 @@ type Host interface {
 	// Parse verifies the signature/token, then returns the event, or nil for events to ignore.
 	Parse(r *http.Request, body []byte) (*Event, error)
 	Status(ctx context.Context, e *Event, s State, desc string) error
+	StatusNamed(ctx context.Context, e *Event, name string, s State, desc string) error
 	Comment(ctx context.Context, e *Event, body string) error
 	// CloneAuth is the user/token pair for HTTPS clones.
 	CloneAuth() (user, token string)

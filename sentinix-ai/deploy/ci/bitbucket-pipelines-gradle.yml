@@ -1,0 +1,25 @@
+# Sample Bitbucket Pipelines configuration for running Gradle checks and uploading to Sentinix.
+# Copy to bitbucket-pipelines.yml. Set SENTINIX_TOKEN, SENTINIX_URL, and SENTINIX_PROJECT_ID as repository variables.
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: Gradle checks and Sentinix upload
+          image: eclipse-temurin:17-jdk
+          script:
+            - ./gradlew check --continue || true
+            - |
+              if [ -f build/reports/detekt/detekt.sarif ]; then
+                curl -s -f -X POST \
+                  -H "Authorization: Bearer $SENTINIX_TOKEN" \
+                  "$SENTINIX_URL/api/projects/$SENTINIX_PROJECT_ID/ingest?engine=detekt&format=sarif&commit=$BITBUCKET_COMMIT&pr=$BITBUCKET_PR_ID" \
+                  --data-binary @build/reports/detekt/detekt.sarif
+              fi
+            - |
+              find build/test-results -type f -name "*Konsist*.xml" 2>/dev/null | while read -r xmlFile; do
+                curl -s -f -X POST \
+                  -H "Authorization: Bearer $SENTINIX_TOKEN" \
+                  "$SENTINIX_URL/api/projects/$SENTINIX_PROJECT_ID/ingest?engine=konsist&format=junit&commit=$BITBUCKET_COMMIT&pr=$BITBUCKET_PR_ID" \
+                  --data-binary @"$xmlFile"
+              done

@@ -1,0 +1,62 @@
+# Sample GitHub Actions workflow running Gradle checks and uploading results to Sentinix.
+# Copy to .github/workflows/sentinix-review.yml in your repository.
+name: Sentinix Review Orchestrator
+
+on:
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  gradle-checks-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Run Gradle checks (Detekt, ktlint, Konsist, Lint)
+        run: ./gradlew check --continue || true
+
+      - name: Upload Detekt SARIF to Sentinix
+        if: always()
+        run: |
+          if [ -f build/reports/detekt/detekt.sarif ]; then
+            curl -s -f -X POST \
+              -H "Authorization: Bearer ${{ secrets.SENTINIX_TOKEN }}" \
+              "${{ vars.SENTINIX_URL }}/api/projects/${{ vars.SENTINIX_PROJECT_ID }}/ingest?engine=detekt&format=sarif&commit=${{ github.event.pull_request.head.sha }}&pr=${{ github.event.pull_request.number }}" \
+              --data-binary @build/reports/detekt/detekt.sarif
+          fi
+
+      - name: Upload ktlint SARIF to Sentinix
+        if: always()
+        run: |
+          if [ -f build/reports/ktlint/ktlint.sarif ]; then
+            curl -s -f -X POST \
+              -H "Authorization: Bearer ${{ secrets.SENTINIX_TOKEN }}" \
+              "${{ vars.SENTINIX_URL }}/api/projects/${{ vars.SENTINIX_PROJECT_ID }}/ingest?engine=ktlint&format=sarif&commit=${{ github.event.pull_request.head.sha }}&pr=${{ github.event.pull_request.number }}" \
+              --data-binary @build/reports/ktlint/ktlint.sarif
+          fi
+
+      - name: Upload Android Lint SARIF to Sentinix
+        if: always()
+        run: |
+          if [ -f build/reports/lint-results.sarif ]; then
+            curl -s -f -X POST \
+              -H "Authorization: Bearer ${{ secrets.SENTINIX_TOKEN }}" \
+              "${{ vars.SENTINIX_URL }}/api/projects/${{ vars.SENTINIX_PROJECT_ID }}/ingest?engine=android-lint&format=sarif&commit=${{ github.event.pull_request.head.sha }}&pr=${{ github.event.pull_request.number }}" \
+              --data-binary @build/reports/lint-results.sarif
+          fi
+
+      - name: Upload Konsist JUnit results to Sentinix
+        if: always()
+        run: |
+          find build/test-results -type f -name "*Konsist*.xml" 2>/dev/null | while read -r xmlFile; do
+            curl -s -f -X POST \
+              -H "Authorization: Bearer ${{ secrets.SENTINIX_TOKEN }}" \
+              "${{ vars.SENTINIX_URL }}/api/projects/${{ vars.SENTINIX_PROJECT_ID }}/ingest?engine=konsist&format=junit&commit=${{ github.event.pull_request.head.sha }}&pr=${{ github.event.pull_request.number }}" \
+              --data-binary @"$xmlFile"
+          done

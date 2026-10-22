@@ -215,6 +215,7 @@ func (e Engine) ScanWithSkipped(ctx context.Context, root string) ([]engines.Fin
 				out = append(out, engines.Finding{
 					Rule:     "file/nul-byte",
 					Engine:   "packs",
+					Category: engines.CategorySecurity,
 					File:     rel,
 					Line:     1,
 					Severity: engines.Info,

@@ -25,10 +25,15 @@ func (f *fakeHost) Parse(*http.Request, []byte) (*githost.Event, error) { return
 func (f *fakeHost) CloneAuth() (string, string)                         { return "", "" }
 func (f *fakeHost) RepoURL(p string) string                             { return p }
 func (f *fakeHost) ConfiguredHost() string                              { return "fake.example" }
-func (f *fakeHost) Status(_ context.Context, _ *githost.Event, s githost.State, desc string) error {
-	f.state = s
-	f.desc = desc
+func (f *fakeHost) StatusNamed(_ context.Context, _ *githost.Event, name string, s githost.State, desc string) error {
+	if name == "sentinix" || f.state == -1 {
+		f.state = s
+		f.desc = desc
+	}
 	return nil
+}
+func (f *fakeHost) Status(ctx context.Context, e *githost.Event, s githost.State, desc string) error {
+	return f.StatusNamed(ctx, e, "sentinix", s, desc)
 }
 func (f *fakeHost) Comment(_ context.Context, _ *githost.Event, b string) error {
 	f.comment = b

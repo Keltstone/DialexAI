@@ -21,6 +21,7 @@ import (
 type Manifest struct {
 	Name       string   `json:"name"`
 	Version    string   `json:"version"`
+	Category   string   `json:"category,omitempty"` // default pack category
 	Stacks     []string `json:"stacks"` // empty = every stack
 	MinVersion string   `json:"min_version,omitempty"`
 	Author     string   `json:"author,omitempty"`
@@ -28,6 +29,7 @@ type Manifest struct {
 
 type Rule struct {
 	ID           string   `json:"id"`
+	Category     string   `json:"category,omitempty"` // category override
 	Severity     string   `json:"severity"`
 	CWE          string   `json:"cwe,omitempty"`
 	Message      string   `json:"message"`
@@ -211,7 +213,14 @@ func (p *Pack) match(file, content, only string) []engines.Finding {
 		if (only != "" && r.ID != only) || !r.applies(file) {
 			continue
 		}
-		base := engines.Finding{Rule: p.Name + "/" + r.ID, Engine: "pack:" + p.Name + "@" + p.Version, File: file,
+		cat := r.Category
+		if cat == "" {
+			cat = p.Category
+		}
+		if cat == "" {
+			cat = engines.CategorySecurity
+		}
+		base := engines.Finding{Rule: p.Name + "/" + r.ID, Engine: "pack:" + p.Name + "@" + p.Version, Category: cat, File: file,
 			Severity: r.sev, Message: r.Message, CWE: r.CWE, Fix: r.Remediation}
 		if r.Multiline {
 			for _, m := range r.re.FindAllStringIndex(content, -1) {

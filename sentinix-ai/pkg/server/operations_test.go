@@ -32,6 +32,9 @@ func (c *countingHost) CloneAuth() (string, string) {
 func (c *countingHost) Status(ctx context.Context, e *githost.Event, s githost.State, desc string) error {
 	return nil
 }
+func (c *countingHost) StatusNamed(ctx context.Context, e *githost.Event, name string, s githost.State, desc string) error {
+	return nil
+}
 func (c *countingHost) Parse(r *http.Request, body []byte) (*githost.Event, error) { return nil, nil }
 func (c *countingHost) Comment(ctx context.Context, e *githost.Event, body string) error {
 	c.comments = append(c.comments, body)

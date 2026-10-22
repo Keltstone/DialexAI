@@ -231,72 +231,315 @@ func (a *App) gate(p *store.Project) (blocking bool, threshold engines.Severity)
 	return
 }
 
+func FormatReviewComment(blocking bool, threshold engines.Severity, allNew, resolved []engines.Finding, ran, skipped []string, uploads []store.IngestUpload, expectedTools []string) string {
+	var buf bytes.Buffer
+	buf.WriteString("<!-- sentinix-review-marker -->\n")
+	buf.WriteString("### Sentinix\n")
+	if blocking {
+		fmt.Fprintf(&buf, "Merge is blocked by new findings at **%s** or above.\n\n", threshold)
+	} else {
+		buf.WriteString("Report only: these findings do not block the merge.\n\n")
+	}
+
+	grouped := policy.GroupByCategory(allNew)
+
+	// 1. Security section (open by default)
+	secFindings := grouped[engines.CategorySecurity]
+	if len(secFindings) > 0 {
+		fmt.Fprintf(&buf, "#### Security (%d)\n```\n", len(secFindings))
+		shownSec := secFindings
+		if len(shownSec) > 50 {
+			shownSec = shownSec[:50]
+		}
+		for _, f := range shownSec {
+			fmt.Fprintf(&buf, "[%s] %s %s:%d %s\n", f.Severity, report.SanitizeField(f.Rule), report.SanitizeField(f.File), f.Line, report.SanitizeField(f.Message))
+		}
+		buf.WriteString("```\n")
+		if len(secFindings) > 50 {
+			fmt.Fprintf(&buf, "%d more not shown.\n", len(secFindings)-50)
+		}
+		buf.WriteString("\n")
+	}
+
+	// 2. Non-security sections (collapsed by default)
+	nonSecCats := []string{engines.CategoryArchitecture, engines.CategoryAccessibility, engines.CategoryStyle, engines.CategoryQuality}
+	for _, cat := range nonSecCats {
+		catFindings := grouped[cat]
+		if len(catFindings) > 0 {
+			title := strings.Title(cat)
+			fmt.Fprintf(&buf, "<details><summary>%s (%d)</summary>\n\n```\n", title, len(catFindings))
+			shown := catFindings
+			if len(shown) > 50 {
+				shown = shown[:50]
+			}
+			for _, f := range shown {
+				fmt.Fprintf(&buf, "[%s] %s %s:%d %s\n", f.Severity, report.SanitizeField(f.Rule), report.SanitizeField(f.File), f.Line, report.SanitizeField(f.Message))
+			}
+			buf.WriteString("```\n")
+			if len(catFindings) > 50 {
+				fmt.Fprintf(&buf, "%d more not shown.\n", len(catFindings)-50)
+			}
+			buf.WriteString("</details>\n\n")
+		}
+	}
+
+	if len(allNew) == 0 {
+		buf.WriteString("No new findings introduced by this change.\n\n")
+	}
+
+	if len(resolved) > 0 {
+		fmt.Fprintf(&buf, "<details><summary>Resolved findings (%d)</summary>\n\n", len(resolved))
+		for _, f := range resolved {
+			fmt.Fprintf(&buf, "- ~%s~ in `%s:%d`\n", report.SanitizeField(f.Rule), report.SanitizeField(f.File), f.Line)
+		}
+		buf.WriteString("</details>\n\n")
+	}
+
+	// 3. Coverage footer
+	buf.WriteString("<details><summary>Coverage</summary>\n\n")
+	if len(ran) > 0 {
+		var sanRan []string
+		for _, r := range ran {
+			sanRan = append(sanRan, report.SanitizeField(r))
+		}
+		fmt.Fprintf(&buf, "Engines run: %s.\n", strings.Join(sanRan, ", "))
+	}
+	if len(skipped) > 0 {
+		var sanSkipped []string
+		for _, s := range skipped {
+			sanSkipped = append(sanSkipped, report.SanitizeField(s))
+		}
+		fmt.Fprintf(&buf, "Skipped files: %s.\n", strings.Join(sanSkipped, ", "))
+	}
+	buf.WriteString("Tool uploads:\n")
+
+	if len(expectedTools) == 0 {
+		expectedTools = []string{"detekt", "konsist", "ktlint", "lint"}
+	}
+
+	upMap := make(map[string]store.IngestUpload)
+	for _, u := range uploads {
+		upMap[strings.ToLower(u.Engine)] = u
+	}
+
+	seenTools := make(map[string]bool)
+	for _, tool := range expectedTools {
+		toolLower := strings.ToLower(tool)
+		seenTools[toolLower] = true
+		sanTool := report.SanitizeField(tool)
+		if u, ok := upMap[toolLower]; ok {
+			if u.ParseStatus == "success" {
+				if u.Attested {
+					tStr := time.Unix(u.ReceivedAt, 0).UTC().Format("15:04:05 UTC")
+					fmt.Fprintf(&buf, "- %s: received (%s)\n", sanTool, tStr)
+				} else {
+					fmt.Fprintf(&buf, "- %s: uploaded by CI (unverified)\n", sanTool)
+				}
+			} else {
+				fmt.Fprintf(&buf, "- %s: failed to parse\n", sanTool)
+			}
+		} else {
+			fmt.Fprintf(&buf, "- %s: not received\n", sanTool)
+		}
+	}
+
+	for _, u := range uploads {
+		uLower := strings.ToLower(u.Engine)
+		if !seenTools[uLower] {
+			sanEngine := report.SanitizeField(u.Engine)
+			if u.ParseStatus == "success" {
+				if u.Attested {
+					tStr := time.Unix(u.ReceivedAt, 0).UTC().Format("15:04:05 UTC")
+					fmt.Fprintf(&buf, "- %s: received (%s)\n", sanEngine, tStr)
+				} else {
+					fmt.Fprintf(&buf, "- %s: uploaded by CI (unverified)\n", sanEngine)
+				}
+			} else {
+				fmt.Fprintf(&buf, "- %s: failed to parse\n", sanEngine)
+			}
+		}
+	}
+
+	buf.WriteString("\nA missing upload is not covered and never reads as clean.\n")
+	buf.WriteString("</details>\n")
+
+	return buf.String()
+}
+
+// FormatFallbackComment produces a comment when no review scan result exists yet.
+// It omits the blocked/clean header, says "scan pending", and renders coverage.
+func FormatFallbackComment(uploads []store.IngestUpload, expectedTools []string) string {
+	var buf bytes.Buffer
+	buf.WriteString("<!-- sentinix-review-marker -->\n")
+	buf.WriteString("### Sentinix\n\n")
+	buf.WriteString("scan pending\n\n")
+
+	// Coverage footer
+	buf.WriteString("<details><summary>Coverage</summary>\n\n")
+	buf.WriteString("Tool uploads:\n")
+
+	if len(expectedTools) == 0 {
+		expectedTools = []string{"detekt", "konsist", "ktlint", "lint"}
+	}
+
+	upMap := make(map[string]store.IngestUpload)
+	for _, u := range uploads {
+		upMap[strings.ToLower(u.Engine)] = u
+	}
+
+	seenTools := make(map[string]bool)
+	for _, tool := range expectedTools {
+		toolLower := strings.ToLower(tool)
+		seenTools[toolLower] = true
+		sanTool := report.SanitizeField(tool)
+		if u, ok := upMap[toolLower]; ok {
+			if u.ParseStatus == "success" {
+				if u.Attested {
+					tStr := time.Unix(u.ReceivedAt, 0).UTC().Format("15:04:05 UTC")
+					fmt.Fprintf(&buf, "- %s: received (%s)\n", sanTool, tStr)
+				} else {
+					fmt.Fprintf(&buf, "- %s: uploaded by CI (unverified)\n", sanTool)
+				}
+			} else {
+				fmt.Fprintf(&buf, "- %s: failed to parse\n", sanTool)
+			}
+		} else {
+			fmt.Fprintf(&buf, "- %s: not received\n", sanTool)
+		}
+	}
+
+	for _, u := range uploads {
+		uLower := strings.ToLower(u.Engine)
+		if !seenTools[uLower] {
+			sanEngine := report.SanitizeField(u.Engine)
+			if u.ParseStatus == "success" {
+				if u.Attested {
+					tStr := time.Unix(u.ReceivedAt, 0).UTC().Format("15:04:05 UTC")
+					fmt.Fprintf(&buf, "- %s: received (%s)\n", sanEngine, tStr)
+				} else {
+					fmt.Fprintf(&buf, "- %s: uploaded by CI (unverified)\n", sanEngine)
+				}
+			} else {
+				fmt.Fprintf(&buf, "- %s: failed to parse\n", sanEngine)
+			}
+		}
+	}
+
+	buf.WriteString("\nA missing upload is not covered and never reads as clean.\n")
+	buf.WriteString("</details>\n")
+
+	return buf.String()
+}
+
 func (a *App) finishReview(ctx context.Context, h githost.Host, ev *githost.Event, res *scheduler.Result, dur time.Duration) {
 	var proj *store.Project
 	if p, err := a.Store.ProjectByRepo(h.Name(), ev.RepoPath); err == nil {
 		proj = &p
 	}
 	blocking, threshold := a.gate(proj)
+	if proj != nil && a.Store != nil && ev != nil && ev.PR != "" && len(res.Ran) > 0 {
+		_ = a.Store.SavePRReviewResult(proj.ID, ev.PR, res.Commit, res.Ran, res.Skipped, res.New, res.Resolved)
+	}
 
-	shown := res.New
-	if len(shown) > 50 {
-		shown = shown[:50]
+	var uploads []store.IngestUpload
+	if proj != nil && a.Store != nil {
+		uploads, _ = a.Store.IngestUploads(proj.ID, res.Commit)
 	}
-	var buf bytes.Buffer
-	buf.WriteString("<!-- sentinix-review-marker -->\n")
-	buf.WriteString("### Sentinix\n")
-	if blocking {
-		fmt.Fprintf(&buf, "Merge is blocked by new findings at **%s** or above.\n", threshold)
-	} else {
-		buf.WriteString("Report only: these findings do not block the merge.\n")
+
+	allNew := append([]engines.Finding{}, res.New...)
+	seenFp := make(map[string]bool)
+	for _, f := range allNew {
+		seenFp[f.Fingerprint()] = true
 	}
-	buf.WriteString("```\n")
-	report.Text(&buf, shown, res.Ran, res.Skipped)
-	buf.WriteString("```\n")
-	if len(res.New) > 50 {
-		fmt.Fprintf(&buf, "%d more not shown.\n", len(res.New)-50)
-	}
-	if len(res.Resolved) > 0 {
-		fmt.Fprintf(&buf, "\n<details><summary>Resolved findings (%d)</summary>\n\n", len(res.Resolved))
-		for _, f := range res.Resolved {
-			fmt.Fprintf(&buf, "- ~%s~ in `%s:%d`\n", report.SanitizeField(f.Rule), report.SanitizeField(f.File), f.Line)
+
+	for _, u := range uploads {
+		if u.ParseStatus == "success" && u.FindingsJSON != "" {
+			var upFs []engines.Finding
+			if json.Unmarshal([]byte(u.FindingsJSON), &upFs) == nil {
+				for _, f := range upFs {
+					fp := f.Fingerprint()
+					if !seenFp[fp] {
+						seenFp[fp] = true
+						allNew = append(allNew, f)
+					}
+				}
+			}
 		}
-		buf.WriteString("</details>\n")
 	}
+
+	grouped := policy.GroupByCategory(allNew)
+	expectedTools := []string{"detekt", "konsist", "ktlint", "lint"}
+
+	commentBody := FormatReviewComment(blocking, threshold, allNew, res.Resolved, res.Ran, res.Skipped, uploads, expectedTools)
 	RecordReviewLatency(dur)
-	if err := h.Comment(ctx, ev, buf.String()); err != nil {
+	if err := h.Comment(ctx, ev, commentBody); err != nil {
 		log.Printf("%s: comment: %v", h.Name(), err)
 	}
+
+	// 1. Overall security status check ("sentinix")
+	secFindings := grouped[engines.CategorySecurity]
 	state, desc := githost.Success, "no new findings at gate"
 	reason := desc
 	switch {
 	case !blocking:
-		desc = fmt.Sprintf("%d new finding(s), report only", len(res.New))
+		desc = fmt.Sprintf("%d new finding(s), report only", len(secFindings))
 		reason = desc
-	case policy.Fails(res.New, threshold):
-		state, desc = githost.Failure, fmt.Sprintf("%d new finding(s)", len(res.New))
+	case policy.Fails(secFindings, threshold):
+		state, desc = githost.Failure, fmt.Sprintf("%d new finding(s)", len(secFindings))
 		reason = desc
 	case len(res.Skipped) > 0:
 		state, desc = githost.Failure, fmt.Sprintf("skipped changed file(s): %s", strings.Join(res.Skipped, ", "))
 		reason = desc
 	default:
-		for _, reqName := range a.RequiredEngines {
-			found := false
-			for _, ran := range res.Ran {
-				if ran == reqName {
-					found = true
+		if len(res.Ran) > 0 {
+			for _, reqName := range a.RequiredEngines {
+				found := false
+				for _, ran := range res.Ran {
+					if ran == reqName {
+						found = true
+						break
+					}
+				}
+				if !found {
+					state, desc = githost.Failure, fmt.Sprintf("missing required engine: %s", reqName)
+					reason = desc
 					break
 				}
 			}
-			if !found {
-				state, desc = githost.Failure, fmt.Sprintf("missing required engine: %s", reqName)
-				reason = desc
-				break
-			}
 		}
 	}
-	if err := h.Status(ctx, ev, state, desc); err != nil {
+	if err := h.StatusNamed(ctx, ev, "sentinix", state, desc); err != nil {
 		log.Printf("%s: status: %v", h.Name(), err)
+	}
+
+	// 2. Per-category status checks
+	pols := store.DefaultCategoryPolicies()
+	if proj != nil && a.Store != nil {
+		if cp, err := a.Store.CategoryPolicies(proj.ID); err == nil {
+			pols = cp
+		}
+	}
+
+	for _, cat := range engines.ValidCategories {
+		pol := pols[cat]
+		if pol.Mode == "off" {
+			continue
+		}
+		catFindings := grouped[cat]
+		thresh, _ := engines.ParseSeverity(pol.Threshold)
+		catState, catDesc := githost.Success, fmt.Sprintf("no new %s findings at gate", cat)
+		if pol.Mode == "block" {
+			if policy.CategoryFails(catFindings, cat, policy.CategoryPolicy{Mode: pol.Mode, Threshold: thresh}) {
+				catState, catDesc = githost.Failure, fmt.Sprintf("%d new %s finding(s)", len(catFindings), cat)
+			}
+		} else { // comment
+			if len(catFindings) > 0 {
+				catDesc = fmt.Sprintf("%d new %s finding(s), comment only", len(catFindings), cat)
+			} else {
+				catDesc = fmt.Sprintf("no new %s findings", cat)
+			}
+		}
+		_ = h.StatusNamed(ctx, ev, "sentinix/"+cat, catState, catDesc)
 	}
 	modeStr := "report"
 	if blocking {
@@ -355,6 +598,89 @@ func (a *App) finishReview(ctx context.Context, h githost.Host, ev *githost.Even
 			a.ProposeInlineSuppression(proj.ID, s)
 		}
 	}
+}
+
+// RefreshPRReview updates the PR comment and commit statuses using the latest uploads.
+func (a *App) RefreshPRReview(ctx context.Context, proj *store.Project, commit, pr string) error {
+	if proj == nil {
+		return nil
+	}
+	h, ok := a.Hosts[proj.Host]
+	if !ok {
+		return nil
+	}
+	ev := &githost.Event{
+		RepoPath:       proj.Repo,
+		Repo:           proj.Repo,
+		PR:             pr,
+		HeadSHA:        commit,
+		ConfiguredHost: h.ConfiguredHost(),
+	}
+
+	ran, skipped, newFs, resolvedFs, found, err := a.Store.GetPRReviewResult(proj.ID, pr, commit)
+	if err != nil || !found {
+		// If none exists, post only the coverage footer and leave existing status untouched
+		uploads, _ := a.Store.IngestUploads(proj.ID, commit)
+		expectedTools := []string{"detekt", "konsist", "ktlint", "lint"}
+
+		grouped := make(map[string][]engines.Finding)
+		for _, u := range uploads {
+			if u.ParseStatus == "success" && u.FindingsJSON != "" {
+				var upFs []engines.Finding
+				if json.Unmarshal([]byte(u.FindingsJSON), &upFs) == nil {
+					for _, f := range upFs {
+						cat := f.Category
+						if cat == "" {
+							cat = engines.CategorySecurity
+						}
+						grouped[cat] = append(grouped[cat], f)
+					}
+				}
+			}
+		}
+
+		commentBody := FormatFallbackComment(uploads, expectedTools)
+		_ = h.Comment(ctx, ev, commentBody)
+
+		// Post per-category statuses for non-security categories
+		pols := store.DefaultCategoryPolicies()
+		if cp, err := a.Store.CategoryPolicies(proj.ID); err == nil {
+			pols = cp
+		}
+		for _, cat := range engines.ValidCategories {
+			if cat == engines.CategorySecurity {
+				continue // leave existing security status untouched
+			}
+			pol := pols[cat]
+			if pol.Mode == "off" {
+				continue
+			}
+			catFindings := grouped[cat]
+			thresh, _ := engines.ParseSeverity(pol.Threshold)
+			catState, catDesc := githost.Success, fmt.Sprintf("no new %s findings", cat)
+			if pol.Mode == "block" {
+				if policy.CategoryFails(catFindings, cat, policy.CategoryPolicy{Mode: pol.Mode, Threshold: thresh}) {
+					catState, catDesc = githost.Failure, fmt.Sprintf("%d new %s finding(s)", len(catFindings), cat)
+				}
+			} else {
+				if len(catFindings) > 0 {
+					catDesc = fmt.Sprintf("%d new %s finding(s), comment only", len(catFindings), cat)
+				}
+			}
+			_ = h.StatusNamed(ctx, ev, "sentinix/"+cat, catState, catDesc)
+		}
+		return nil
+	}
+
+	res := &scheduler.Result{
+		Commit:   commit,
+		Ran:      ran,
+		Skipped:  skipped,
+		New:      newFs,
+		Resolved: resolvedFs,
+	}
+	a.finishReview(ctx, h, ev, res, 0)
+	return nil
 }
 
 // queueFull runs a full scan of a project's branch (or the given one) and records it.

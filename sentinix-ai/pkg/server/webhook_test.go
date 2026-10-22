@@ -32,6 +32,9 @@ func (h *webhookTestHost) CloneAuth() (string, string) {
 func (h *webhookTestHost) Status(ctx context.Context, e *githost.Event, s githost.State, desc string) error {
 	return nil
 }
+func (h *webhookTestHost) StatusNamed(ctx context.Context, e *githost.Event, name string, s githost.State, desc string) error {
+	return nil
+}
 func (h *webhookTestHost) Comment(ctx context.Context, e *githost.Event, body string) error {
 	return nil
 }
@@ -102,9 +105,10 @@ func TestWebhook_EnqueueFailureThenRedeliveryResultsInScan(t *testing.T) {
 
 	host := &webhookTestHost{name: "gh", secret: "test-secret"}
 	app := &App{
-		Store: st,
-		Hosts: map[string]githost.Host{"gh": host},
-		Sess:  auth.Sessions{Key: []byte("test-session-key")},
+		Store:   st,
+		Hosts:   map[string]githost.Host{"gh": host},
+		Sess:    auth.Sessions{Key: []byte("test-session-key")},
+		Workers: -1,
 	}
 	handler := app.Handler()
 

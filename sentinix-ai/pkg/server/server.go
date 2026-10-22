@@ -68,20 +68,25 @@ type principal struct {
 type ctxKey struct{}
 
 func (a *App) Handler() http.Handler {
-	if a.Workers < 1 {
-		a.Workers = 2
+	workers := a.Workers
+	if workers < 1 && a.Workers != -1 {
+		workers = 2
+	}
+	semWorkers := workers
+	if semWorkers < 1 {
+		semWorkers = 1
 	}
 	scheduler.OnBaseCacheHit = RecordBaseCacheHit
-	a.sem = make(chan struct{}, a.Workers)
+	a.sem = make(chan struct{}, semWorkers)
 	a.webhookSem = make(chan struct{}, 32)
-	if a.Store != nil {
+	if a.Store != nil && a.Workers != -1 {
 		a.Store.ReclaimStaleJobs()
 		go func() {
 			for range time.Tick(30 * time.Second) {
 				a.Store.ReclaimStaleJobs()
 			}
 		}()
-		for i := 0; i < a.Workers; i++ {
+		for i := 0; i < workers; i++ {
 			go func() {
 				for {
 					jobID, hostName, payload, err := a.Store.DequeueJob()
@@ -137,6 +142,8 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("GET /api/projects", api("read", a.projects))
 	m.HandleFunc("POST /api/projects", api("manage", a.createProject))
 	m.HandleFunc("PATCH /api/projects/{id}", api("manage", a.updateProject))
+	m.HandleFunc("GET /api/projects/{id}/policy", api("read", a.getProjectPolicy))
+	m.HandleFunc("PATCH /api/projects/{id}/policy", api("manage", a.updateProjectPolicy))
 	m.HandleFunc("POST /api/projects/{id}/scan", api("scan", a.scanNow))
 	m.HandleFunc("GET /api/projects/{id}/scans", api("read", a.scans))
 	m.HandleFunc("GET /api/projects/{id}/surface", api("read", a.surface))

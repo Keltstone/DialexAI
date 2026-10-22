@@ -59,8 +59,8 @@ const views = {
       ['open', 'fixed', 'accepted', 'false_positive'].map((s) => h('option', { value: s, selected: s === status }, s)));
     return h('div', {}, h('h1', {}, 'Findings'), h('div', { class: 'row' }, sel,
       h('a', { href: `/api/projects/${project}/report/html`, target: '_blank', rel: 'noopener' }, project ? 'Report' : '')),
-      table(['Severity', 'Rule', 'Where', 'Owner', 'Ticket'], fs.map((f) => h('tr', {},
-        h('td', {}, sev(f.severity)), h('td', {}, h('a', { href: '#/finding/' + f.ID }, f.rule)),
+      table(['Category', 'Severity', 'Rule', 'Where', 'Owner', 'Ticket'], fs.map((f) => h('tr', {},
+        h('td', {}, f.category || 'security'), h('td', {}, sev(f.severity)), h('td', {}, h('a', { href: '#/finding/' + f.ID }, f.rule)),
         h('td', {}, `${f.file}:${f.line}`), h('td', {}, f.Owner), h('td', {}, f.Ticket)))));
   },
   async finding() {
@@ -72,7 +72,7 @@ const views = {
       const r = await api(`/findings/${f.ID}/triage`, { method: 'POST', body: { status, owner: owner.value, ...extra } });
       if (r && r.approval) toast('Sent for approval by a second reviewer.');
     });
-    return h('div', {}, h('h1', {}, f.rule), h('p', {}, sev(f.severity), ' ', f.message),
+    return h('div', {}, h('h1', {}, f.rule), h('p', {}, h('span', { class: 'tag' }, f.category || 'security'), ' ', sev(f.severity), ' ', f.message),
       h('div', { class: 'card' }, h('div', {}, `${f.file}:${f.line}`), h('pre', {}, f.evidence || ''),
         f.cwe ? h('div', { class: 'mute' }, f.cwe) : null, f.fix ? h('p', {}, 'Fix: ', f.fix) : null),
       vd ? h('div', { class: 'card' }, h('strong', {}, 'AI verdict (advisory): '), (vd.real ? 'real' : 'likely false positive') + `, ${vd.severity}, confidence ${Number(vd.confidence).toFixed(2)}. `, vd.reasoning,
