@@ -61,7 +61,7 @@ If you are an end-user and do **not** want to use terminal commands or build fro
 mkdir -p ~/Workspace && cd ~/Workspace
 
 # 2. Clone Kolt
-git clone https://github.com/Kolta-Labs/Kolt.git
+git clone https://github.com/keltstone/Kolt.git
 
 # 3. Clone DialexAI alongside Kolt
 git clone https://github.com/Kolta-Labs/DialexAI.git

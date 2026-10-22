@@ -95,7 +95,7 @@ mindmap
 mkdir -p ~/Workspace && cd ~/Workspace
 
 # 2. Clone Kolt
-git clone https://github.com/Kolta-Labs/Kolt.git
+git clone https://github.com/keltstone/Kolt.git
 
 # 3. Clone DialexAI alongside Kolt
 git clone https://github.com/Kolta-Labs/DialexAI.git

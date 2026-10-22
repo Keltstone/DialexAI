@@ -18,7 +18,7 @@ The project is dual-licensed (see [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md)
 (cd artix-ai && go test ./pkg/...)
 (cd dialex-ai && ./gradlew :shared:allTests)
 ```
-The Kotlin client needs the public [Kolt](https://github.com/Kolta-Labs/Kolt) libraries (Apache-2.0) as a sibling checkout: `git clone https://github.com/Kolta-Labs/Kolt.git KoltLibs` next to this repo (see `dialex-ai/settings.gradle.kts`).
+The Kotlin client needs the public [Kolt](https://github.com/keltstone/Kolt) libraries (Apache-2.0) as a sibling checkout: `git clone https://github.com/keltstone/Kolt.git KoltLibs` next to this repo (see `dialex-ai/settings.gradle.kts`).
 
 ## Scoped starter work
 
