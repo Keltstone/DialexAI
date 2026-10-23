@@ -16,6 +16,7 @@ import (
 	"sentinix/pkg/store"
 	"strings"
 	"testing"
+	"time"
 )
 
 type mockHostWithStatusNamed struct {
@@ -444,4 +445,158 @@ func TestPackFindingIngest(t *testing.T) {
 		t.Errorf("expected engine pack:android@1.0.0, got %s", fs[0].Engine)
 	}
 }
+
+func TestIngest_MandatoryTimestampAndReplay(t *testing.T) {
+	e := setup(t)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.app.TrustedKeys = []ed25519.PublicKey{pub}
+
+	p, err := e.st.CreateProject(store.Project{Name: "r15-test", Host: "gh", Repo: "o/r15", Enforcement: "block", FailOn: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := e.st.CreateToken(p.ID, "ci-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sarifPayload := `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"detekt"}},"results":[{"ruleId":"detekt.X","level":"warning","message":{"text":"m"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/A.kt"},"region":{"startLine":1}}}]}]}]}`
+	bodyHash := sha256.Sum256([]byte(sarifPayload))
+
+	// 1. Upload signed without timestamp header -> MUST land as ci-unattested (fail closed)
+	noTsMsg := fmt.Sprintf("%s|%s|%s|%s|%s|%x", p.ID, "c1", "1", "detekt", "sarif", bodyHash)
+	noTsSig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(noTsMsg)))
+	req := httptest.NewRequest("POST", "/api/projects/"+p.ID+"/ingest?engine=detekt&format=sarif&commit=c1&pr=1", strings.NewReader(sarifPayload))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("X-Signature", noTsSig)
+	w := httptest.NewRecorder()
+	e.h.ServeHTTP(w, req)
+	if w.Code == 200 {
+		fs, _ := e.st.Findings(store.Filter{Project: p.ID})
+		for _, f := range fs {
+			if f.Source == "ci-attested" {
+				t.Fatalf("upload without timestamp header must NOT be ci-attested, got %+v", f)
+			}
+		}
+	}
+
+	// 2. Upload signed with expired timestamp (>900s ago) -> MUST NOT be ci-attested
+	oldTS := time.Now().Unix() - 1000
+	oldTsMsg := fmt.Sprintf("%s|%s|%s|%s|%s|%d|%x", p.ID, "c2", "1", "detekt", "sarif", oldTS, bodyHash)
+	oldTsSig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(oldTsMsg)))
+	req = httptest.NewRequest("POST", "/api/projects/"+p.ID+"/ingest?engine=detekt&format=sarif&commit=c2&pr=1", strings.NewReader(sarifPayload))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("X-Signature", oldTsSig)
+	req.Header.Set("X-Signature-Timestamp", fmt.Sprintf("%d", oldTS))
+	w = httptest.NewRecorder()
+	e.h.ServeHTTP(w, req)
+	if w.Code == 200 {
+		ups, _ := e.st.IngestUploads(p.ID, "c2")
+		for _, u := range ups {
+			if u.Attested {
+				t.Fatalf("upload with expired timestamp must NOT be attested")
+			}
+		}
+	}
+
+	// 3. Upload with valid timestamp -> ci-attested
+	validTS := time.Now().Unix()
+	validTsMsg := fmt.Sprintf("%s|%s|%s|%s|%s|%d|%x", p.ID, "c3", "1", "detekt", "sarif", validTS, bodyHash)
+	validTsSig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(validTsMsg)))
+	req = httptest.NewRequest("POST", "/api/projects/"+p.ID+"/ingest?engine=detekt&format=sarif&commit=c3&pr=1", strings.NewReader(sarifPayload))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("X-Signature", validTsSig)
+	req.Header.Set("X-Signature-Timestamp", fmt.Sprintf("%d", validTS))
+	w = httptest.NewRecorder()
+	e.h.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("valid upload failed: code=%d body=%s", w.Code, w.Body.String())
+	}
+	ups, _ := e.st.IngestUploads(p.ID, "c3")
+	if len(ups) == 0 || !ups[0].Attested {
+		t.Fatalf("expected valid upload to be attested")
+	}
+
+	// 4. Replay the EXACT same signature on another request -> MUST NOT be attested (nonce replay cache)
+	req = httptest.NewRequest("POST", "/api/projects/"+p.ID+"/ingest?engine=detekt&format=sarif&commit=c3&pr=1", strings.NewReader(sarifPayload))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("X-Signature", validTsSig)
+	req.Header.Set("X-Signature-Timestamp", fmt.Sprintf("%d", validTS))
+	w = httptest.NewRecorder()
+	e.h.ServeHTTP(w, req)
+	if w.Code == 200 {
+		ups, _ := e.st.IngestUploads(p.ID, "c3")
+		// The second upload with same signature must NOT be attested
+		if len(ups) > 0 && ups[0].Attested {
+			// Check if replay cache flagged it
+			t.Fatalf("replayed signature was accepted as attested")
+		}
+	}
+}
+
+func TestIngest_ReversedOrderCleanAfterDirty(t *testing.T) {
+	e := setup(t)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.app.TrustedKeys = []ed25519.PublicKey{pub}
+
+	p, err := e.st.CreateProject(store.Project{Name: "r15-order", Host: "gh", Repo: "o/order", Enforcement: "block", FailOn: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := e.st.CreateToken(p.ID, "ci-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sarifFmt := `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"detekt"}},"results":[%s]}]}`
+	one := `{"ruleId":"detekt.X","level":"warning","message":{"text":"m"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/A.kt"},"region":{"startLine":1}}}]}`
+	dirty := strings.Replace(sarifFmt, "%s", one, 1)
+	clean := strings.Replace(sarifFmt, "%s", "", 1)
+
+	now := time.Now().Unix()
+	tsDirty := now
+
+	// Upload newer dirty report with timestamp now
+	dirtyHash := sha256.Sum256([]byte(dirty))
+	dirtyMsg := fmt.Sprintf("%s|%s|%s|%s|%s|%d|%x", p.ID, "c-dirty", "1", "detekt", "sarif", tsDirty, dirtyHash)
+	dirtySig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(dirtyMsg)))
+	req := httptest.NewRequest("POST", "/api/projects/"+p.ID+"/ingest?engine=detekt&format=sarif&commit=c-dirty&pr=1", strings.NewReader(dirty))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("X-Signature", dirtySig)
+	req.Header.Set("X-Signature-Timestamp", fmt.Sprintf("%d", tsDirty))
+	w := httptest.NewRecorder()
+	e.h.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("dirty upload failed: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	fs, _ := e.st.Findings(store.Filter{Project: p.ID})
+	if len(fs) != 1 || fs[0].Status != "open" {
+		t.Fatalf("expected 1 open finding, got %+v", fs)
+	}
+
+	// Now upload an OLD clean report captured in the past with no timestamp (or an old timestamp)
+	cleanHash := sha256.Sum256([]byte(clean))
+	oldCleanMsg := fmt.Sprintf("%s|%s|%s|%s|%s|%x", p.ID, "c-dirty", "1", "detekt", "sarif", cleanHash)
+	oldCleanSig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(oldCleanMsg)))
+	req = httptest.NewRequest("POST", "/api/projects/"+p.ID+"/ingest?engine=detekt&format=sarif&commit=c-dirty&pr=1", strings.NewReader(clean))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("X-Signature", oldCleanSig)
+	// No timestamp header provided
+	w = httptest.NewRecorder()
+	e.h.ServeHTTP(w, req)
+
+	// Finding MUST remain open and NOT be closed by the un-timestamped/old clean upload!
+	fs, _ = e.st.Findings(store.Filter{Project: p.ID})
+	if len(fs) != 1 || fs[0].Status != "open" {
+		t.Fatalf("expected finding to remain open, but was closed by old clean replay: %+v", fs)
+	}
+}
+
 

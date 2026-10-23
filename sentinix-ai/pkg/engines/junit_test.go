@@ -111,3 +111,15 @@ func TestParseJUnit_Malformed(t *testing.T) {
 		t.Fatalf("expected error for malformed xml, got nil")
 	}
 }
+
+func TestParseJUnit_NoNilWrappedError(t *testing.T) {
+	data := []byte("<notasuite><child>foo</child></notasuite>")
+	_, err := ParseJUnit("konsist", data, "")
+	if err == nil {
+		t.Fatalf("expected error for non-testsuite xml, got nil")
+	}
+	if strings.Contains(err.Error(), "%!w(<nil>)") {
+		t.Errorf("error contains %%!w(<nil>): %v", err)
+	}
+}
+
