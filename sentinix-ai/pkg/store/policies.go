@@ -1,7 +1,9 @@
 package store
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -208,6 +210,23 @@ func (s *Store) DeleteIngestUpload(projectID, commitSHA, engine string) error {
 	return err
 }
 
+// RecordIngestSignature checks and records a signature in the replay cache.
+// Returns an error if the signature has already been used (replay detected).
+func (s *Store) RecordIngestSignature(sig string, projectID string, ts int64) error {
+	sigHash := sha256.Sum256([]byte(sig))
+	sigHex := hex.EncodeToString(sigHash[:])
+	currentTime := now()
+
+	// Clean up signatures older than 1800 seconds (30 minutes)
+	cutoff := currentTime - 1800
+	_, _ = s.db.Exec("delete from ingest_signatures where created_at < $1", cutoff)
+
+	_, err := s.db.Exec("insert into ingest_signatures(sig_hash, project_id, ts, created_at) values($1, $2, $3, $4)",
+		sigHex, projectID, ts, currentTime)
+	return err
+}
+
+
 // SavePRReviewResult persists the outcome of a full PR review scan for rebuilding on upload.
 func (s *Store) SavePRReviewResult(projectID, pr, commit string, ran, skipped []string, newFs, resolvedFs []engines.Finding) error {
 	newJSON, _ := json.Marshal(newFs)
@@ -272,7 +291,7 @@ func isServerOwnedEngine(e string) bool {
 // - Ingest uploads can only close findings whose source matches the same ingest origin (e.g. ci-unattested or ci-attested).
 // - Scoped by PR via finding_prs link table: closing PR2 never closes a finding PR1 still reports;
 //   findings are only marked fixed when no other PR/branch still reports them.
-func (s *Store) CloseEngineFindings(projectID, engine, pr, source string, currentFingerprints []string) error {
+func (s *Store) CloseEngineFindings(projectID, engine, pr, source string, currentFingerprints []string, uploadTs int64) error {
 	if isServerOwnedEngine(engine) || source == "" {
 		return nil
 	}
@@ -289,11 +308,29 @@ func (s *Store) CloseEngineFindings(projectID, engine, pr, source string, curren
 	var rows *sql.Rows
 	var err error
 	if pr != "" {
-		rows, err = s.db.Query("select distinct fingerprint from finding_prs where project_id=$1 and engine=$2 and pr=$3 union select fingerprint from findings where project_id=$1 and engine=$2 and pr=$3 and source=$4 and status='open'",
-			projectID, engine, pr, source)
+		if uploadTs > 0 {
+			rows, err = s.db.Query(`select distinct fp.fingerprint from finding_prs fp 
+				join findings f on f.project_id=fp.project_id and f.fingerprint=fp.fingerprint 
+				where fp.project_id=$1 and fp.engine=$2 and fp.pr=$3 and f.source=$4 and f.status='open' and f.last_seen<=$5
+				union 
+				select fingerprint from findings where project_id=$1 and engine=$2 and pr=$3 and source=$4 and status='open' and last_seen<=$5`,
+				projectID, engine, pr, source, uploadTs)
+		} else {
+			rows, err = s.db.Query(`select distinct fp.fingerprint from finding_prs fp 
+				join findings f on f.project_id=fp.project_id and f.fingerprint=fp.fingerprint 
+				where fp.project_id=$1 and fp.engine=$2 and fp.pr=$3 and f.source=$4 and f.status='open'
+				union 
+				select fingerprint from findings where project_id=$1 and engine=$2 and pr=$3 and source=$4 and status='open'`,
+				projectID, engine, pr, source)
+		}
 	} else {
-		rows, err = s.db.Query("select fingerprint from findings where project_id=$1 and engine=$2 and pr='' and source=$3 and status='open'",
-			projectID, engine, source)
+		if uploadTs > 0 {
+			rows, err = s.db.Query("select fingerprint from findings where project_id=$1 and engine=$2 and pr='' and source=$3 and status='open' and last_seen<=$4",
+				projectID, engine, source, uploadTs)
+		} else {
+			rows, err = s.db.Query("select fingerprint from findings where project_id=$1 and engine=$2 and pr='' and source=$3 and status='open'",
+				projectID, engine, source)
+		}
 	}
 	if err != nil {
 		return err
@@ -325,7 +362,7 @@ func (s *Store) CloseEngineFindings(projectID, engine, pr, source string, curren
 				continue
 			}
 		}
-		if _, err := s.db.Exec("update findings set status='fixed', updated=$1 where project_id=$2 and fingerprint=$3", t, projectID, fp); err != nil {
+		if _, err := s.db.Exec("update findings set status='fixed', updated=$1 where project_id=$2 and fingerprint=$3 and source=$4", t, projectID, fp, source); err != nil {
 			return err
 		}
 	}

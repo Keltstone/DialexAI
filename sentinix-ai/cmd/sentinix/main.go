@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -30,7 +31,7 @@ import (
 
 var version = "1.0.0"
 
-const usage = "usage: sentinix scan [flags] [path] | surface [base-ref] | packs keygen|sign|verify | bench <dir> | audit verify [-db <dsn>] | version"
+const usage = "usage: sentinix scan [flags] [path] | sign [flags] [file] | surface [base-ref] | packs keygen|sign|verify | bench <dir> | audit verify [-db <dsn>] | version"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -43,6 +44,8 @@ func main() {
 		fmt.Printf("Sentinix AI version %s\n", version)
 	case "scan":
 		scan(args)
+	case "sign":
+		signCmd(args)
 	case "surface":
 		surface(args)
 	case "packs":
@@ -213,6 +216,30 @@ func upload(server, project, token string, ran []string, fs []engines.Finding) e
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
+
+	if signingKey := os.Getenv("SENTINIX_SIGNING_KEY"); signingKey != "" {
+		if kb, err := os.ReadFile(signingKey); err == nil {
+			signingKey = strings.TrimSpace(string(kb))
+		}
+		if b, err := base64.StdEncoding.DecodeString(signingKey); err == nil {
+			var privKey ed25519.PrivateKey
+			if len(b) == ed25519.PrivateKeySize {
+				privKey = ed25519.PrivateKey(b)
+			} else if len(b) == ed25519.SeedSize {
+				privKey = ed25519.NewKeyFromSeed(b)
+			}
+			if len(privKey) > 0 {
+				ts := fmt.Sprintf("%d", time.Now().Unix())
+				h := sha256.Sum256(body)
+				commitSHA := strings.TrimSpace(string(commit))
+				msg := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%x", project, commitSHA, "", "secrets", "findings", ts, h)
+				sig := base64.StdEncoding.EncodeToString(ed25519.Sign(privKey, []byte(msg)))
+				req.Header.Set("X-Signature", sig)
+				req.Header.Set("X-Signature-Timestamp", ts)
+			}
+		}
+	}
+
 	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
 	if err != nil {
 		return err
@@ -222,6 +249,89 @@ func upload(server, project, token string, ran []string, fs []engines.Finding) e
 		return fmt.Errorf("upload failed: %s", resp.Status)
 	}
 	return nil
+}
+
+func signCmd(args []string) {
+	fl := flag.NewFlagSet("sign", flag.ExitOnError)
+	keyArg := fl.String("key", "", "ed25519 private key (base64 string, or path to key file)")
+	project := fl.String("project", "", "project ID")
+	commit := fl.String("commit", "", "commit SHA (defaults to git rev-parse HEAD)")
+	pr := fl.String("pr", "", "pull request number or identifier")
+	engine := fl.String("engine", "detekt", "engine name (e.g. detekt, ktlint, konsist)")
+	format := fl.String("format", "sarif", "report format (sarif, junit, findings)")
+	timestamp := fl.Int64("timestamp", 0, "unix timestamp in seconds (defaults to current time)")
+	raw := fl.Bool("raw", false, "output only the base64 signature string")
+	fl.Parse(args)
+
+	if *project == "" {
+		die(fmt.Errorf("sign requires -project"))
+	}
+	keyStr := *keyArg
+	if keyStr == "" {
+		keyStr = os.Getenv("SENTINIX_SIGNING_KEY")
+	}
+	if keyStr == "" {
+		die(fmt.Errorf("sign requires -key or SENTINIX_SIGNING_KEY"))
+	}
+
+	var privKey ed25519.PrivateKey
+	if kb, err := os.ReadFile(keyStr); err == nil {
+		keyStr = strings.TrimSpace(string(kb))
+	}
+	if b, err := base64.StdEncoding.DecodeString(keyStr); err == nil {
+		if len(b) == ed25519.PrivateKeySize {
+			privKey = ed25519.PrivateKey(b)
+		} else if len(b) == ed25519.SeedSize {
+			privKey = ed25519.NewKeyFromSeed(b)
+		}
+	} else if len(keyStr) == ed25519.PrivateKeySize {
+		privKey = ed25519.PrivateKey([]byte(keyStr))
+	}
+	if len(privKey) == 0 {
+		die(fmt.Errorf("invalid ed25519 private key (must be base64-encoded 64-byte key or 32-byte seed)"))
+	}
+
+	commitSHA := *commit
+	if commitSHA == "" {
+		if out, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
+			commitSHA = strings.TrimSpace(string(out))
+		}
+	}
+	if commitSHA == "" {
+		die(fmt.Errorf("sign requires -commit or a git repository"))
+	}
+
+	ts := *timestamp
+	if ts == 0 {
+		ts = time.Now().Unix()
+	}
+
+	var body []byte
+	var err error
+	if fl.NArg() > 0 {
+		body, err = os.ReadFile(fl.Arg(0))
+		die(err)
+	} else {
+		stat, _ := os.Stdin.Stat()
+		if (stat.Mode() & os.ModeCharDevice) == 0 {
+			body, err = io.ReadAll(os.Stdin)
+			die(err)
+		} else {
+			die(fmt.Errorf("sign requires a report file argument or stdin"))
+		}
+	}
+
+	bodyHash := sha256.Sum256(body)
+	msg := fmt.Sprintf("%s|%s|%s|%s|%s|%d|%x", *project, commitSHA, *pr, *engine, *format, ts, bodyHash)
+	sig := ed25519.Sign(privKey, []byte(msg))
+	sigB64 := base64.StdEncoding.EncodeToString(sig)
+
+	if *raw {
+		fmt.Println(sigB64)
+	} else {
+		fmt.Printf("X-Signature: %s\n", sigB64)
+		fmt.Printf("X-Signature-Timestamp: %d\n", ts)
+	}
 }
 
 // benchCmd scores the built-in packs on a labelled sample project against the spec targets.

@@ -1,5 +1,10 @@
 # Sample Bitbucket Pipelines configuration for running Gradle checks and uploading to Sentinix.
 # Copy to bitbucket-pipelines.yml. Set SENTINIX_TOKEN, SENTINIX_URL, and SENTINIX_PROJECT_ID as repository variables.
+#
+# NOTE ON FORK PULL REQUESTS:
+# In Bitbucket Pipelines, pull requests from fork repositories do not receive secured repository
+# variables (SENTINIX_TOKEN, SENTINIX_SIGNING_KEY). Unsigned uploads are treated as ci-unattested,
+# capped at Medium severity, and comment-only. Attested uploads require SENTINIX_SIGNING_KEY.
 
 pipelines:
   pull-requests:

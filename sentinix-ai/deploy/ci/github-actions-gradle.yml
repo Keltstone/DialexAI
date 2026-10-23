@@ -1,5 +1,13 @@
 # Sample GitHub Actions workflow running Gradle checks and uploading results to Sentinix.
 # Copy to .github/workflows/sentinix-review.yml in your repository.
+#
+# NOTE ON FORK PULL REQUESTS:
+# In GitHub Actions (and other CI systems), workflows triggered by pull requests from
+# external forks do not have access to repository secrets (SENTINIX_TOKEN, SENTINIX_SIGNING_KEY).
+# Consequently, uploads from fork PRs are unsigned (ci-unattested), capped at Medium severity,
+# excluded from gating checks and AI context, and cannot reopen or close findings.
+# For internal PRs, supplying SENTINIX_SIGNING_KEY allows cryptographically attested
+# uploads (ci-attested) via `sentinix sign` or the OpenSSL ed25519 recipe.
 name: Sentinix Review Orchestrator
 
 on:
@@ -25,8 +33,15 @@ jobs:
         if: always()
         run: |
           if [ -f build/reports/detekt/detekt.sarif ]; then
+            SIG_ARGS=()
+            if [ -n "${{ secrets.SENTINIX_SIGNING_KEY }}" ]; then
+              TS=$(date +%s)
+              SIG=$(sentinix sign -raw -key "${{ secrets.SENTINIX_SIGNING_KEY }}" -project "${{ vars.SENTINIX_PROJECT_ID }}" -commit "${{ github.event.pull_request.head.sha }}" -pr "${{ github.event.pull_request.number }}" -engine detekt -format sarif -timestamp "$TS" build/reports/detekt/detekt.sarif)
+              SIG_ARGS=(-H "X-Signature: $SIG" -H "X-Signature-Timestamp: $TS")
+            fi
             curl -s -f -X POST \
               -H "Authorization: Bearer ${{ secrets.SENTINIX_TOKEN }}" \
+              "${SIG_ARGS[@]}" \
               "${{ vars.SENTINIX_URL }}/api/projects/${{ vars.SENTINIX_PROJECT_ID }}/ingest?engine=detekt&format=sarif&commit=${{ github.event.pull_request.head.sha }}&pr=${{ github.event.pull_request.number }}" \
               --data-binary @build/reports/detekt/detekt.sarif
           fi
@@ -35,8 +50,15 @@ jobs:
         if: always()
         run: |
           if [ -f build/reports/ktlint/ktlint.sarif ]; then
+            SIG_ARGS=()
+            if [ -n "${{ secrets.SENTINIX_SIGNING_KEY }}" ]; then
+              TS=$(date +%s)
+              SIG=$(sentinix sign -raw -key "${{ secrets.SENTINIX_SIGNING_KEY }}" -project "${{ vars.SENTINIX_PROJECT_ID }}" -commit "${{ github.event.pull_request.head.sha }}" -pr "${{ github.event.pull_request.number }}" -engine ktlint -format sarif -timestamp "$TS" build/reports/ktlint/ktlint.sarif)
+              SIG_ARGS=(-H "X-Signature: $SIG" -H "X-Signature-Timestamp: $TS")
+            fi
             curl -s -f -X POST \
               -H "Authorization: Bearer ${{ secrets.SENTINIX_TOKEN }}" \
+              "${SIG_ARGS[@]}" \
               "${{ vars.SENTINIX_URL }}/api/projects/${{ vars.SENTINIX_PROJECT_ID }}/ingest?engine=ktlint&format=sarif&commit=${{ github.event.pull_request.head.sha }}&pr=${{ github.event.pull_request.number }}" \
               --data-binary @build/reports/ktlint/ktlint.sarif
           fi
@@ -45,8 +67,15 @@ jobs:
         if: always()
         run: |
           if [ -f build/reports/lint-results.sarif ]; then
+            SIG_ARGS=()
+            if [ -n "${{ secrets.SENTINIX_SIGNING_KEY }}" ]; then
+              TS=$(date +%s)
+              SIG=$(sentinix sign -raw -key "${{ secrets.SENTINIX_SIGNING_KEY }}" -project "${{ vars.SENTINIX_PROJECT_ID }}" -commit "${{ github.event.pull_request.head.sha }}" -pr "${{ github.event.pull_request.number }}" -engine android-lint -format sarif -timestamp "$TS" build/reports/lint-results.sarif)
+              SIG_ARGS=(-H "X-Signature: $SIG" -H "X-Signature-Timestamp: $TS")
+            fi
             curl -s -f -X POST \
               -H "Authorization: Bearer ${{ secrets.SENTINIX_TOKEN }}" \
+              "${SIG_ARGS[@]}" \
               "${{ vars.SENTINIX_URL }}/api/projects/${{ vars.SENTINIX_PROJECT_ID }}/ingest?engine=android-lint&format=sarif&commit=${{ github.event.pull_request.head.sha }}&pr=${{ github.event.pull_request.number }}" \
               --data-binary @build/reports/lint-results.sarif
           fi
@@ -55,8 +84,16 @@ jobs:
         if: always()
         run: |
           find build/test-results -type f -name "*Konsist*.xml" 2>/dev/null | while read -r xmlFile; do
+            SIG_ARGS=()
+            if [ -n "${{ secrets.SENTINIX_SIGNING_KEY }}" ]; then
+              TS=$(date +%s)
+              SIG=$(sentinix sign -raw -key "${{ secrets.SENTINIX_SIGNING_KEY }}" -project "${{ vars.SENTINIX_PROJECT_ID }}" -commit "${{ github.event.pull_request.head.sha }}" -pr "${{ github.event.pull_request.number }}" -engine konsist -format junit -timestamp "$TS" "$xmlFile")
+              SIG_ARGS=(-H "X-Signature: $SIG" -H "X-Signature-Timestamp: $TS")
+            fi
             curl -s -f -X POST \
               -H "Authorization: Bearer ${{ secrets.SENTINIX_TOKEN }}" \
+              "${SIG_ARGS[@]}" \
               "${{ vars.SENTINIX_URL }}/api/projects/${{ vars.SENTINIX_PROJECT_ID }}/ingest?engine=konsist&format=junit&commit=${{ github.event.pull_request.head.sha }}&pr=${{ github.event.pull_request.number }}" \
               --data-binary @"$xmlFile"
           done
+

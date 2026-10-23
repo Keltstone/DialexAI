@@ -603,57 +603,39 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var signedUpload bool
+	var uploadTs int64
+	tsHeader := r.Header.Get("X-Signature-Timestamp")
+	if tsHeader == "" {
+		tsHeader = r.Header.Get("X-Timestamp")
+	}
+	if tsHeader != "" {
+		if ts, err := strconv.ParseInt(tsHeader, 10, 64); err == nil {
+			uploadTs = ts
+		}
+	}
+
 	if sigHeader := r.Header.Get("X-Signature"); sigHeader != "" && len(a.TrustedKeys) > 0 {
-		if sigBytes, err := base64.StdEncoding.DecodeString(sigHeader); err == nil {
-			bodyHash := sha256.Sum256(bodyBytes)
-			contextMsg := fmt.Sprintf("%s|%s|%s|%s|%s|%x", proj.ID, commit, pr, engine, format, bodyHash)
+		// Timestamp is MANDATORY; window 900s/300s skew
+		if uploadTs > 0 {
+			nowUnix := time.Now().Unix()
+			if nowUnix-uploadTs <= 900 && uploadTs-nowUnix <= 300 {
+				if sigBytes, err := base64.StdEncoding.DecodeString(sigHeader); err == nil {
+					bodyHash := sha256.Sum256(bodyBytes)
+					contextMsg := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%x", proj.ID, commit, pr, engine, format, tsHeader, bodyHash)
 
-			// Check timestamp/nonce if provided
-			tsHeader := r.Header.Get("X-Signature-Timestamp")
-			if tsHeader == "" {
-				tsHeader = r.Header.Get("X-Timestamp")
-			}
-			tsValid := true
-			if tsHeader != "" {
-				if tsInt, err := strconv.ParseInt(tsHeader, 10, 64); err == nil {
-					nowUnix := time.Now().Unix()
-					if nowUnix-tsInt > 900 || tsInt-nowUnix > 300 { // 15 min expiry, 5 min clock skew
-						tsValid = false
+					validSig := false
+					for _, k := range a.TrustedKeys {
+						if ed25519.Verify(k, []byte(contextMsg), sigBytes) {
+							validSig = true
+							break
+						}
 					}
-				} else {
-					tsValid = false
-				}
-			}
 
-			if tsValid {
-				contextMsgWithTS := ""
-				if tsHeader != "" {
-					contextMsgWithTS = fmt.Sprintf("%s|%s|%s|%s|%s|%s|%x", proj.ID, commit, pr, engine, format, tsHeader, bodyHash)
-				}
-
-				// Check if body itself binds context
-				validContextBody := false
-				if isJSON && env.Commit != "" && env.Commit == commit {
-					projectMatches := (env.Project == "" || env.Project == proj.ID) && (env.ProjectID == "" || env.ProjectID == proj.ID)
-					prMatches := (pr == "" || (env.PR != nil && fmt.Sprintf("%v", env.PR) == pr))
-					engineMatches := (engine == "" || env.Engine == "" || env.Engine == engine)
-					if projectMatches && prMatches && engineMatches {
-						validContextBody = true
-					}
-				}
-
-				for _, k := range a.TrustedKeys {
-					if ed25519.Verify(k, []byte(contextMsg), sigBytes) {
-						signedUpload = true
-						break
-					}
-					if contextMsgWithTS != "" && ed25519.Verify(k, []byte(contextMsgWithTS), sigBytes) {
-						signedUpload = true
-						break
-					}
-					if validContextBody && ed25519.Verify(k, bodyBytes, sigBytes) {
-						signedUpload = true
-						break
+					if validSig {
+						// Check and record nonce/signature replay in store
+						if err := a.Store.RecordIngestSignature(sigHeader, proj.ID, uploadTs); err == nil {
+							signedUpload = true
+						}
 					}
 				}
 			}
@@ -841,7 +823,7 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 	for _, f := range findings {
 		currentFps = append(currentFps, f.Fingerprint())
 	}
-	_ = a.Store.CloseEngineFindings(proj.ID, engine, pr, source, currentFps)
+	_ = a.Store.CloseEngineFindings(proj.ID, engine, pr, source, currentFps, uploadTs)
 
 	if pr != "" && commit != "" {
 		_ = a.RefreshPRReview(r.Context(), &proj, commit, pr)
