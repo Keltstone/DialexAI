@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sentinix/pkg/advisories"
@@ -303,12 +305,16 @@ func TestIngestTrust_UnsignedCappedAndRefusesReopen(t *testing.T) {
 	e.app.TrustedKeys = []ed25519.PublicKey{pub}
 
 	signedBody := `{"commit":"c2","findings":[{"rule":"vuln","engine":"secrets","file":"main.go","line":10,"severity":4,"message":"crit","evidence":"token"}]}`
-	sig := ed25519.Sign(priv, []byte(signedBody))
+	ts := fmt.Sprintf("%d", time.Now().Unix())
+	bodyHash := sha256.Sum256([]byte(signedBody))
+	msg := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%x", p.ID, "c2", "", "secrets", "findings", ts, bodyHash)
+	sig := ed25519.Sign(priv, []byte(msg))
 	sigHeader := base64.StdEncoding.EncodeToString(sig)
 
 	req = httptest.NewRequest("POST", "/api/projects/"+p.ID+"/ingest", strings.NewReader(signedBody))
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("X-Signature", sigHeader)
+	req.Header.Set("X-Signature-Timestamp", ts)
 	w = httptest.NewRecorder()
 	e.h.ServeHTTP(w, req)
 	if w.Code != 200 {

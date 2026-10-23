@@ -58,10 +58,11 @@ create table if not exists skipped_file_overrides(project_id text not null defau
 create table if not exists project_grants(project_id text not null, grantee text not null, primary key(project_id, grantee));
 create table if not exists project_policies(project_id text not null, category text not null, mode text not null, threshold text not null, primary key(project_id, category));
 create table if not exists ingest_uploads(id text primary key, project_id text not null, commit_sha text not null, pr text not null default '', engine text not null, category text not null default '', format text not null, received_at bigint not null, parse_status text not null, finding_count bigint not null default 0, findings_json text not null default '', error_message text not null default '', attested integer not null default 0, unique(project_id, commit_sha, engine));
+create table if not exists ingest_signatures(sig_hash text primary key, project_id text not null, ts bigint not null, created_at bigint not null);
+create index if not exists idx_ingest_signatures_created on ingest_signatures(created_at);
 create index if not exists idx_findings_project on findings(project_id);
 create index if not exists idx_findings_status on findings(status);
 create index if not exists idx_findings_severity on findings(severity);
-create index if not exists idx_findings_category on findings(category);
 create index if not exists idx_scans_project on scans(project_id);
 create index if not exists idx_durable_queue_status on durable_queue(status);
 create index if not exists idx_audit_seq on audit(seq);
@@ -126,6 +127,8 @@ func Open(dsn string) (*Store, error) {
 		"create table if not exists pr_review_results(project_id text not null, pr text not null, commit_sha text not null, ran text not null default '', skipped text not null default '', new_findings_json text not null default '[]', resolved_findings_json text not null default '[]', updated_at bigint not null, primary key(project_id, pr, commit_sha))",
 		"create table if not exists finding_prs(project_id text not null, fingerprint text not null, pr text not null, engine text not null, primary key(project_id, fingerprint, pr, engine))",
 		"create index if not exists idx_finding_prs_fp on finding_prs(project_id, fingerprint)",
+		"create table if not exists ingest_signatures(sig_hash text primary key, project_id text not null, ts bigint not null, created_at bigint not null)",
+		"create index if not exists idx_ingest_signatures_created on ingest_signatures(created_at)",
 	} {
 		if _, err := db.Exec(q); err != nil && !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
 			return nil, err

@@ -58,15 +58,23 @@ func ParseJUnit(engine string, data []byte, defaultCategory string) ([]Finding, 
 
 	// Try unmarshaling as <testsuites>
 	var rootSuites jUnitTestSuites
+	var rootErr error
 	if err := xml.Unmarshal(data, &rootSuites); err == nil && len(rootSuites.Suites) > 0 {
 		suites = rootSuites.Suites
 	} else {
+		rootErr = err
 		// Try unmarshaling as single <testsuite>
 		var singleSuite jUnitTestSuite
 		if err := xml.Unmarshal(data, &singleSuite); err == nil && (len(singleSuite.TestCases) > 0 || singleSuite.Name != "") {
 			suites = []jUnitTestSuite{singleSuite}
 		} else {
-			return nil, fmt.Errorf("%s: bad JUnit XML: %w", engine, err)
+			if err != nil {
+				return nil, fmt.Errorf("%s: bad JUnit XML: %w", engine, err)
+			}
+			if rootErr != nil {
+				return nil, fmt.Errorf("%s: bad JUnit XML: %w", engine, rootErr)
+			}
+			return nil, fmt.Errorf("%s: bad JUnit XML: missing testsuite element", engine)
 		}
 	}
 

@@ -1,5 +1,10 @@
 # Sample GitLab CI configuration for running Gradle checks and uploading to Sentinix.
 # Include in your repository's .gitlab-ci.yml. Set SENTINIX_TOKEN and SENTINIX_URL in CI/CD Variables.
+#
+# NOTE ON FORK MERGE REQUESTS:
+# In GitLab CI, pipelines for merge requests originating from forks do not expose protected
+# variables (SENTINIX_TOKEN, SENTINIX_SIGNING_KEY). Unsigned uploads are treated as ci-unattested,
+# capped at Medium severity, and comment-only. Attested uploads require SENTINIX_SIGNING_KEY.
 
 stages:
   - test
