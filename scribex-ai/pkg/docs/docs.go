@@ -58,7 +58,7 @@ func Symbols(root, file string) map[string]string {
 }
 
 // Check validates (and with sync, repairs) every anchor under root. Stale issues fixed by sync are not reported.
-func Check(root string, sync bool) (Report, error) {
+func Check(root string, sync bool, prose anchors.Prose) (Report, error) {
 	cache := map[string]map[string]string{}
 	look := func(file, sym string) (string, bool) {
 		s, ok := cache[file]
@@ -76,7 +76,7 @@ func Check(root string, sync bool) (Report, error) {
 			return r, err
 		}
 		r.Total += anchors.Count(string(b))
-		issues, out := anchors.Process(string(b), look, sync)
+		issues, out := anchors.Process(string(b), look, sync, prose)
 		for _, i := range issues {
 			if !(sync && i.Stale) {
 				r.Issues = append(r.Issues, Issue{f, i})

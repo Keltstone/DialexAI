@@ -30,11 +30,11 @@ func TestSymbolsAndAnchors(t *testing.T) {
 
 	look := func(f, s string) (string, bool) { v, ok := g[s]; return v, ok }
 	md := "<!-- @scribex:anchor(a.go#Verify) -->\nprose\n<!-- @scribex:end -->\n<!-- @scribex:anchor(a.go#Gone) -->\n<!-- @scribex:end -->"
-	issues, out := anchors.Process(md, look, true)
+	issues, out := anchors.Process(md, look, true, nil)
 	if len(issues) != 2 || !strings.Contains(out, "sig=") || !strings.Contains(out, "func Verify") {
 		t.Fatalf("%v\n%s", issues, out)
 	}
-	issues, out2 := anchors.Process(out, look, true) // idempotent; only dead anchor remains
+	issues, out2 := anchors.Process(out, look, true, nil) // idempotent; only dead anchor remains
 	if len(issues) != 1 || out2 != out {
 		t.Fatalf("not idempotent: %v\n%s", issues, out2)
 	}

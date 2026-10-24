@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"scribex/pkg/anchors"
 	"scribex/pkg/confluence"
 	"scribex/pkg/dashboard"
 	"scribex/pkg/diagram"
@@ -20,10 +21,15 @@ import (
 	"scribex/pkg/github"
 	"scribex/pkg/jira"
 	"scribex/pkg/manifest"
+	"scribex/pkg/mcp"
+	"scribex/pkg/secrets"
 	"scribex/pkg/trace"
 )
 
 var version = "1.0.0"
+
+var force *bool
+var preset, mcpURL, mcpExe, mcpArgs, mcpEnv, mcpHdr *string
 
 const usage = `usage: scribex <cmd> [flags]
   init | check [-base ref] | sync [-commit] | diagram | scavenge
@@ -32,6 +38,12 @@ const usage = `usage: scribex <cmd> [flags]
   jira -base ref [-key K] [-post]          (same env)
   trace -base ref [-key K] [-pr N] [-out f.csv]
   serve -repos file -rbac file [-addr :8080]
+  sync -ai                                 (LLM prose update for changed signatures; see config)
+  config init|show|set <k> <v>|validate|test
+  secrets set <NAME> (value on stdin) | list | check
+  ci init github|gitlab [-force]
+  mcp add <name> [-preset p | -url u | -cmd c -args a,b] [-env K=VAR] [-header K=Bearer ${VAR}] | list | remove <name> | check | export | serve
+  wiki new <title> | lint | search <q> | backlinks <page> | render -out dir
   hash-token <token> | version`
 
 func main() {
@@ -51,8 +63,24 @@ func main() {
 	addr := fs.String("addr", ":8080", "serve address")
 	repos := fs.String("repos", "", "serve: repos file")
 	rbac := fs.String("rbac", "", "serve: rbac file")
-	fs.Parse(os.Args[2:])
-	a := fs.Args()
+	ai := fs.Bool("ai", false, "sync: let the configured LLM update prose for changed signatures")
+	force = fs.Bool("force", false, "overwrite generated files")
+	preset = fs.String("preset", "", "mcp add: "+strings.Join(mcp.PresetNames(), "|"))
+	mcpURL = fs.String("url", "", "mcp add: remote server URL")
+	mcpExe = fs.String("cmd", "", "mcp add: stdio server command")
+	mcpArgs = fs.String("args", "", "mcp add: comma-separated args")
+	mcpEnv = fs.String("env", "", "mcp add: KEY=ENV_VAR,... (stored as ${ENV_VAR})")
+	mcpHdr = fs.String("header", "", "mcp add: Name=value (value must use ${ENV_VAR} for credentials)")
+	var a []string // flags may appear before or after positionals
+	for rest := os.Args[2:]; ; {
+		fs.Parse(rest)
+		if fs.NArg() == 0 {
+			break
+		}
+		a = append(a, fs.Arg(0))
+		rest = fs.Args()[1:]
+	}
+	secrets.Load(*root)
 
 	var err error
 	switch os.Args[1] {
@@ -63,8 +91,14 @@ func main() {
 	case "check":
 		err = check(*root, *base)
 	case "sync":
+		var prose anchors.Prose
+		if *ai {
+			if prose, err = proseFn(*root); err != nil {
+				break
+			}
+		}
 		var r docs.Report
-		if r, err = docs.Check(*root, true); err == nil {
+		if r, err = docs.Check(*root, true, prose); err == nil {
 			for _, i := range r.Issues {
 				fmt.Println(i)
 			}
@@ -85,7 +119,17 @@ func main() {
 	case "trace":
 		err = traceCmd(*root, *base, *key, *pr, *out)
 	case "serve":
-		err = serve(*repos, *rbac, *addr)
+		err = serve(*root, *repos, *rbac, *addr)
+	case "config":
+		err = configCmd(*root, a)
+	case "secrets":
+		err = secretsCmd(*root, a)
+	case "ci":
+		err = ciCmd(*root, a)
+	case "mcp":
+		err = mcpCmd(*root, a)
+	case "wiki":
+		err = wikiCmd(*root, a, *out)
 	case "hash-token":
 		if len(a) != 1 {
 			err = fmt.Errorf("hash-token <token>")
@@ -134,7 +178,7 @@ func check(root, base string) error {
 			return err
 		}
 	}
-	r, err := docs.Check(root, false)
+	r, err := docs.Check(root, false, nil)
 	for _, i := range r.Issues {
 		fmt.Println(i)
 	}
@@ -145,7 +189,7 @@ func check(root, base string) error {
 }
 
 func scavenge(root string) error {
-	r, err := docs.Check(root, false)
+	r, err := docs.Check(root, false, nil)
 	if err != nil {
 		return err
 	}
@@ -169,7 +213,7 @@ func comment(root, base, repo string, pr int) error {
 			return err
 		}
 	}
-	r, err := docs.Check(root, false)
+	r, err := docs.Check(root, false, nil)
 	if err != nil {
 		return err
 	}
@@ -322,7 +366,7 @@ func traceCmd(root, base, key string, pr int, out string) error {
 	return trace.Write(w, key, prs, ds, docs.Refs(root), ms)
 }
 
-func serve(reposF, rbacF, addr string) error {
+func serve(root, reposF, rbacF, addr string) error {
 	rs, err := dashboard.LoadRepos(reposF)
 	if err != nil {
 		return err
@@ -332,7 +376,7 @@ func serve(reposF, rbacF, addr string) error {
 		return err
 	}
 	fmt.Println("scribex dashboard on", addr)
-	return http.ListenAndServe(addr, dashboard.Handler(rs, ps))
+	return http.ListenAndServe(addr, dashboard.Handler(rs, ps, root))
 }
 
 // companion commits only .md files touched by sync; no-op when clean.

@@ -28,9 +28,15 @@ func Hash(sig string) string {
 	return hex.EncodeToString(h[:4])
 }
 
+// Prose rewrites an anchor's prose for a changed signature. Only called for anchors that were
+// synced before (sig= present) and whose signature changed, so first-time syncs never spend tokens.
+type Prose func(ref, sig, old string) (string, error)
+
+const endMark = "<!-- @scribex:end -->"
+
 // Process walks md; returns issues and, when sync is true, the rewritten text.
 // Sync refreshes the sig hash and the ```signature fence; prose is never touched.
-func Process(md string, look Lookup, sync bool) ([]Issue, string) {
+func Process(md string, look Lookup, sync bool, prose Prose) ([]Issue, string) {
 	in := strings.Split(md, "\n")
 	var out []string
 	var issues []Issue
@@ -63,6 +69,17 @@ func Process(md string, look Lookup, sync bool) ([]Issue, string) {
 				i++
 			}
 		}
+		if prose != nil && m[3] != "" && m[3] != want {
+			if j := endAt(in, i+1); j >= 0 {
+				nw, err := prose(ref, sig, strings.Join(in[i+1:j], "\n"))
+				if err != nil {
+					issues = append(issues, Issue{Line: i + 1, Ref: ref, Msg: "ai rewrite failed: " + err.Error()})
+				} else {
+					out = append(out, strings.Split(strings.Trim(nw, "\n"), "\n")...)
+					i = j - 1
+				}
+			}
+		}
 	}
 	return issues, strings.Join(out, "\n")
 }
@@ -75,4 +92,16 @@ func Count(md string) (n int) {
 		}
 	}
 	return
+}
+
+func endAt(lines []string, from int) int {
+	for j := from; j < len(lines); j++ {
+		if strings.TrimSpace(lines[j]) == endMark {
+			return j
+		}
+		if open.MatchString(lines[j]) {
+			return -1
+		}
+	}
+	return -1
 }

@@ -79,7 +79,7 @@ func TestDashboardRBAC(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "R.md"), []byte("<!-- @scribex:anchor(a.go#P) -->\n<!-- @scribex:end -->\n<!-- @scribex:anchor(a.go#Dead) -->\n<!-- @scribex:end -->\n"), 0o644)
 	h := dashboard.Handler(
 		[]dashboard.Repo{{"r1", dir, "core"}, {"r2", dir, "web"}},
-		[]dashboard.Principal{{Hash: dashboard.HashToken("adm"), Admin: true}, {Hash: dashboard.HashToken("v"), Teams: map[string]bool{"core": true}}})
+		[]dashboard.Principal{{Hash: dashboard.HashToken("adm"), Admin: true}, {Hash: dashboard.HashToken("v"), Teams: map[string]bool{"core": true}}}, dir)
 	get := func(tok string) (int, []dashboard.Health) {
 		r := httptest.NewRequest("GET", "/api/health", nil)
 		if tok != "" {
