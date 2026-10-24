@@ -118,3 +118,46 @@ func TestIsLoosening(t *testing.T) {
 		})
 	}
 }
+
+func TestRuleEnforcementLevelsAndPolicy(t *testing.T) {
+	pol := &ProjectPolicy{
+		DefaultLevel: LevelBlock,
+		Rules: map[string]RuleEnforcementLevel{
+			"android/allow-backup": LevelWarn,
+			"rust/unsafe-block":    LevelNotice,
+			"python/csrf-exempt":   LevelIgnore,
+		},
+	}
+
+	fs := []engines.Finding{
+		{Rule: "android/exported-component", Severity: engines.High},
+		{Rule: "android/allow-backup", Severity: engines.Low},
+		{Rule: "rust/unsafe-block", Severity: engines.Medium},
+		{Rule: "python/csrf-exempt", Severity: engines.Critical},
+	}
+
+	ev := EvaluateFindings(fs, pol)
+	if len(ev.Blocked) != 1 || ev.Blocked[0].Rule != "android/exported-component" {
+		t.Errorf("expected 1 blocked finding, got %+v", ev.Blocked)
+	}
+	if len(ev.Warned) != 1 || ev.Warned[0].Rule != "android/allow-backup" {
+		t.Errorf("expected 1 warned finding, got %+v", ev.Warned)
+	}
+	if len(ev.Noticed) != 1 || ev.Noticed[0].Rule != "rust/unsafe-block" {
+		t.Errorf("expected 1 noticed finding, got %+v", ev.Noticed)
+	}
+	if len(ev.Ignored) != 1 || ev.Ignored[0].Rule != "python/csrf-exempt" {
+		t.Errorf("expected 1 ignored finding, got %+v", ev.Ignored)
+	}
+
+	if !PolicyFails(ev) {
+		t.Errorf("expected PolicyFails to be true when Blocked findings exist")
+	}
+
+	// When blocked is empty, policy must pass
+	evClean := EvaluatedFindings{Warned: ev.Warned, Noticed: ev.Noticed}
+	if PolicyFails(evClean) {
+		t.Errorf("expected PolicyFails to be false when only Warned/Noticed findings exist")
+	}
+}
+

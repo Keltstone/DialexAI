@@ -142,6 +142,22 @@ const views = {
       out.push(h('h2', {}, 'This project'), h('div', { class: 'row' }, enf, failOn), h('div', { class: 'row' }, sched, policy, h('label', {}, ai, ' AI add-on'),
         h('button', { onclick: act(async () => { await api('/projects/' + project, { method: 'PATCH', body: { Schedule: sched.value, ModelPolicy: policy.value, AI: ai.checked, Enforcement: enf.value, FailOn: failOn.value } }); await loadProjects(); }) }, 'Save')),
         h('div', { class: 'row' }, h('button', { class: 'plain', onclick: act(async () => { const t = await api(`/projects/${project}/tokens`, { method: 'POST', body: { Name: 'ci' } }); prompt('CI token (shown once)', t.token); }) }, 'Create CI token')));
+      try {
+        const rp = await api(`/projects/${project}/rule-policies`);
+        const ruleRows = Object.entries(rp.rules || {}).map(([rID, lvl]) => h('tr', {},
+          h('td', {}, rID),
+          h('td', {}, h('select', { 'aria-label': 'Enforcement for ' + rID, onchange: act((e) => api(`/projects/${project}/rule-policies`, { method: 'PUT', body: { rule: rID, level: e.target.value } })) },
+            ['block', 'warn', 'notice', 'ignore'].map((l) => h('option', { value: l, selected: l === lvl }, l)))),
+          h('td', {}, h('button', { class: 'plain', onclick: act(async () => { await api(`/projects/${project}/rule-policies/${rID}`, { method: 'DELETE' }); await route(); }) }, 'Reset'))
+        ));
+        const newRuleInput = h('input', { placeholder: 'stack/rule-id (e.g. go/insecure-tls-skip-verify)', 'aria-label': 'Rule ID' });
+        const newRuleLevel = h('select', { 'aria-label': 'Level' }, ['block', 'warn', 'notice', 'ignore'].map((l) => h('option', { value: l }, l)));
+        const addRuleBtn = h('button', { onclick: act(async () => { if (newRuleInput.value) { await api(`/projects/${project}/rule-policies`, { method: 'PUT', body: { rule: newRuleInput.value, level: newRuleLevel.value } }); await route(); } }) }, 'Set rule policy');
+        out.push(h('h2', {}, 'Rule enforcement policies'),
+          table(['Rule ID', 'Level', 'Action'], ruleRows),
+          h('div', { class: 'row' }, newRuleInput, newRuleLevel, addRuleBtn)
+        );
+      } catch { /* rule-policies not accessible */ }
     }
     try {
       const us = await api('/users');

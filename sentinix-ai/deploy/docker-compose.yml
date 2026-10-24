@@ -17,7 +17,7 @@ services:
   sentinix:
     build: { context: .., dockerfile: deploy/Dockerfile }
     depends_on: { db: { condition: service_healthy } }
-    command: ["-db", "postgres://sentinix:${POSTGRES_PASSWORD}@db:5432/sentinix?sslmode=${SENTINIX_PGSSLMODE:-disable}", "-config", "/etc/sentinix/sentinix.json"]
+    command: ["-db", "postgres://sentinix:${POSTGRES_PASSWORD}@db:5432/sentinix?sslmode=${SENTINIX_PGSSLMODE:-prefer}", "-config", "/etc/sentinix/sentinix.json"]
     env_file: ../.env
     ports: ["8080:8080"]
     volumes: ["./sentinix.json:/etc/sentinix/sentinix.json:ro"]

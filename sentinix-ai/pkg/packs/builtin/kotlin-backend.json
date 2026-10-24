@@ -78,6 +78,56 @@
     "*.java"
    ],
    "pattern": "getInstance\\(\\s*\"(AES/ECB[^\"]*|DES[^\"]*|MD5|SHA-?1)\""
+  },
+  {
+   "id": "jwt-weak-hmac-secret",
+   "severity": "critical",
+   "cwe": "CWE-326",
+   "message": "Trivial or hardcoded JWT secret in configuration",
+   "remediation": "Generate a 256-bit cryptographically random secret and load from environment variable.",
+   "files": [
+    "*.properties",
+    "*.yml",
+    "*.yaml"
+   ],
+   "pattern": "(?i)(?:jwt\\.secret|jwt_secret|jwtSecret)\\s*[:=]\\s*[\"']?(?:secret|change[_-]?me|123456|password|default)[\"']?"
+  },
+  {
+   "id": "unvalidated-redirect",
+   "severity": "medium",
+   "cwe": "CWE-601",
+   "message": "Unvalidated redirect target in controller",
+   "remediation": "Validate target URL against allowed internal paths or domain whitelist.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "return\\s+\"redirect:\"\\s*\\+\\s*\\w+"
+  },
+  {
+   "id": "path-traversal-file",
+   "severity": "high",
+   "cwe": "CWE-22",
+   "message": "File constructed directly from request object without sanitization",
+   "remediation": "Validate filename or ensure canonicalPath is within expected root directory.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "File\\s*\\([^,]+,\\s*(?:request|params|param|req)\\.[a-zA-Z0-9_]+\\)"
+  },
+  {
+   "id": "xxe-xml-factory",
+   "severity": "high",
+   "cwe": "CWE-611",
+   "message": "XML DocumentBuilderFactory without disallow-doctype-decl",
+   "remediation": "Call setFeature(\"http://apache.org/xml/features/disallow-doctype-decl\", true).",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "DocumentBuilderFactory\\.newInstance\\(\\)",
+   "unless": "disallow-doctype-decl"
   }
  ],
  "tests": [
@@ -116,6 +166,30 @@
    "file": "A.kt",
    "bad": "MessageDigest.getInstance(\"SHA1\")",
    "good": "MessageDigest.getInstance(\"SHA-256\")"
+  },
+  {
+   "rule": "jwt-weak-hmac-secret",
+   "file": "application.properties",
+   "bad": "jwt.secret=changeme",
+   "good": "jwt.secret=${JWT_SECRET_KEY}"
+  },
+  {
+   "rule": "unvalidated-redirect",
+   "file": "AuthController.kt",
+   "bad": "return \"redirect:\" + returnUrl",
+   "good": "return \"redirect:/dashboard\""
+  },
+  {
+   "rule": "path-traversal-file",
+   "file": "UploadService.kt",
+   "bad": "val dest = File(baseDir, req.filename)",
+   "good": "val dest = File(baseDir, safeFilename)"
+  },
+  {
+   "rule": "xxe-xml-factory",
+   "file": "XmlParser.kt",
+   "bad": "val dbf = DocumentBuilderFactory.newInstance()",
+   "good": "val dbf = DocumentBuilderFactory.newInstance().apply { setFeature(\"http://apache.org/xml/features/disallow-doctype-decl\", true) }"
   }
  ]
 }

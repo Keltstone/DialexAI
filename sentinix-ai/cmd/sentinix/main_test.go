@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"sentinix/pkg/engines"
+	"sentinix/pkg/policy"
 	"sentinix/pkg/server"
 	"sentinix/pkg/store"
 )
@@ -157,4 +158,71 @@ func TestSentinixSignCmd(t *testing.T) {
 		t.Fatalf("expected upload to be attested via sentinix sign output, got %+v", ups)
 	}
 }
+
+func TestCustomRulesNewAndTest(t *testing.T) {
+	tmpDir := t.TempDir()
+	outFile := filepath.Join(tmpDir, "team-rules.json")
+
+	// 1. Generate new rule pack template
+	packCmd([]string{"new", "team-rules", outFile})
+
+	if _, err := os.Stat(outFile); err != nil {
+		t.Fatalf("expected rule template to be created at %s, got error: %v", outFile, err)
+	}
+
+	// 2. Test the rule pack template
+	packCmd([]string{"test", outFile})
+}
+
+func TestHookInstallAndUninstall(t *testing.T) {
+	tmpDir := t.TempDir()
+	origWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(origWd)
+
+	// Create fake .git directory
+	os.MkdirAll(".git", 0o755)
+
+	// 1. Install hook
+	hookCmd([]string{"install"})
+	hookPath := filepath.Join(".git", "hooks", "pre-commit")
+	if _, err := os.Stat(hookPath); err != nil {
+		t.Fatalf("expected hook to be installed at %s, got error: %v", hookPath, err)
+	}
+
+	// 2. Uninstall hook
+	hookCmd([]string{"uninstall"})
+	if _, err := os.Stat(hookPath); !os.IsNotExist(err) {
+		t.Fatalf("expected hook to be deleted after uninstall")
+	}
+}
+
+func TestPolicyInitAndShow(t *testing.T) {
+	tmpDir := t.TempDir()
+	policyFile := filepath.Join(tmpDir, "policy.json")
+
+	// 1. Initialize policy
+	policyCmd([]string{"init", policyFile})
+
+	if _, err := os.Stat(policyFile); err != nil {
+		t.Fatalf("expected policy to exist at %s: %v", policyFile, err)
+	}
+
+	// 2. Show policy
+	policyCmd([]string{"show", policyFile})
+
+	// 3. Verify content
+	p, err := policy.LoadProjectPolicy(policyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.DefaultLevel != policy.LevelWarn {
+		t.Errorf("expected default level warn, got %s", p.DefaultLevel)
+	}
+	if p.Rules["go/insecure-tls-skip-verify"] != policy.LevelBlock {
+		t.Errorf("expected go/insecure-tls-skip-verify to be block, got %s", p.Rules["go/insecure-tls-skip-verify"])
+	}
+}
+
+
 

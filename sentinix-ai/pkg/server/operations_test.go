@@ -107,6 +107,20 @@ func TestOperations_ReadyzAndMetricsEndpoints(t *testing.T) {
 			t.Errorf("expected /metrics to include %q, got: %s", expected, body)
 		}
 	}
+
+	// Test /.well-known/security.txt and /security.txt
+	for _, secPath := range []string{"/.well-known/security.txt", "/security.txt"} {
+		reqSec := httptest.NewRequest("GET", secPath, nil)
+		wSec := httptest.NewRecorder()
+		e.h.ServeHTTP(wSec, reqSec)
+		if wSec.Code != 200 {
+			t.Errorf("expected %s 200, got %d", secPath, wSec.Code)
+		}
+		secBody := wSec.Body.String()
+		if !strings.Contains(secBody, "Contact: mailto:") || !strings.Contains(secBody, "Expires:") {
+			t.Errorf("expected valid security.txt format, got: %s", secBody)
+		}
+	}
 }
 
 func TestPRComment_SingleCommentAcrossThreePushesAndCollapsedResolved(t *testing.T) {
@@ -165,4 +179,70 @@ func TestBaseBranchCaching_ZeroBaseRunsOnSecondReview(t *testing.T) {
 		t.Errorf("expected baseCacheHits to increment, got %d (initial %d)", baseCacheHits.Load(), initialHits)
 	}
 }
+
+func TestProjectRulePoliciesRESTAPI(t *testing.T) {
+	e := setup(t)
+	defer e.st.Close()
+
+	p, err := e.app.Store.CreateProject(store.Project{Name: "rule-pol-proj", Host: "gh", Repo: "o/r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Initial GET /api/projects/{id}/policy contains rules
+	w := e.call("admin@example.test", auth.Admin, "GET", "/api/projects/"+p.ID+"/policy", "")
+	if w.Code != 200 {
+		t.Fatalf("GET /policy failed: code=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"rules"`) {
+		t.Fatalf("expected 'rules' field in policy response: %s", w.Body.String())
+	}
+
+	// 2. PUT single rule policy
+	putBody := `{"rule": "go/insecure-tls-skip-verify", "level": "block"}`
+	w = e.call("admin@example.test", auth.Admin, "PUT", "/api/projects/"+p.ID+"/rule-policies", putBody)
+	if w.Code != 200 {
+		t.Fatalf("PUT /rule-policies failed: code=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"go/insecure-tls-skip-verify":"block"`) {
+		t.Fatalf("expected rule to be saved: %s", w.Body.String())
+	}
+
+	// 3. PUT batch rules
+	batchBody := `{"rules": {"python/sql-injection": "warn", "node/eval-injection": "ignore"}}`
+	w = e.call("admin@example.test", auth.Admin, "PUT", "/api/projects/"+p.ID+"/rule-policies", batchBody)
+	if w.Code != 200 {
+		t.Fatalf("PUT /rule-policies batch failed: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// 4. GET /api/projects/{id}/rule-policies
+	w = e.call("admin@example.test", auth.Admin, "GET", "/api/projects/"+p.ID+"/rule-policies", "")
+	if w.Code != 200 {
+		t.Fatalf("GET /rule-policies failed: code=%d body=%s", w.Code, w.Body.String())
+	}
+	resp := w.Body.String()
+	if !strings.Contains(resp, `"python/sql-injection":"warn"`) || !strings.Contains(resp, `"node/eval-injection":"ignore"`) {
+		t.Fatalf("expected batch rules in response: %s", resp)
+	}
+
+	// 5. DELETE a rule policy
+	w = e.call("admin@example.test", auth.Admin, "DELETE", "/api/projects/"+p.ID+"/rule-policies/python/sql-injection", "")
+	if w.Code != 204 {
+		t.Fatalf("DELETE /rule-policies failed: code=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// Verify deleted rule is no longer present
+	w = e.call("admin@example.test", auth.Admin, "GET", "/api/projects/"+p.ID+"/rule-policies", "")
+	if strings.Contains(w.Body.String(), `"python/sql-injection"`) {
+		t.Fatalf("deleted rule still present in response: %s", w.Body.String())
+	}
+
+	// 6. Invalid level rejected with 400 Bad Request
+	badBody := `{"rule": "go/sql-injection", "level": "super-block"}`
+	w = e.call("admin@example.test", auth.Admin, "PUT", "/api/projects/"+p.ID+"/rule-policies", badBody)
+	if w.Code != 400 {
+		t.Fatalf("expected 400 Bad Request for invalid level, got %d", w.Code)
+	}
+}
+
 

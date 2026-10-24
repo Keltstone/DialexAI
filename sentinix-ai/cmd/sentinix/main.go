@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,7 +32,7 @@ import (
 
 var version = "1.0.0"
 
-const usage = "usage: sentinix scan [flags] [path] | sign [flags] [file] | surface [base-ref] | packs keygen|sign|verify | bench <dir> | audit verify [-db <dsn>] | version"
+const usage = "usage: sentinix scan [flags] [path] | sign [flags] [file] | surface [base-ref] | packs keygen|sign|verify|new|test | rules new|test|sign | policy init|show | hook install|run|uninstall | bench <dir> | audit verify [-db <dsn>] | version"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -48,8 +49,12 @@ func main() {
 		signCmd(args)
 	case "surface":
 		surface(args)
-	case "packs":
+	case "packs", "rules":
 		packCmd(args)
+	case "policy":
+		policyCmd(args)
+	case "hook":
+		hookCmd(args)
 	case "bench":
 		benchCmd(args)
 	case "audit":
@@ -66,8 +71,10 @@ func scan(args []string) {
 	update := fl.Bool("update-baseline", false, "write current findings to -baseline and exit 0")
 	reportOnly := fl.Bool("report-only", false, "print findings but never fail on them (exit 0 unless an engine failed)")
 	gate := fl.String("fail-on", "high", "fail at or above: info|low|medium|high|critical")
+	policyPath := fl.String("policy", "", "path to project policy JSON (defaults to .sentinix/policy.json if present)")
 	sarif := fl.String("sarif", "", "write SARIF to this file")
 	packDir := fl.String("packs", "", "directory of signed extra rule packs")
+	customRules := fl.String("rules", "", "path to custom rule pack JSON (loads without signature for local dev)")
 	trust := fl.String("trust", "", "file of trusted pack public keys (needed with -packs)")
 	server := fl.String("server", "", "Sentinix server URL; upload findings for this project (CI)")
 	project := fl.String("project", "", "project id on the server (with -server)")
@@ -84,6 +91,22 @@ func scan(args []string) {
 	die(err)
 	pe, err := packs.NewEngine(*packDir, *trust)
 	die(err)
+	if *customRules != "" {
+		rb, err := os.ReadFile(*customRules)
+		die(err)
+		cp, err := packs.Parse(rb)
+		die(err)
+		pe.Packs = append(pe.Packs, cp)
+	} else if *packDir == "" {
+		localRulesPath := filepath.Join(root, ".sentinix", "rules.json")
+		if _, err := os.Stat(localRulesPath); err == nil {
+			if rb, err := os.ReadFile(localRulesPath); err == nil {
+				if cp, err := packs.Parse(rb); err == nil {
+					pe.Packs = append(pe.Packs, cp)
+				}
+			}
+		}
+	}
 
 	var all []engines.Finding
 	var ran []string
@@ -120,6 +143,25 @@ func scan(args []string) {
 		die(err)
 		all = b.New(all)
 	}
+	var projPolicy *policy.ProjectPolicy
+	if *policyPath != "" {
+		p, err := policy.LoadProjectPolicy(*policyPath)
+		die(err)
+		projPolicy = p
+	} else {
+		defaultPolicyPath := filepath.Join(root, ".sentinix", "policy.json")
+		if _, err := os.Stat(defaultPolicyPath); err == nil {
+			if p, err := policy.LoadProjectPolicy(defaultPolicyPath); err == nil {
+				projPolicy = p
+			}
+		}
+	}
+	var ev policy.EvaluatedFindings
+	if projPolicy != nil {
+		ev = policy.EvaluateFindings(all, projPolicy)
+		all = ev.Active()
+	}
+
 	if *sarif != "" {
 		f, err := os.Create(*sarif)
 		die(err)
@@ -127,19 +169,145 @@ func scan(args []string) {
 		f.Close()
 	}
 	report.Text(os.Stdout, all, ran)
-	if code == 0 && !*reportOnly && policy.Fails(all, min) {
-		code = 1
+	if code == 0 && !*reportOnly {
+		if projPolicy != nil {
+			if policy.PolicyFails(ev) {
+				code = 1
+			}
+		} else if policy.Fails(all, min) {
+			code = 1
+		}
 	}
 	os.Exit(code)
 }
 
+func policyCmd(a []string) {
+	if len(a) < 1 {
+		die(fmt.Errorf("usage: sentinix policy init [path] | show [path]"))
+	}
+	switch a[0] {
+	case "init":
+		target := ".sentinix/policy.json"
+		if len(a) > 1 {
+			target = a[1]
+		}
+		dir := filepath.Dir(target)
+		if dir != "." && dir != "" {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				die(err)
+			}
+		}
+		pol := policy.ProjectPolicy{
+			Version:      "1.0.0",
+			DefaultLevel: policy.LevelWarn,
+			Rules: map[string]policy.RuleEnforcementLevel{
+				"android/exported-component":      policy.LevelBlock,
+				"go/insecure-tls-skip-verify":     policy.LevelBlock,
+				"python/insecure-deserialization": policy.LevelBlock,
+				"node/eval-injection":             policy.LevelBlock,
+				"dotnet/insecure-deserialization": policy.LevelBlock,
+				"php/insecure-unserialize":        policy.LevelBlock,
+				"rust/transmute":                  policy.LevelBlock,
+			},
+		}
+		b, err := json.MarshalIndent(pol, "", "  ")
+		die(err)
+		if err := os.WriteFile(target, append(b, '\n'), 0o644); err != nil {
+			die(err)
+		}
+		fmt.Printf("Initialized policy at %s\n", target)
+	case "show":
+		target := ".sentinix/policy.json"
+		if len(a) > 1 {
+			target = a[1]
+		}
+		p, err := policy.LoadProjectPolicy(target)
+		die(err)
+		b, _ := json.MarshalIndent(p, "", "  ")
+		fmt.Println(string(b))
+	default:
+		die(fmt.Errorf("unknown policy subcommand: %s", a[0]))
+	}
+}
+
 func packCmd(a []string) {
-	if len(a) < 2 {
-		die(fmt.Errorf("usage: packs keygen <prefix> | sign <body.json> <keyfile> | verify <signed.json> <pubfile>"))
+	if len(a) < 1 {
+		die(fmt.Errorf("usage: packs keygen <prefix> | sign <body.json> <keyfile> | verify <signed.json> <pubfile> | new [name] [file] | test <file>"))
 	}
 	b64 := base64.StdEncoding
 	switch a[0] {
+	case "new":
+		name := "custom-rules"
+		outFile := "rules.json"
+		if len(a) > 1 {
+			name = a[1]
+			if strings.HasSuffix(a[1], ".json") {
+				outFile = a[1]
+				name = strings.TrimSuffix(filepath.Base(a[1]), ".json")
+			} else {
+				outFile = a[1] + ".json"
+			}
+		}
+		if len(a) > 2 {
+			outFile = a[2]
+		}
+		tmpl := map[string]any{
+			"name":     name,
+			"version":  "1.0.0",
+			"category": "security",
+			"stacks":   []string{},
+			"rules": []map[string]any{
+				{
+					"id":          name + "/no-hardcoded-secret",
+					"severity":    "high",
+					"cwe":         "CWE-798",
+					"message":     "Hardcoded credential or token detected. Use environment variables or secret vault.",
+					"remediation": "Replace hardcoded value with System.getenv() or VaultConfig.getSecret()",
+					"files":       []string{"*.kt", "*.java", "*.go", "*.ts", "*.js", "*.py"},
+					"pattern":     `(?i)(api[_-]?key|auth[_-]?token|secret[_-]?key)\s*[:=]\s*["'][a-zA-Z0-9_\-]{16,}["']`,
+					"unless":      "EXAMPLE|TEST|MOCK|DUMMY",
+				},
+			},
+			"tests": []map[string]any{
+				{
+					"rule": name + "/no-hardcoded-secret",
+					"file": "AuthService.kt",
+					"bad":  `val apiKey = "live_sk_abcdef1234567890"`,
+					"good": `val apiKey = VaultConfig.getSecret("api_key")`,
+				},
+			},
+		}
+		data, err := json.MarshalIndent(tmpl, "", "  ")
+		die(err)
+		if dir := filepath.Dir(outFile); dir != "" && dir != "." {
+			os.MkdirAll(dir, 0o755)
+		}
+		die(os.WriteFile(outFile, append(data, '\n'), 0o644))
+		fmt.Printf("✓ Created custom security rule pack template in %s\n", outFile)
+		fmt.Printf("  • Edit patterns, messages, and test fixtures in %s\n", outFile)
+		fmt.Printf("  • Verify anytime: sentinix rules test %s\n", outFile)
+		fmt.Printf("  • Run locally:    sentinix scan -rules %s .\n", outFile)
+	case "test":
+		if len(a) < 2 {
+			die(fmt.Errorf("test needs <rules.json>"))
+		}
+		body, err := os.ReadFile(a[1])
+		die(err)
+		var signed packs.Signed
+		if json.Unmarshal(body, &signed) == nil && len(signed.Body) > 0 {
+			body = signed.Body
+		}
+		p, err := packs.Parse(body)
+		die(err)
+		fmt.Printf("✓ Pack %q v%s: %d rule(s) compiled successfully.\n", p.Name, p.Version, len(p.Rules))
+		for _, s := range p.Samples {
+			fmt.Printf("  • Rule %q verified on sample %q (good and bad fixtures passed)\n", s.Rule, s.File)
+		}
+		fmt.Println("🎉 All custom rules and regression tests verified!")
 	case "keygen":
+		if len(a) < 2 {
+			die(fmt.Errorf("keygen needs <prefix>"))
+		}
 		pub, priv, err := ed25519.GenerateKey(nil)
 		die(err)
 		die(os.WriteFile(a[1]+".key", []byte(b64.EncodeToString(priv)), 0o600))
@@ -172,6 +340,68 @@ func packCmd(a []string) {
 		fmt.Printf("ok: %s %s, %d rules\n", p.Name, p.Version, len(p.Rules))
 	default:
 		die(fmt.Errorf("unknown packs command %q", a[0]))
+	}
+}
+
+func hookCmd(a []string) {
+	if len(a) < 1 {
+		die(fmt.Errorf("usage: hook install | run | uninstall"))
+	}
+	switch a[0] {
+	case "install":
+		if _, err := os.Stat(".git"); os.IsNotExist(err) {
+			die(fmt.Errorf(".git directory not found; run this command from the root of a git repository"))
+		}
+		hooksDir := filepath.Join(".git", "hooks")
+		os.MkdirAll(hooksDir, 0o755)
+		hookFile := filepath.Join(hooksDir, "pre-commit")
+		hookScript := `#!/usr/bin/env sh
+# Sentinix Developer Pre-Commit Hook
+# Prevents committing secrets and high-severity policy violations.
+
+if ! command -v sentinix >/dev/null 2>&1; then
+    if [ -x "./dist/bin/sentinix" ]; then
+        SENTINIX_BIN="./dist/bin/sentinix"
+    else
+        exit 0
+    fi
+else
+    SENTINIX_BIN="sentinix"
+fi
+
+$SENTINIX_BIN hook run
+`
+		err := os.WriteFile(hookFile, []byte(hookScript), 0o755)
+		die(err)
+		fmt.Printf("✓ Sentinix pre-commit hook installed to %s\n", hookFile)
+	case "uninstall":
+		hookFile := filepath.Join(".git", "hooks", "pre-commit")
+		if _, err := os.Stat(hookFile); err == nil {
+			os.Remove(hookFile)
+			fmt.Printf("✓ Sentinix pre-commit hook removed from %s\n", hookFile)
+		} else {
+			fmt.Println("Pre-commit hook was not installed.")
+		}
+	case "run":
+		out, err := exec.Command("git", "diff", "--cached", "--name-only").Output()
+		if err != nil {
+			os.Exit(0)
+		}
+		files := strings.Fields(strings.TrimSpace(string(out)))
+		if len(files) == 0 {
+			os.Exit(0)
+		}
+		cmd := exec.Command(os.Args[0], "scan", "-fail-on", "high", ".")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, "\n🛑 Sentinix Pre-Commit Check Failed! High-severity issues detected.")
+			fmt.Fprintln(os.Stderr, "Resolve the issues above before committing, or bypass with: git commit --no-verify")
+			os.Exit(1)
+		}
+		fmt.Println("✓ Sentinix pre-commit check: clean.")
+	default:
+		die(fmt.Errorf("unknown hook command %q", a[0]))
 	}
 }
 

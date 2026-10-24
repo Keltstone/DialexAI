@@ -1,0 +1,150 @@
+{
+  "name": "dotnet",
+  "version": "1.0.0",
+  "stacks": [
+    "dotnet"
+  ],
+  "author": "Kolta Labs",
+  "rules": [
+    {
+      "id": "dotnet/sql-injection",
+      "severity": "high",
+      "cwe": "CWE-89",
+      "message": "Potential SQL injection via string interpolation in database command",
+      "remediation": "Use parameterized queries with SqlParameter or EF Core FromSqlInterpolated.",
+      "files": [
+        "*.cs"
+      ],
+      "pattern": "(?:SqlCommand|ExecuteSqlRaw|FromSqlRaw)\\s*\\(\\s*\\$\""
+    },
+    {
+      "id": "dotnet/insecure-deserialization",
+      "severity": "critical",
+      "cwe": "CWE-502",
+      "message": "Insecure deserialization: BinaryFormatter or TypeNameHandling.All enables remote code execution",
+      "remediation": "Migrate to System.Text.Json with safe type handling.",
+      "files": [
+        "*.cs"
+      ],
+      "pattern": "BinaryFormatter\\.Deserialize|TypeNameHandling\\.(?:All|Auto)"
+    },
+    {
+      "id": "dotnet/weak-crypto-md5-sha1",
+      "severity": "medium",
+      "cwe": "CWE-327",
+      "message": "Weak cryptographic algorithm (MD5 or SHA1) detected",
+      "remediation": "Use SHA256.Create() or SHA512.Create().",
+      "files": [
+        "*.cs"
+      ],
+      "pattern": "(?:MD5|SHA1)\\.Create\\s*\\("
+    },
+    {
+      "id": "dotnet/hardcoded-connection-string",
+      "severity": "high",
+      "cwe": "CWE-798",
+      "message": "Hardcoded database password in connection string",
+      "remediation": "Use Azure Key Vault, Managed Identity, or dotnet user-secrets.",
+      "files": [
+        "*.cs"
+      ],
+      "pattern": "(?i)(?:User ID|Uid)\\s*=\\s*[^;]+;\\s*(?:Password|Pwd)\\s*=\\s*[^;\"]+"
+    },
+    {
+      "id": "dotnet/xxe-xml-document",
+      "severity": "high",
+      "cwe": "CWE-611",
+      "message": "XmlDocument constructed without disabling external DTD resolver",
+      "remediation": "Set XmlResolver = null or use XmlReaderSettings with DtdProcessing = Prohibit.",
+      "files": [
+        "*.cs"
+      ],
+      "pattern": "new\\s+XmlDocument\\s*\\(\\)",
+      "unless": "XmlResolver\\s*=\\s*null"
+    },
+    {
+      "id": "dotnet/antiforgery-disabled",
+      "severity": "high",
+      "cwe": "CWE-352",
+      "message": "Action explicitly disables Anti-CSRF protection via [IgnoreAntiforgeryToken]",
+      "remediation": "Keep [ValidateAntiForgeryToken] active on state-altering actions.",
+      "files": [
+        "*.cs"
+      ],
+      "pattern": "\\[IgnoreAntiforgeryToken\\]"
+    },
+    {
+      "id": "dotnet/ldap-injection",
+      "severity": "high",
+      "cwe": "CWE-90",
+      "message": "LDAP query filter constructed using string interpolation",
+      "remediation": "Encode inputs with Encoder.LdapFilterEncode before building queries.",
+      "files": [
+        "*.cs"
+      ],
+      "pattern": "new\\s+DirectorySearcher\\s*\\([^)]*\\$"
+    },
+    {
+      "id": "dotnet/open-redirect",
+      "severity": "medium",
+      "cwe": "CWE-601",
+      "message": "Unvalidated redirect using input variable directly",
+      "remediation": "Use LocalRedirect() or verify Url.IsLocalUrl().",
+      "files": [
+        "*.cs"
+      ],
+      "pattern": "return\\s+Redirect\\s*\\(\\s*(?:returnUrl|redirectUrl|target|url)\\s*\\)",
+      "unless": "IsLocalUrl"
+    }
+  ],
+  "tests": [
+    {
+      "rule": "dotnet/sql-injection",
+      "file": "UserRepository.cs",
+      "bad": "var cmd = new SqlCommand($\"SELECT * FROM Users WHERE Email='{email}'\", conn);",
+      "good": "var cmd = new SqlCommand(\"SELECT * FROM Users WHERE Email=@email\", conn);"
+    },
+    {
+      "rule": "dotnet/insecure-deserialization",
+      "file": "Serializer.cs",
+      "bad": "var obj = formatter.BinaryFormatter.Deserialize(stream);",
+      "good": "var obj = JsonSerializer.Deserialize<UserDto>(stream);"
+    },
+    {
+      "rule": "dotnet/weak-crypto-md5-sha1",
+      "file": "Hasher.cs",
+      "bad": "using var md5 = MD5.Create();",
+      "good": "using var sha = SHA256.Create();"
+    },
+    {
+      "rule": "dotnet/hardcoded-connection-string",
+      "file": "DbConfig.cs",
+      "bad": "string conn = \"Server=sql.prod;Database=main;User ID=admin;Password=SecretPassword123!\";",
+      "good": "string conn = configuration.GetConnectionString(\"DefaultConnection\");"
+    },
+    {
+      "rule": "dotnet/xxe-xml-document",
+      "file": "XmlService.cs",
+      "bad": "var doc = new XmlDocument();",
+      "good": "var doc = new XmlDocument(); doc.XmlResolver = null;"
+    },
+    {
+      "rule": "dotnet/antiforgery-disabled",
+      "file": "AccountController.cs",
+      "bad": "[HttpPost]\n[IgnoreAntiforgeryToken]\npublic IActionResult Update() { return Ok(); }",
+      "good": "[HttpPost]\n[ValidateAntiForgeryToken]\npublic IActionResult Update() { return Ok(); }"
+    },
+    {
+      "rule": "dotnet/ldap-injection",
+      "file": "LdapService.cs",
+      "bad": "var searcher = new DirectorySearcher($\"(&(objectClass=user)(sAMAccountName={username}))\");",
+      "good": "var searcher = new DirectorySearcher(\"(&(objectClass=user)(sAMAccountName=\" + safeUser + \"))\");"
+    },
+    {
+      "rule": "dotnet/open-redirect",
+      "file": "LoginController.cs",
+      "bad": "return Redirect(returnUrl);",
+      "good": "return LocalRedirect(returnUrl);"
+    }
+  ]
+}

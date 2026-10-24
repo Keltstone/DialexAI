@@ -1,0 +1,166 @@
+{
+  "name": "python",
+  "version": "1.0.0",
+  "stacks": [
+    "python",
+    "django"
+  ],
+  "author": "Kolta Labs",
+  "rules": [
+    {
+      "id": "python/sql-injection",
+      "severity": "high",
+      "cwe": "CWE-89",
+      "message": "Potential SQL injection via string formatting or f-strings in database query",
+      "remediation": "Use parameterized queries: cursor.execute('SELECT * FROM users WHERE id = %s', [user_id]) or Django ORM filter().",
+      "files": [
+        "*.py"
+      ],
+      "pattern": "(?:\\.execute|\\.raw)\\s*\\(\\s*(?:f[\"']|[\"'][^\"']*%s[^\"']*[\"']\\s*%|[\"'][^\"']*[\"']\\s*\\.format\\s*\\()"
+    },
+    {
+      "id": "python/command-injection",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "message": "Dangerous shell execution via os.system or subprocess shell=True",
+      "remediation": "Use subprocess.run(['cmd', arg], shell=False, check=True).",
+      "files": [
+        "*.py"
+      ],
+      "pattern": "\\bos\\.system\\s*\\(|subprocess\\.(?:Popen|run|call|check_output)\\s*\\([^)]*shell\\s*=\\s*True"
+    },
+    {
+      "id": "python/insecure-deserialization",
+      "severity": "critical",
+      "cwe": "CWE-502",
+      "message": "Insecure deserialization using pickle or unsafe yaml.load allows remote code execution",
+      "remediation": "Use json.loads() or yaml.safe_load().",
+      "files": [
+        "*.py"
+      ],
+      "pattern": "\\bpickle\\.(?:loads|load)\\s*\\(|yaml\\.load\\s*\\([^,)]*\\)"
+    },
+    {
+      "id": "python/django-debug-enabled",
+      "severity": "high",
+      "cwe": "CWE-489",
+      "message": "Django DEBUG is enabled, risking sensitive traceback disclosure",
+      "remediation": "Set DEBUG = False in production configurations.",
+      "files": [
+        "*.py"
+      ],
+      "pattern": "\\bDEBUG\\s*=\\s*True\\b"
+    },
+    {
+      "id": "python/django-csrf-exempt",
+      "severity": "medium",
+      "cwe": "CWE-352",
+      "message": "View explicitly exempt from CSRF protection via @csrf_exempt",
+      "remediation": "Retain CSRF verification or restrict to token-authenticated API endpoints.",
+      "files": [
+        "*.py"
+      ],
+      "pattern": "@csrf_exempt\\b"
+    },
+    {
+      "id": "python/weak-hash-md5",
+      "severity": "medium",
+      "cwe": "CWE-327",
+      "message": "Weak cryptographic hash (MD5/SHA1) detected",
+      "remediation": "Use hashlib.sha256() or hashlib.sha3_256().",
+      "files": [
+        "*.py"
+      ],
+      "pattern": "\\bhashlib\\.(?:md5|sha1)\\s*\\("
+    },
+    {
+      "id": "python/ssrf-requests",
+      "severity": "high",
+      "cwe": "CWE-918",
+      "message": "Server-Side Request Forgery via direct user request parameter in requests call",
+      "remediation": "Validate target URL host against allowlist and prohibit loopback/private ranges.",
+      "files": [
+        "*.py"
+      ],
+      "pattern": "\\brequests\\.(?:get|post|put|delete|head)\\s*\\(\\s*request\\.(?:GET|POST|query_params)\\["
+    },
+    {
+      "id": "python/jinja-autoescape-disabled",
+      "severity": "high",
+      "cwe": "CWE-79",
+      "message": "Jinja2 Environment initialized with autoescape=False disables HTML escaping",
+      "remediation": "Configure autoescape=True or select_autoescape().",
+      "files": [
+        "*.py"
+      ],
+      "pattern": "Environment\\s*\\([^)]*autoescape\\s*=\\s*False"
+    },
+    {
+      "id": "python/insecure-tempfile-mktemp",
+      "severity": "medium",
+      "cwe": "CWE-377",
+      "message": "tempfile.mktemp() is deprecated and vulnerable to race conditions",
+      "remediation": "Use tempfile.NamedTemporaryFile() or mkstemp().",
+      "files": [
+        "*.py"
+      ],
+      "pattern": "\\btempfile\\.mktemp\\s*\\("
+    }
+  ],
+  "tests": [
+    {
+      "rule": "python/sql-injection",
+      "file": "views.py",
+      "bad": "cursor.execute(f\"SELECT * FROM accounts WHERE id = '{account_id}'\")",
+      "good": "cursor.execute(\"SELECT * FROM accounts WHERE id = %s\", [account_id])"
+    },
+    {
+      "rule": "python/command-injection",
+      "file": "tasks.py",
+      "bad": "subprocess.run(f\"ping -c 1 {host}\", shell=True)",
+      "good": "subprocess.run([\"ping\", \"-c\", \"1\", host], shell=False)"
+    },
+    {
+      "rule": "python/insecure-deserialization",
+      "file": "cache.py",
+      "bad": "data = pickle.loads(raw_bytes)",
+      "good": "data = json.loads(raw_bytes.decode('utf-8'))"
+    },
+    {
+      "rule": "python/django-debug-enabled",
+      "file": "settings.py",
+      "bad": "DEBUG = True",
+      "good": "DEBUG = os.getenv('DJANGO_DEBUG', 'False') == 'True'"
+    },
+    {
+      "rule": "python/django-csrf-exempt",
+      "file": "api.py",
+      "bad": "@csrf_exempt\ndef webhook(request): pass",
+      "good": "def webhook(request): pass"
+    },
+    {
+      "rule": "python/weak-hash-md5",
+      "file": "hash_util.py",
+      "bad": "digest = hashlib.md5(content).hexdigest()",
+      "good": "digest = hashlib.sha256(content).hexdigest()"
+    },
+    {
+      "rule": "python/ssrf-requests",
+      "file": "proxy.py",
+      "bad": "resp = requests.get(request.GET['target'])",
+      "good": "resp = requests.get(safe_url)"
+    },
+    {
+      "rule": "python/jinja-autoescape-disabled",
+      "file": "templates.py",
+      "bad": "env = Environment(loader=loader, autoescape=False)",
+      "good": "env = Environment(loader=loader, autoescape=True)"
+    },
+    {
+      "rule": "python/insecure-tempfile-mktemp",
+      "file": "exporter.py",
+      "bad": "tmp_path = tempfile.mktemp()",
+      "good": "with tempfile.NamedTemporaryFile() as tmp: pass"
+    }
+  ]
+}

@@ -1,0 +1,149 @@
+{
+  "name": "go",
+  "version": "1.0.0",
+  "stacks": [
+    "go"
+  ],
+  "author": "Kolta Labs",
+  "rules": [
+    {
+      "id": "go/sql-injection",
+      "severity": "high",
+      "cwe": "CWE-89",
+      "message": "Potential SQL injection via fmt.Sprintf in database query",
+      "remediation": "Use parameterized queries ($1, ?): db.QueryRowContext(ctx, query, args...)",
+      "files": [
+        "*.go"
+      ],
+      "pattern": "(?:db|tx)\\.(?:Query|QueryRow|Exec)(?:Context)?\\s*\\([^,]*fmt\\.Sprintf"
+    },
+    {
+      "id": "go/insecure-tls-skip-verify",
+      "severity": "critical",
+      "cwe": "CWE-295",
+      "message": "TLS certificate verification disabled via InsecureSkipVerify: true",
+      "remediation": "Remove InsecureSkipVerify: true. Configure RootCAs if using private CA.",
+      "files": [
+        "*.go"
+      ],
+      "pattern": "InsecureSkipVerify\\s*:\\s*true"
+    },
+    {
+      "id": "go/weak-random-token",
+      "severity": "medium",
+      "cwe": "CWE-338",
+      "message": "Insecure math/rand used for security token generation",
+      "remediation": "Use crypto/rand.Read() for tokens, secrets, nonces, and session IDs.",
+      "files": [
+        "*.go"
+      ],
+      "pattern": "(?i)(token|session|nonce|secret|key)\\s*[:=].*math/rand"
+    },
+    {
+      "id": "go/cors-allow-all-origins",
+      "severity": "medium",
+      "cwe": "CWE-942",
+      "message": "Overly permissive CORS configuration with wildcard origin",
+      "remediation": "Declare explicit domain whitelist in AllowOrigins.",
+      "files": [
+        "*.go"
+      ],
+      "pattern": "AllowOrigins\\s*:\\s*\\[\\]string\\{\"\\*\"\\}"
+    },
+    {
+      "id": "go/command-injection",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "message": "Shell execution wrapper detected; high risk of command injection",
+      "remediation": "Execute binaries directly with exec.Command(binary, args...) without invoking a shell.",
+      "files": [
+        "*.go"
+      ],
+      "pattern": "exec\\.Command(?:Context)?\\s*\\(\\s*[\"'](?:sh|bash|cmd)[\"']\\s*,\\s*[\"']-[cC][\"']\\s*,"
+    },
+    {
+      "id": "go/pprof-exposed-default-mux",
+      "severity": "high",
+      "cwe": "CWE-200",
+      "message": "Default HTTP ServeMux used with ListenAndServe; pprof debug endpoints may be exposed",
+      "remediation": "Pass a custom http.ServeMux or router rather than nil.",
+      "files": [
+        "*.go"
+      ],
+      "pattern": "http\\.ListenAndServe\\s*\\([^,]+,\\s*nil\\s*\\)"
+    },
+    {
+      "id": "go/path-traversal-filepath-join",
+      "severity": "high",
+      "cwe": "CWE-22",
+      "message": "Direct file access via joined user input path without prefix validation",
+      "remediation": "Validate target with filepath.Clean and check prefix against base directory.",
+      "files": [
+        "*.go"
+      ],
+      "pattern": "os\\.(?:Open|ReadFile|Create)\\s*\\(\\s*filepath\\.Join\\([^,]+,\\s*(?:r\\.|req\\.|param|c\\.)"
+    },
+    {
+      "id": "go/unhandled-error-close",
+      "severity": "low",
+      "cwe": "CWE-703",
+      "message": "Deferred resource Close without error handling",
+      "remediation": "Wrap in a closure to handle or log close errors: defer func() { _ = f.Close() }().",
+      "files": [
+        "*.go"
+      ],
+      "pattern": "defer\\s+(?:[a-zA-Z0-9_]+\\.)+Close\\(\\)",
+      "unless": "func\\(\\)"
+    }
+  ],
+  "tests": [
+    {
+      "rule": "go/sql-injection",
+      "file": "store.go",
+      "bad": "row := db.QueryRow(fmt.Sprintf(\"SELECT id FROM users WHERE email='%s'\", email))",
+      "good": "row := db.QueryRow(\"SELECT id FROM users WHERE email=$1\", email)"
+    },
+    {
+      "rule": "go/insecure-tls-skip-verify",
+      "file": "client.go",
+      "bad": "tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}",
+      "good": "tr := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13}}"
+    },
+    {
+      "rule": "go/weak-random-token",
+      "file": "auth.go",
+      "bad": "sessionToken := math/rand.Int63()",
+      "good": "var b [32]byte; rand.Read(b[:]); sessionToken := hex.EncodeToString(b[:])"
+    },
+    {
+      "rule": "go/cors-allow-all-origins",
+      "file": "server.go",
+      "bad": "cfg := cors.Config{AllowOrigins: []string{\"*\"}}",
+      "good": "cfg := cors.Config{AllowOrigins: []string{\"https://app.corp.internal\"}}"
+    },
+    {
+      "rule": "go/command-injection",
+      "file": "worker.go",
+      "bad": "cmd := exec.Command(\"sh\", \"-c\", userInput)",
+      "good": "cmd := exec.Command(\"git\", \"status\")"
+    },
+    {
+      "rule": "go/pprof-exposed-default-mux",
+      "file": "main.go",
+      "bad": "log.Fatal(http.ListenAndServe(\":8080\", nil))",
+      "good": "log.Fatal(http.ListenAndServe(\":8080\", mux))"
+    },
+    {
+      "rule": "go/path-traversal-filepath-join",
+      "file": "api.go",
+      "bad": "f, err := os.Open(filepath.Join(baseDir, r.URL.Query().Get(\"f\")))",
+      "good": "f, err := os.Open(safeFilePath)"
+    },
+    {
+      "rule": "go/unhandled-error-close",
+      "file": "file.go",
+      "bad": "defer resp.Body.Close()",
+      "good": "defer func() { _ = resp.Body.Close() }()"
+    }
+  ]
+}

@@ -80,6 +80,7 @@ type Finding struct {
 	Match      string   `json:"match,omitempty"`
 	Occurrence int      `json:"occurrence,omitempty"`
 	Source     string   `json:"source,omitempty"`
+	Level      string   `json:"level,omitempty"` // "block" | "warn" | "notice" | "ignore"
 }
 
 func NormalizeCategory(c string) string {

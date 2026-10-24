@@ -135,6 +135,8 @@ func (a *App) Handler() http.Handler {
 	})
 	m.HandleFunc("GET /readyz", a.readyz)
 	m.HandleFunc("GET /metrics", a.metrics)
+	m.HandleFunc("GET /.well-known/security.txt", a.securityTxt)
+	m.HandleFunc("GET /security.txt", a.securityTxt)
 
 	api := func(perm string, h http.HandlerFunc) http.HandlerFunc { return a.guard(perm, h) }
 	m.HandleFunc("GET /api/me", api("read", a.me))
@@ -144,6 +146,9 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("PATCH /api/projects/{id}", api("manage", a.updateProject))
 	m.HandleFunc("GET /api/projects/{id}/policy", api("read", a.getProjectPolicy))
 	m.HandleFunc("PATCH /api/projects/{id}/policy", api("manage", a.updateProjectPolicy))
+	m.HandleFunc("GET /api/projects/{id}/rule-policies", api("read", a.getProjectRulePolicies))
+	m.HandleFunc("PUT /api/projects/{id}/rule-policies", api("manage", a.setProjectRulePolicy))
+	m.HandleFunc("DELETE /api/projects/{id}/rule-policies/{rule...}", api("manage", a.deleteProjectRulePolicy))
 	m.HandleFunc("POST /api/projects/{id}/scan", api("scan", a.scanNow))
 	m.HandleFunc("GET /api/projects/{id}/scans", api("read", a.scans))
 	m.HandleFunc("GET /api/projects/{id}/surface", api("read", a.surface))
@@ -400,6 +405,23 @@ func (a *App) readyz(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ready\n"))
+}
+
+func (a *App) securityTxt(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	contact := "mailto:security@sentinix.internal"
+	if a.OwnerEmail != "" {
+		contact = "mailto:" + a.OwnerEmail
+	}
+	policyURL := "/.well-known/security.txt"
+	content := fmt.Sprintf("Contact: %s\nExpires: %s\nPreferred-Languages: en\nPolicy: %s\nCanonical: %s\n",
+		contact,
+		time.Now().AddDate(1, 0, 0).UTC().Format(time.RFC3339),
+		policyURL,
+		policyURL,
+	)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(content))
 }
 
 var (

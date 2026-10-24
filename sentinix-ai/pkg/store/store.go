@@ -57,6 +57,7 @@ create table if not exists leader_election(lock_key text primary key, holder tex
 create table if not exists skipped_file_overrides(project_id text not null default '*', file text not null, expires_at bigint not null, reason text not null default '', approver text not null default '', ts bigint not null default 0, primary key(project_id, file));
 create table if not exists project_grants(project_id text not null, grantee text not null, primary key(project_id, grantee));
 create table if not exists project_policies(project_id text not null, category text not null, mode text not null, threshold text not null, primary key(project_id, category));
+create table if not exists project_rule_policies(project_id text not null, rule_id text not null, level text not null, updated_at bigint not null, primary key(project_id, rule_id));
 create table if not exists ingest_uploads(id text primary key, project_id text not null, commit_sha text not null, pr text not null default '', engine text not null, category text not null default '', format text not null, received_at bigint not null, parse_status text not null, finding_count bigint not null default 0, findings_json text not null default '', error_message text not null default '', attested integer not null default 0, unique(project_id, commit_sha, engine));
 create table if not exists ingest_signatures(sig_hash text primary key, project_id text not null, ts bigint not null, created_at bigint not null);
 create index if not exists idx_ingest_signatures_created on ingest_signatures(created_at);
@@ -117,6 +118,7 @@ func Open(dsn string) (*Store, error) {
 		"alter table findings add column category text not null default 'security'",
 		"create index if not exists idx_findings_category on findings(category)",
 		"create table if not exists project_policies(project_id text not null, category text not null, mode text not null, threshold text not null, primary key(project_id, category))",
+		"create table if not exists project_rule_policies(project_id text not null, rule_id text not null, level text not null, updated_at bigint not null, primary key(project_id, rule_id))",
 		"create table if not exists ingest_uploads(id text primary key, project_id text not null, commit_sha text not null, pr text not null default '', engine text not null, category text not null default '', format text not null, received_at bigint not null, parse_status text not null, finding_count bigint not null default 0, findings_json text not null default '', error_message text not null default '', attested integer not null default 0, unique(project_id, commit_sha, engine))",
 		"alter table ingest_uploads add column attested integer not null default 0",
 		"alter table findings add column pr text not null default ''",

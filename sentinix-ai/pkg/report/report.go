@@ -42,7 +42,11 @@ func Text(w io.Writer, fs []engines.Finding, ran []string, skipped ...[]string) 
 		rule := SanitizeField(f.Rule)
 		file := SanitizeField(f.File)
 		msg := SanitizeField(f.Message)
-		fmt.Fprintf(w, "[%s] %s %s:%d %s\n", f.Severity, rule, file, f.Line, msg)
+		tag := f.Severity.String()
+		if f.Level != "" {
+			tag = fmt.Sprintf("%s|%s", f.Severity.String(), f.Level)
+		}
+		fmt.Fprintf(w, "[%s] %s %s:%d %s\n", tag, rule, file, f.Line, msg)
 	}
 	fmt.Fprintf(w, "%d finding(s). Engines run: %s. Not covered: engines not installed, AI triage.\n",
 		len(fs), strings.Join(ran, ", "))

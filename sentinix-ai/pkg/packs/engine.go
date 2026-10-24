@@ -131,6 +131,35 @@ func DetectStacks(root string) (map[string]bool, []string) {
 					st["android"] = true
 				}
 			}
+		case strings.HasSuffix(n, ".swift"), n == "Podfile", n == "Package.swift", strings.HasSuffix(n, "Info.plist"):
+			st["ios"] = true
+			st["swift"] = true
+		case strings.HasSuffix(n, ".go"), n == "go.mod":
+			st["go"] = true
+		case strings.HasSuffix(n, ".cs"), strings.HasSuffix(n, ".csproj"), strings.HasSuffix(n, ".sln"):
+			st["dotnet"] = true
+		case strings.HasSuffix(n, ".php"), n == "composer.json":
+			st["php"] = true
+		case strings.HasSuffix(n, ".rs"), n == "Cargo.toml", n == "Cargo.lock":
+			st["rust"] = true
+		case strings.HasSuffix(n, ".py"), n == "requirements.txt", n == "pyproject.toml", n == "Pipfile":
+			st["python"] = true
+			st["django"] = true
+		case strings.HasSuffix(n, ".js"), strings.HasSuffix(n, ".jsx"), strings.HasSuffix(n, ".ts"), strings.HasSuffix(n, ".tsx"), n == "package.json":
+			st["node"] = true
+			st["javascript"] = true
+			if strings.HasSuffix(n, ".ts") || strings.HasSuffix(n, ".tsx") {
+				st["typescript"] = true
+			}
+			if strings.HasSuffix(n, ".jsx") || strings.HasSuffix(n, ".tsx") {
+				st["react"] = true
+			}
+			if n == "package.json" {
+				b, _ := os.ReadFile(p)
+				if strings.Contains(string(b), "\"react\"") {
+					st["react"] = true
+				}
+			}
 		}
 		return nil
 	})

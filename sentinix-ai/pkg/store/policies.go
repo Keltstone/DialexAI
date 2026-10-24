@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"sentinix/pkg/engines"
+	"sentinix/pkg/policy"
 )
 
 type CategoryPolicy struct {
@@ -368,3 +369,42 @@ func (s *Store) CloseEngineFindings(projectID, engine, pr, source string, curren
 	}
 	return nil
 }
+
+// RulePolicies returns the per-rule policies configured for a project.
+func (s *Store) RulePolicies(projectID string) (map[string]policy.RuleEnforcementLevel, error) {
+	rows, err := s.db.Query("select rule_id, level from project_rule_policies where project_id=$1", projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	res := make(map[string]policy.RuleEnforcementLevel)
+	for rows.Next() {
+		var r, l string
+		if err := rows.Scan(&r, &l); err != nil {
+			return nil, err
+		}
+		if lvl, ok := policy.ParseEnforcementLevel(l); ok {
+			res[r] = lvl
+		}
+	}
+	return res, rows.Err()
+}
+
+// SetRulePolicy sets the enforcement level for a specific rule on a project.
+func (s *Store) SetRulePolicy(projectID, ruleID string, level policy.RuleEnforcementLevel) error {
+	norm, ok := policy.ParseEnforcementLevel(string(level))
+	if !ok {
+		return fmt.Errorf("invalid rule enforcement level: %s", level)
+	}
+	t := now()
+	_, err := s.db.Exec("insert into project_rule_policies(project_id, rule_id, level, updated_at) values($1, $2, $3, $4) on conflict(project_id, rule_id) do update set level=excluded.level, updated_at=excluded.updated_at",
+		projectID, ruleID, string(norm), t)
+	return err
+}
+
+// DeleteRulePolicy removes a custom rule policy override.
+func (s *Store) DeleteRulePolicy(projectID, ruleID string) error {
+	_, err := s.db.Exec("delete from project_rule_policies where project_id=$1 and rule_id=$2", projectID, ruleID)
+	return err
+}
+
