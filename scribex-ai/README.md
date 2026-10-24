@@ -12,7 +12,7 @@ Validates JWT bearer tokens.
 |---|---|
 | `scribex init` | create `.scribex/manifest.yaml` |
 | `scribex check [-C dir] [-base ref]` | exit 1 on stale/dead anchors; with `-base`, exit 0 early (0 tokens) if no public signature changed |
-| `scribex sync` | refresh `sig=` hash + ```` ```signature ```` block (prose untouched) |
+| `scribex sync [-commit]` | (-commit: companion commit of changed .md) refresh `sig=` hash + ```` ```signature ```` block (prose untouched) |
 | `scribex diagram` | rebuild `<!-- @scribex:diagram -->` Mermaid block from Go imports |
 
 Languages: Go (AST), TS/JS, Python, Kotlin, Java (regex). Phase 1 only; see `spec/SPEC.md`.

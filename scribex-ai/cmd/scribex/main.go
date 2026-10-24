@@ -17,7 +17,7 @@ import (
 
 var version = "1.0.0"
 
-const usage = "usage: scribex init | check [-C dir] [-base ref] | sync [-C dir] | diagram [-C dir] | version"
+const usage = "usage: scribex init | check [-C dir] [-base ref] | sync [-C dir] [-commit] | diagram [-C dir] | version"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -27,6 +27,7 @@ func main() {
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 	root := fs.String("C", ".", "repo root")
 	base := fs.String("base", "", "git ref to diff against (impact gate)")
+	commit := fs.Bool("commit", false, "sync: git-commit changed docs as a companion commit")
 	fs.Parse(os.Args[2:])
 	var err error
 	switch os.Args[1] {
@@ -37,7 +38,9 @@ func main() {
 	case "check":
 		err = check(*root, *base, false)
 	case "sync":
-		err = check(*root, "", true)
+		if err = check(*root, "", true); err == nil && *commit {
+			err = companion(*root)
+		}
 	case "diagram":
 		err = diagramCmd(*root)
 	default:
@@ -48,6 +51,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, "scribex:", err)
 		os.Exit(1)
 	}
+}
+
+// companion commits only .md files touched by sync; no-op when clean.
+func companion(root string) error {
+	if out, _ := exec.Command("git", "-C", root, "status", "--porcelain", "--", "*.md").Output(); len(out) == 0 {
+		return nil
+	}
+	if err := exec.Command("git", "-C", root, "add", "--", "*.md").Run(); err != nil {
+		return err
+	}
+	return exec.Command("git", "-C", root, "commit", "-m", "docs: scribex sync", "--", "*.md").Run()
 }
 
 func initCmd(root string) error {
