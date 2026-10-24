@@ -58,7 +58,7 @@ NEW_VERSION_CODE=$((CURRENT_VERSION_CODE + 1))
 TODAY=$(date +"%Y-%m-%d")
 
 echo "=============================================================================="
-echo "  🚀 Bumping DialexAI Suite Version Across All 4 Softwares"
+echo "  🚀 Bumping DialexAI Suite Version Across All 5 Systems"
 echo "  • New Version:      ${NEW_VERSION}"
 echo "  • New Version Code: ${NEW_VERSION_CODE}"
 echo "  • Release Date:     ${TODAY}"

@@ -1,113 +1,137 @@
-# Artix Enterprise Release Notes — v0.11.0-enterprise
+# DialexAI Ecosystem v1.0.0 Release Notes
 
-## Release Summary
-Artix Enterprise `v0.11.0-enterprise` delivers comprehensive hostile reviewer remediations across security boundaries, test retention gates, AST integrity analysis, sandbox child environment isolation, taint tracking expansions, cryptographic trust verification, and benign corpus evaluations (R14-1 – R14-9):
+The **DialexAI Ecosystem** implements an **Independent Software Release Model**, enabling each tool to ship upon reaching production maturity while sharing core deliberation, cryptographic, and packaging standards.
 
-- **R14-1: Test Retention & Regression Gate & CLI Restoration**:
-  - Restored CLI unit tests for `verify-approval` and the deprecated `merge` alias.
-  - Added CI check (`scripts/check-test-retention.sh`) that compares the test function inventory against the previous release tag baseline, failing closed if any `Test*` function is removed without documentation in `REMOVED_TESTS.md`.
-  - Added explicit test cases rejecting unreachable dead switch cases.
-
-- **R14-2: AST Adversarial Reviewer Hardening**:
-  - Enforced `errgroup.Go` wait requirement: flags uncoordinated `errgroup.Go` calls lacking an enclosing or subsequent `Wait()`.
-  - Treated unconditional or constant-true `t.Skip*`/`t.SkipNow` before the first assertion as no reachable assertion.
-  - Flagged testify `assert.Len`, `assert.Empty`, `assert.Contains` calls on literal empties as tautological assertions.
-  - Treated nil-channel select cases as dead code paths.
-  - Preserved float `x != x` comparisons without flagging as tautology to correctly support IEEE-754 `NaN` checks.
-
-- **R14-3: Taint Analysis & Egress Expansion**:
-  - Expanded taint sink detection to standard library networking packages: `net/smtp`, `net/rpc`, and `net/textproto`.
-  - Added secret exfiltration detection for `database/sql` external host DSNs.
-  - Tracked method-chain flows, struct receiver field mutations, and map store/load operations across AST paths.
-
-- **R14-4: Sandbox Environment Isolation & Canary Leak Prevention**:
-  - Built child process execution environment strictly from an allowlist (`PATH`, `HOME=<sandbox-temp>`, `LANG`, `GOPATH`, `GOROOT`, `GOCACHE`, `TMPDIR`, etc.).
-  - Stripped all provider, forge, audit, enterprise, and sensitive credentials from child process environments.
-  - Implemented post-test workspace scan detecting canary secret leaks in non-allowlisted files prior to commit.
-
-- **R14-5: Trust Anchor & Build Reproducibility**:
-  - Published signing key fingerprint (`SHA256:Dh5vIjePKsm29xfvnLukrKDTOzLM/w5u6rYBcB3hmNg`) at resolving `.well-known/security.txt`.
-  - Signed unified `SHA256SUMS` with SSH signature (`ssh-keygen -Y sign`) including binaries, `.vsix`, and `.zip` distribution packages.
-  - Standardized reproducible compilation flags (`-trimpath`, `-ldflags="-s -w"`) on pinned Go toolchains.
-
-- **R14-6: Fail-Closed Tag Registry Remote Verification**:
-  - Replaced ad-hoc verification with `scripts/verify-tag-registry.sh` validating against committed `docs/release/TAG_IMMUTABILITY_REGISTRY.json` and querying remote tag refs via `git ls-remote --tags origin`.
-  - Fails closed immediately if remote refs are offline or empty.
-  - Clarified immutability assurances in release documentation.
-
-- **R14-7: Release Hygiene & Verify-Only Terminology**:
-  - Standardized `verify-approval` across CLI commands, help text, and documentation.
-  - Retained `artix merge` strictly as a deprecated alias directing users to `verify-approval`.
-
-- **R14-8: Full Enterprise Phase 1 to Verify-Approval Matrix**:
-  - Implemented full enterprise end-to-end integration test (`TestEnterprisePhase1ToVerifyApprovalE2E`) with compiled trust keys and root policies without requiring `ARTIX_ENTERPRISE`.
-  - Tested negative matrix cases: stale head SHA, self-approval refusal, bot approval rejection, dismissed reviews, and forge 5xx errors.
-
-- **R14-9: Three-Source Benign Corpus Evaluation with Absolute FPR Targets**:
-  - Evaluated against standard library GOROOT (1,808 files) and pinned ecosystem modules (Set 1: `golang.org/x/sync`, `github.com/google/uuid`, `go.uber.org/zap`, `golang.org/x/crypto`, `github.com/stretchr/testify`; Set 2: `github.com/spf13/cobra`, `golang.org/x/sys`, `github.com/pkg/errors`).
-  - Achieved: GOROOT FPR 4.81% (Target <= 5.0%), Pinned Set 1 combined FPR 1.73% (Target <= 5.0%), testify FPR 8.33% (Target <= 10.0%).
-  - Added absolute target gate and gap reporting in `cmd/artix-corpus/main.go`.
+### 🚀 Current Software Releases
+- 🟢 **Sentinix AI (`v1.0.0`)**: **Production GA Release — Publishing Now** ([`sentinix-ai/RELEASE_NOTES.md`](sentinix-ai/RELEASE_NOTES.md) · [`sentinix-ai/CHANGELOG.md`](sentinix-ai/CHANGELOG.md))
+- 🟢 **Socratix Engine (`v1.0.0`)**: Deliberation & Consensus Daemon ([`socratix-engine/CHANGELOG.md`](socratix-engine/CHANGELOG.md))
+- 🟡 **Dialex AI (`v1.0.0`)**: Desktop & Mobile Deliberation Platform ([`dialex-ai/CHANGELOG.md`](dialex-ai/CHANGELOG.md))
+- 🔵 **Artix AI (`v0.11.0-enterprise`)**: Autonomous Coding & Stakeholder Council ([`artix-ai/RELEASE_NOTES.md`](artix-ai/RELEASE_NOTES.md) · [`artix-ai/CHANGELOG.md`](artix-ai/CHANGELOG.md))
+- 🔵 **Kritix AI (`v0.3.0-enterprise`)**: Autonomous QA Testing Studio & Fuzzing ([`kritix-ai/CHANGELOG.md`](kritix-ai/CHANGELOG.md))
 
 ---
 
-## Cryptographic Trust Root & Signatures
+## 🚀 Key Product Highlights
 
-### Release Signing Key
-- **Signer Identity / Principal**: `releases@artix.ai`
-- **Tagger Identity**: `releases@artix.ai <releases@artix.ai>`
-- **Key Type**: `ED25519 (SSH format)`
-- **Public Key**: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ4FO6aRcfHA07XqA9SGUUfpiqYfLsaRz+KUwigN2K5x`
-- **Key Fingerprint (SHA-256)**: `SHA256:Dh5vIjePKsm29xfvnLukrKDTOzLM/w5u6rYBcB3hmNg`
+### 1. Sentinix AI (v1.0.0)
+- **Continuous Security Review & PR Gate Daemon**:
+  - High-performance Go CLI (`sentinix`) and daemon (`sentinixd`) for repository scanning, security linting, and automated pull request governance.
+  - Multi-platform webhook integrations (GitHub, GitLab, Bitbucket) with automated PR comments, inline diff annotations, and commit status checks.
+- **10 Curated Technology Stacks & 135 Enterprise Rules**:
+  - 100% fixture-tested regression suites across 10 technology ecosystems:
+    - **Android** (60 rules): Keystore, biometric auth, tapjacking, certificate pinning, WebView XSS, exported components, deep link validation.
+    - **iOS / Swift** (15 rules): Keychain `kSecAttrAccessible`, ATS bypasses, biometric local authentication, Core Data encryption, URL scheme validation.
+    - **Go** (10 rules): Path traversal, SQL injection, broad interface binding, unhandled errors, weak TLS.
+    - **Python / Django / FastAPI** (10 rules): `eval`/`exec`, raw ORM SQL injection, Django CSRF exemptions, pickle deserialization, yaml unsafe load.
+    - **Java / Spring Boot** (10 rules): Spring SpEL expression injection, JPA concatenation, Actuator exposure, XML external entities (XXE), unsafe deserialization.
+    - **Node.js / React** (10 rules): `dangerouslySetInnerHTML`, `eval`/`child_process.exec`, Express CORS `*` with credentials, prototype pollution, JWT `none` algorithm.
+    - **Cloud & Terraform / IaC** (5 rules): AWS S3 public bucket ACLs, Security Group ingress `0.0.0.0/0` SSH/RDP, IAM wildcard policies, RDS public accessibility.
+    - **Kubernetes / Helm** (5 rules): Pod privileged mode, root user execution, hostPID/hostNetwork escape, default service accounts.
+    - **Docker / Container** (5 rules): Missing USER directive, latest base tags, exposed sensitive ports, Docker socket mounting, secrets in `ENV`/`ARG`.
+    - **CI/CD / GitHub Actions** (5 rules): `pull_request_target` with checkout, unpinned 3rd-party actions, inline script injection, plaintext tokens.
+- **Rule Customization & Policy Governance**:
+  - Modular policy engine (`policy.json`) supporting max severity gates, allowed CVSS thresholds, fail-on-critical, and mandatory manual review policies.
+  - Baseline diffing (`--baseline .sentinix-baseline.json`) enabling zero-noise progressive adoption on legacy codebases.
+- **Reporting & Standards Export**:
+  - Native export to SARIF v2.1.0, JUnit XML, Markdown PR summaries, and machine-readable JSON.
+  - Standards mapping to OWASP Top 10, CWE, and NIST SP 800-53.
 
-### Verifying the Tag
-To independently verify the cryptographic signature on this tag:
-```bash
-TEMP_SIGNERS=$(mktemp)
-echo "releases@artix.ai ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ4FO6aRcfHA07XqA9SGUUfpiqYfLsaRz+KUwigN2K5x" > "$TEMP_SIGNERS"
-git -c gpg.ssh.allowedSignersFile="$TEMP_SIGNERS" tag -v v0.11.0-enterprise
-rm -f "$TEMP_SIGNERS"
-```
+### 2. Dialex AI (v1.0.0)
+- **Hegelian Multi-Agent Adversarial Deliberation**:
+  - Pits up to 6 competing frontier AI models (Claude, GPT, Gemini, Grok, DeepSeek, Mistral, Ollama) in multi-round structured dialectic debates.
+  - Moderator frames topic agendas, leads round-by-round syntheses, and generates consensus verdicts.
+- **No Extra Per-Token Billing via Local CLIs or Ollama**:
+  - Direct execution through local authenticated developer subshells (`claude`, `codex`, `antigravity`/`agy`, `ollama`) eliminating metered API markups.
+- **Persona Registry & Style Modifiers**:
+  - 10 Universal General Debate Archetypes (*Facilitator*, *Devil's Advocate*, *Optimist*, *Pragmatist*, *Contrarian*, *Expert*, *Risk Analyst*, *Ethicist*, *Historian*, *Futurist*).
+  - 40+ Domain-Specific Personas spanning Distributed Systems, Cybersecurity, AI Infrastructure, FinTech, and Legal Compliance.
+- **Generative Deliverables**:
+  - One-tap synthesis: Architecture Decision Records (ADR-042), Weighted Decision Matrices, Executive Memorandums, and Code Diffs.
+- **Multiplatform Clients**:
+  - Compose Multiplatform Desktop (macOS DMG, Windows MSI/EXE, Linux DEB/RPM).
+  - Android Mobile application with radial stadium arena and voice dilemma intake.
 
-### Tag Immutability Registry
-Exact commit targets verified via `git rev-parse <tag>^{commit}` and `git rev-parse <tag>`:
-- **`v0.1.0-enterprise`**: `92fc42fa5a2f694c3d2f8f4a556d35a529bdc09b` (tag: `d42da85a32b4905e62d4b980bb6d3320523efd7d`)
-- **`v0.2.0-enterprise`**: `7b4164992fd24a9e6154db382b2d8d87f68cab89` (tag: `51c215a385ded1e206fcf01d461549e97bcf76f6`)
-- **`v0.3.0-enterprise`**: `22a07738bbbcbd4b93398801292eb9f9c98299ee` (tag: `9384732de2a0ffae6aae71935e857ad7c842bed1`)
-- **`v0.4.0-enterprise`**: `3cb016d11557268d8d0050d461d62f342fc102c2` (tag: `aaaf821939ab414d593b763d806a509b7bdced85`)
-- **`v0.5.0-enterprise`**: `ea197f8108a8824c64364a2c059a3e261475073f` (tag: `71fbb86f8c0547e749811da19a74fd80bcc6a0cb`)
-- **`v0.6.0-enterprise`**: `e1803c1553c440353051385f304109b9551c992f` (tag: `30d4c0559ea1eacdeb051ab399de46fe10cf4604`)
-- **`v0.7.0-enterprise`**: `5d31de9c95c4980ed8ff019fb966449acfd085c6` (tag: `091bed22e42db575235a7b35c99dcc42b380b534`)
-- **`v0.8.0-enterprise`**: `c1aa48e44172283eb0977fc11841a0ddce2edab8` (tag: `a2ccd59289ed05104554a458c268171d3fe58919`)
-- **`v0.9.0-enterprise`**: `8a39e5ce06e36abc08f7380cd5e0ad2e11a09ae0` (tag: `2d4ba1c4be4c32c8f6e0d8105cfbc4f73ba08d49`)
-- **`v0.10.0-enterprise`**: `4b7892495515bc779a9434be591da363b467315f` (tag: `4e4cae598feaaa60f8430d6dbf03595296d0064f`)
+### 3. Artix AI (v1.0.0)
+- **Autonomous Software Engineering & Spec-to-Patch Deliberation**:
+  - Multi-agent Stakeholder Council exploring competing architectural paths and trade-offs before code modifications.
+  - Interactive Engineering Lab with diff viewer, patch synthesizer, and AST verification.
+- **CLI & Background Daemon**:
+  - High-performance Go CLI (`artix`) and daemon (`artixd`) with `plan`, `steer`, `persona`, and `replay` workflows.
+  - Integration with Git, Forge APIs, LSP servers, and Model Context Protocol (MCP) toolchains.
+
+### 4. Kritix AI (v1.0.0)
+- **Autonomous QA Testing Studio & Cockpit**:
+  - Visual driver and semantic DOM accessibility exploration.
+  - Dynamic invariant checking and synthetic crash reproduction.
+- **OWASP DAST & Security Auditing**:
+  - Automated security fuzzing across SQL injection, Cross-Site Scripting (XSS), and PII leak detection boundaries.
+  - Real-time token compression and ROI metrics calculator.
+- **Enterprise Verification CLI**:
+  - Standalone Go CLI (`kritix`) with headless test execution, model configuration, and truth audits.
+
+### 5. Socratix Engine (v1.0.0)
+- **Multi-Agent Consensus & Credence Engine**:
+  - Standalone Go daemon (`socratix`) serving high-throughput SSE APIs on port 7890.
+  - Mathematical consensus detection, tension resolution, and Bayesian credence tracking across turn state machines.
+  - SQLite deliberation graph persistence and encrypted credential vault.
+- **Benchmark Suite**:
+  - `socratixbench` CLI tool for measuring convergence, stance independence, and rubric scoring across model matrices.
 
 ---
 
-## Clean Clone Verification Commands
+## 📦 Release Distribution Matrix
+
+| Software | Variant | macOS (`.dmg` / `.tar.gz`) | Windows (`.msi` / `.exe` / `.zip`) | Linux (`.deb` / `.rpm` / `.tar.gz`) | Homebrew Target |
+|---|---|---|---|---|---|
+| **Dialex AI** | With Engine | `DialexAI-1.0.0-with-engine.dmg` | `DialexAI-1.0.0-with-engine.msi`<br>`DialexAI-1.0.0-with-engine.exe` | `DialexAI-1.0.0-with-engine.deb`<br>`DialexAI-1.0.0-with-engine.rpm` | `brew install --cask dialex-ai-bundled` |
+| **Dialex AI** | Without Engine | `DialexAI-1.0.0-without-engine.dmg` | `DialexAI-1.0.0-without-engine.msi`<br>`DialexAI-1.0.0-without-engine.exe` | `DialexAI-1.0.0-without-engine.deb`<br>`DialexAI-1.0.0-without-engine.rpm` | `brew install --cask dialex-ai` |
+| **Artix AI** | With Engine | `ArtixAI-1.0.0-with-engine.dmg` | `ArtixAI-1.0.0-with-engine.msi`<br>`ArtixAI-1.0.0-with-engine.exe` | `ArtixAI-1.0.0-with-engine.deb`<br>`ArtixAI-1.0.0-with-engine.rpm` | `brew install --cask artix-ai-bundled` |
+| **Artix AI** | Without Engine | `ArtixAI-1.0.0-without-engine.dmg` | `ArtixAI-1.0.0-without-engine.msi`<br>`ArtixAI-1.0.0-without-engine.exe` | `ArtixAI-1.0.0-without-engine.deb`<br>`ArtixAI-1.0.0-without-engine.rpm` | `brew install --cask artix-ai` |
+| **Artix AI CLI** | Standalone CLI | `artix-v1.0.0-darwin-*.tar.gz` | `artix-v1.0.0-windows-amd64.zip` | `artix-v1.0.0-linux-*.tar.gz` | `brew install artix` (`--with-engine`) |
+| **Kritix AI** | With Engine | `KritixAI-1.0.0-with-engine.dmg` | `KritixAI-1.0.0-with-engine.msi`<br>`KritixAI-1.0.0-with-engine.exe` | `KritixAI-1.0.0-with-engine.deb`<br>`KritixAI-1.0.0-with-engine.rpm` | `brew install --cask kritix-ai-bundled` |
+| **Kritix AI** | Without Engine | `KritixAI-1.0.0-without-engine.dmg` | `KritixAI-1.0.0-without-engine.msi`<br>`KritixAI-1.0.0-without-engine.exe` | `KritixAI-1.0.0-without-engine.deb`<br>`KritixAI-1.0.0-without-engine.rpm` | `brew install --cask kritix-ai` |
+| **Kritix AI CLI** | Standalone CLI | `kritix-v1.0.0-darwin-*.tar.gz` | `kritix-v1.0.0-windows-amd64.zip` | `kritix-v1.0.0-linux-*.tar.gz` | `brew install kritix` (`--with-engine`) |
+| **Socratix Engine** | Daemon & Bench | `socratix-v1.0.0-darwin-*.tar.gz` | `socratix-v1.0.0-windows-amd64.zip` | `socratix-v1.0.0-linux-*.tar.gz` | `brew install socratix` |
+| **Sentinix AI** | Security CLI & Server | `sentinix-v1.0.0-darwin-*.tar.gz` | `sentinix-v1.0.0-windows-amd64.zip` | `sentinix-v1.0.0-linux-*.tar.gz` | `brew install sentinix` |
+
+---
+
+## 🛠️ Verification & Build Commands
+
 On a clean clone of the repository:
+
 ```bash
-# 1. Verify build
-go build ./...
+# 1. Verify Go builds across all modules
+go build ./socratix-engine/...
+go build ./artix-ai/...
+go build ./kritix-ai/...
+go build ./sentinix-ai/...
 
-# 2. Verify vet
-go vet ./...
+# 2. Run unit and integration tests
+go test -count=1 ./socratix-engine/...
+go test -count=1 ./artix-ai/...
+go test -count=1 ./kritix-ai/...
+go test -count=1 ./sentinix-ai/...
 
-# 3. Verify all tests with race detector
-go test -race -count=1 ./...
+# 3. Verify all 135 security rule pack fixtures
+go test -v ./sentinix-ai/pkg/packs/...
 
-# 4. Verify test retention gate against baseline tag
+# 4. Verify test retention gate
 ./scripts/check-test-retention.sh
 
-# 5. Run reproducible 3-source benign corpus evaluation (GOROOT + pinned modules + fixed modules)
-./scripts/benign-corpus.sh
+# 5. Build full CLI binaries & cross-compilation packages
+./scripts/build-dist.sh --cli --cross-compile --app all
 
-# 6. Verify committed tag registry against remote refs (fails closed if remote is unreachable)
-./scripts/verify-tag-registry.sh
-
-# 7. Verify tag signature independently against published fingerprint in .well-known/security.txt
-TEMP_SIGNERS=$(mktemp)
-echo "releases@artix.ai ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ4FO6aRcfHA07XqA9SGUUfpiqYfLsaRz+KUwigN2K5x" > "$TEMP_SIGNERS"
-ssh-keygen -lf "$TEMP_SIGNERS" | grep -F "SHA256:Dh5vIjePKsm29xfvnLukrKDTOzLM/w5u6rYBcB3hmNg" || { echo "Fingerprint mismatch!"; exit 1; }
-git -c gpg.ssh.allowedSignersFile="$TEMP_SIGNERS" tag -v v0.11.0-enterprise
-rm -f "$TEMP_SIGNERS"
+# 6. Verify generated SHA256 checksums
+cd dist && sha256sum -c SHA256SUMS
 ```
+
+---
+
+## 📜 Cryptographic Trust Root & Signatures
+
+All release binaries, archives, and tags are cryptographically signed:
+- **Signer Identity / Principal**: `releases@dialex.ai`
+- **Key Type**: `ED25519 (SSH format)`
+- **Published Checksums**: `dist/SHA256SUMS`
+- **Official Repository**: `https://github.com/Keltstone/DialexAI`

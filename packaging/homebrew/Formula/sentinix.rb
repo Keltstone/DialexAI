@@ -1,10 +1,10 @@
 class Sentinix < Formula
   desc "Sentinix AI — Continuous Security Review, PR Gate & Vulnerability Posture Engine"
   homepage "https://dialex.ai"
-  url "https://github.com/Kolta-Labs/DialexAI/archive/refs/tags/v1.0.0.tar.gz"
+  url "https://github.com/Keltstone/DialexAI/archive/refs/tags/sentinix-v1.0.0.tar.gz"
   version "1.0.0"
   license "Apache-2.0"
-  head "https://github.com/Kolta-Labs/DialexAI.git", branch: "main"
+  head "https://github.com/Keltstone/DialexAI.git", branch: "main"
 
   depends_on "go" => :build
 

@@ -1,6 +1,7 @@
 package com.dialex.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -28,7 +29,8 @@ fun AboutDialog(
     authorName: String = "Arun Electra",
     companyName: String = "Kolta Labs",
     onDismiss: () -> Unit,
-    onOpenFullAbout: (() -> Unit)? = null
+    onOpenFullAbout: (() -> Unit)? = null,
+    onOpenLicensingDedication: (() -> Unit)? = null
 ) {
     val cc = LocalCcColors.current
 
@@ -151,13 +153,34 @@ fun AboutDialog(
 
                     HorizontalDivider(color = cc.border.copy(alpha = 0.25f), thickness = 0.75.dp)
 
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
                             "Copyright © 2026 Kolta Labs. Free & Open Source.",
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.5.sp),
                             color = cc.textMuted.copy(alpha = 0.6f)
                         )
+                        if (onOpenLicensingDedication != null) {
+                            Text(
+                                "• Legal",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontSize = 10.5.sp,
+                                    color = cc.textMuted.copy(alpha = 0.75f)
+                                ),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .clickable {
+                                        onDismiss()
+                                        onOpenLicensingDedication()
+                                    }
+                                    .padding(horizontal = 2.dp)
+                            )
+                        }
                     }
                 }
+            }
             }
         }
     }

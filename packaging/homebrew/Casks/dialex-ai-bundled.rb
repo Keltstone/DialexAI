@@ -2,7 +2,7 @@ cask "dialex-ai-bundled" do
   version "1.0.0"
   sha256 :no_check # Updated upon official release
 
-  url "https://github.com/Kolta-Labs/DialexAI/releases/download/v#{version}/DialexAI-#{version}-with-engine.dmg"
+  url "https://github.com/Keltstone/DialexAI/releases/download/v#{version}/DialexAI-#{version}-with-engine.dmg"
   name "Dialex AI (Bundled Engine)"
   desc "Sovereign Multi-Agent AI Deliberation Platform (Bundled with Socratix Engine)"
   homepage "https://dialex.ai"

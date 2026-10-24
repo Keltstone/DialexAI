@@ -304,7 +304,8 @@ private fun SettingsTabContent(
     extraTabContent: (@Composable () -> Unit)?,
     state: SettingsState,
     onIntent: (SettingsIntent) -> Unit,
-    onShowFeedback: () -> Unit
+    onShowFeedback: () -> Unit,
+    onOpenLicensingDedication: (() -> Unit)? = null
 ) {
     if (isExtraTabSelected && extraTabContent != null) {
         extraTabContent()
@@ -314,7 +315,8 @@ private fun SettingsTabContent(
                 themeMode = state.themeMode,
                 onModeChange = { onIntent(SettingsIntent.ThemeModeChanged(it)) },
                 onShowFeedback = onShowFeedback,
-                onNavigateToAbout = { onIntent(SettingsIntent.SelectTab(SettingsTab.About)) }
+                onNavigateToAbout = { onIntent(SettingsIntent.SelectTab(SettingsTab.About)) },
+                onNavigateToLicensing = onOpenLicensingDedication
             )
             SettingsTab.Security -> SecurityTab(state, onIntent)
             SettingsTab.AiAgents -> AiAgentsTab(state, onIntent)
@@ -329,7 +331,7 @@ private fun SettingsTabContent(
                 onNavigateToLogs = { onIntent(SettingsIntent.SelectTab(SettingsTab.Logs)) }
             )
             SettingsTab.Logs -> LogsTab()
-            SettingsTab.About -> AboutTab(state.connectionLabel, state.legalConsent, onShowFeedback)
+            SettingsTab.About -> AboutTab(state.connectionLabel, state.legalConsent, onShowFeedback, onOpenLicensingDedication)
         }
     }
 }
@@ -342,6 +344,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     extraTabLabel: String? = null,
     extraTabContent: (@Composable () -> Unit)? = null,
+    onOpenLicensingDedication: (() -> Unit)? = null,
     isCompact: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -432,7 +435,8 @@ fun SettingsScreen(
                                 extraTabContent = extraTabContent,
                                 state = state,
                                 onIntent = onIntent,
-                                onShowFeedback = { showFeedbackDialog = true }
+                                onShowFeedback = { showFeedbackDialog = true },
+                                onOpenLicensingDedication = onOpenLicensingDedication
                             )
                         }
                     }
@@ -652,7 +656,8 @@ fun SettingsScreen(
                                 extraTabContent = extraTabContent,
                                 state = state,
                                 onIntent = onIntent,
-                                onShowFeedback = { showFeedbackDialog = true }
+                                onShowFeedback = { showFeedbackDialog = true },
+                                onOpenLicensingDedication = onOpenLicensingDedication
                             )
                         }
                     }
@@ -673,7 +678,8 @@ fun SettingsScreen(
             onOpenFullAbout = {
                 isExtraTabSelected = false
                 onIntent(SettingsIntent.SelectTab(SettingsTab.About))
-            }
+            },
+            onOpenLicensingDedication = onOpenLicensingDedication
         )
     }
 
@@ -723,7 +729,8 @@ private fun AppearanceTab(
     themeMode: ThemeMode,
     onModeChange: (ThemeMode) -> Unit,
     onShowFeedback: () -> Unit,
-    onNavigateToAbout: () -> Unit
+    onNavigateToAbout: () -> Unit,
+    onNavigateToLicensing: (() -> Unit)? = null
 ) {
     val cc = LocalCcColors.current
     val chatDisplayState = LocalChatDisplaySettings.current
@@ -982,11 +989,31 @@ private fun AppearanceTab(
 
                         HorizontalDivider(color = cc.border.copy(alpha = 0.25f), thickness = 0.75.dp)
 
-                        Text(
-                            "Copyright © 2026 Kolta Labs. All rights reserved.",
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
-                            color = cc.textMuted.copy(alpha = 0.7f)
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Copyright © 2026 Kolta Labs. All rights reserved.",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
+                                color = cc.textMuted.copy(alpha = 0.7f)
+                            )
+
+                            if (onNavigateToLicensing != null) {
+                                Text(
+                                    "Licensing Dedication & Notices",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 11.sp,
+                                        color = cc.textMuted.copy(alpha = 0.75f)
+                                    ),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .clickable { onNavigateToLicensing() }
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -2,7 +2,7 @@ cask "artix-ai-bundled" do
   version "1.0.0"
   sha256 :no_check
 
-  url "https://github.com/Kolta-Labs/DialexAI/releases/download/v#{version}/ArtixAI-#{version}-with-engine.dmg"
+  url "https://github.com/Keltstone/DialexAI/releases/download/v#{version}/ArtixAI-#{version}-with-engine.dmg"
   name "Artix AI (Bundled Engine)"
   desc "Autonomous Software Engineering & Spec-to-Patch Cockpit (Bundled with Socratix Engine)"
   homepage "https://dialex.ai"

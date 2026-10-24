@@ -7,7 +7,7 @@ object LegalTexts {
     const val CURRENT_LEGAL_VERSION = "1.0.0"
     const val EFFECTIVE_DATE = "January 1, 2026"
     const val MAINTAINER = "Kolta Labs"
-    const val REPOSITORY_URL = "https://github.com/Kolta-Labs/DialexAI"
+    const val REPOSITORY_URL = "https://github.com/Keltstone/DialexAI"
     const val LICENSING_EMAIL = "licensing@koltalabs.com"
     const val PRIVACY_EMAIL = "privacy@koltalabs.com"
 

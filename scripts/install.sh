@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # DialexAI Ecosystem Universal Installer
-# Installs Artix AI, Dialex AI, Kritix AI, and Socratix Deliberation Engine
+# Installs Artix AI, Dialex AI, Kritix AI, Sentinix AI, and Socratix Deliberation Engine
 # Supports:
 #   - macOS, Linux, and Windows (via bash / WSL)
 #   - CLI binaries & Desktop GUI Applications (DMG / DEB / App)
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 VERSION="1.0.0"
-REPO_OWNER="Kolta-Labs"
+REPO_OWNER="Keltstone"
 REPO_NAME="DialexAI"
 GITHUB_RELEASE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${VERSION}"
 

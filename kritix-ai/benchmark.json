@@ -30,7 +30,7 @@
   ],
   "execution_timestamp": "2026-10-04T18:45:05Z",
   "reproducer_command": "kritix benchmark --corpus testdata/regressions --runs 2",
-  "commit": "2f5706a",
+  "commit": "af53217",
   "dataset": "testdata/regressions (105 mutation cases across 5 categories; 21 semantic swaps tested across 2 runs = 42 evaluations)",
   "raw_log_path": ".dev/kritix-ai/evidence/round1/benchmark_corpus_harness-1791139505105178000.jsonl",
   "raw_log_sha256": "8405b64c1626f9506770235dedaaf260af5fcae7c71f6804d69156e8ceebe41a"

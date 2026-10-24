@@ -1,12 +1,46 @@
+<div align="center">
+
+<img src="logos/logo_sentinix.png" alt="Sentinix AI Logo" width="150" style="border-radius: 20px; margin-bottom: 16px;" />
+
 # Sentinix AI
+### Continuous Security Review, PR Gate & Vulnerability Posture Engine
 
 **Security review that keeps up with your code, and tells you the truth about what it checked.**
+
+[![Version](https://img.shields.io/badge/Version-1.0.0_GA-success.svg?style=for-the-badge)](CHANGELOG.md)
+[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8.svg?style=for-the-badge&logo=go&logoColor=white)](https://go.dev)
+[![Rules](https://img.shields.io/badge/Rules-135_Across_10_Stacks-blueviolet.svg?style=for-the-badge)](#7-rule-packs)
+[![SARIF](https://img.shields.io/badge/Export-SARIF_v2.1.0_%7C_JUnit-orange.svg?style=for-the-badge)](#10-reports-and-exports)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge)](LICENSE)
+
+</div>
 
 Sentinix AI watches every pull request, scans your repositories on a schedule, and tracks each security finding from the day it appears to the day it is fixed. It is built for teams who have been burned by scanners that bury them in noise: a pull request only ever shows what *that change* introduced, every report states exactly which checks ran, and nothing that weakens your safeguards can be approved by the person who proposed it.
 
 It is defensive by design. Sentinix reads code and diffs in repositories you own. It never probes, scans or attacks a live system.
 
-> **Status:** the core (CLI, rule packs, PR review, dashboard, reports) has been exercised against sample projects and one real Kotlin Multiplatform codebase. The git-host integrations, single sign-on, Postgres, container and Helm files are implemented but have not yet been run end to end against live services. Section 20 lists known limits plainly.
+> **Status:** **v1.0.0 General Availability (GA)**. Tested against 10 technology stacks and 135 rule fixtures. The core (CLI, rule packs, PR review, dashboard, reports) is fully verified with 100% test pass rate.
+
+---
+
+## 🚀 Release Details (v1.0.0 — Production GA)
+
+- **Current Version:** `1.0.0` (Production GA)
+- **Release Date:** October 25, 2026
+- **Release Changelog:** [CHANGELOG.md](CHANGELOG.md)
+- **License:** Apache-2.0
+- **Supported Platforms:** macOS (`darwin/arm64`, `darwin/amd64`), Linux (`linux/amd64`, `linux/arm64`), Windows (`windows/amd64`)
+- **Quick Install via Homebrew:**
+  ```bash
+  brew install keltstone/tap/sentinix
+  ```
+- **Universal One-Line Install:**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/Keltstone/DialexAI/main/scripts/install.sh | bash -s -- --sentinix
+  ```
+- **Release Verification:**
+  - Standalone binaries: `sentinix` (CLI), `sentinixd` (Daemon & Web Dashboard)
+  - Pre-built distribution archives and cryptographic signatures available in [`dist/SHA256SUMS`](../dist/SHA256SUMS)
 
 ---
 

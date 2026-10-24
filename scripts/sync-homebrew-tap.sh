@@ -2,16 +2,16 @@
 # ==============================================================================
 # Sync Homebrew Formulas and Casks to Standalone Homebrew Tap Repository
 # Enables Homebrew shorthand syntax:
-#   brew install kolta-labs/tap/sentinix
+#   brew install keltstone/tap/sentinix
 #   or:
-#   brew install kolta-labs/dialexai/sentinix
+#   brew install keltstone/dialexai/sentinix
 # ==============================================================================
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DIR="${ROOT_DIR}/packaging/homebrew"
-DEFAULT_ORG="Kolta-Labs"
+DEFAULT_ORG="Keltstone"
 TAP_REPO_NAME="${1:-homebrew-tap}"
 TARGET_REPO="https://github.com/${DEFAULT_ORG}/${TAP_REPO_NAME}.git"
 WORK_DIR="/tmp/homebrew-tap-sync-$$"
@@ -48,7 +48,7 @@ cp -R "${SOURCE_DIR}/Casks/"* "${WORK_DIR}/Casks/" 2>/dev/null || true
 
 # Generate Tap README
 cat <<EOF > "${WORK_DIR}/README.md"
-# Kolta Labs Homebrew Tap
+# Keltstone Homebrew Tap
 
 Official Homebrew formulas and casks for the DialexAI Ecosystem:
 - **Sentinix AI** (\`sentinix\`): Continuous Security Review, PR Gate & Vulnerability Posture Engine
@@ -60,22 +60,22 @@ Official Homebrew formulas and casks for the DialexAI Ecosystem:
 
 \`\`\`bash
 # Install Sentinix Security Review CLI & Daemon
-brew install kolta-labs/tap/sentinix
+brew install keltstone/tap/sentinix
 
 # Install Artix AI CLI
-brew install kolta-labs/tap/artix
+brew install keltstone/tap/artix
 
 # Install Kritix AI CLI
-brew install kolta-labs/tap/kritix
+brew install keltstone/tap/kritix
 
 # Install Socratix Deliberation Engine
-brew install kolta-labs/tap/socratix
+brew install keltstone/tap/socratix
 \`\`\`
 
 ## Alternatively: Add Tap
 
 \`\`\`bash
-brew tap kolta-labs/tap
+brew tap keltstone/tap
 brew install sentinix
 \`\`\`
 EOF

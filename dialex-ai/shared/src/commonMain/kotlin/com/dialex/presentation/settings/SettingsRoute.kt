@@ -80,6 +80,7 @@ fun SettingsRoute(
         onBack = { backStack.removeLast() },
         extraTabLabel = extraTabLabel,
         extraTabContent = extraTabContent,
+        onOpenLicensingDedication = { backStack.add(com.dialex.presentation.nav.LicensingDedication) },
         isCompact = isCompact,
         modifier = modifier
     )

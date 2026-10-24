@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.FactCheck
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.*
@@ -57,7 +58,8 @@ private enum class AboutSubTab(val label: String, val icon: ImageVector) {
 fun AboutTab(
     connectionLabel: String,
     consent: com.dialex.domain.model.LegalConsent? = null,
-    onShowFeedback: (() -> Unit)? = null
+    onShowFeedback: (() -> Unit)? = null,
+    onOpenLicensingDedication: (() -> Unit)? = null
 ) {
     val cc = LocalCcColors.current
     val uriHandler = LocalUriHandler.current
@@ -143,6 +145,26 @@ fun AboutTab(
                             color = cc.textMuted
                         )
 
+                        if (onOpenLicensingDedication != null) {
+                            Text(
+                                "•",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                color = cc.textMuted.copy(alpha = 0.4f)
+                            )
+                            Text(
+                                "Licensing Dedication & Notices",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    color = cc.textMuted.copy(alpha = 0.75f)
+                                ),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .clickable { onOpenLicensingDedication() }
+                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
+
                         if (consent != null && consent.isAccepted) {
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
@@ -222,10 +244,10 @@ fun AboutTab(
             modifier = Modifier.fillMaxWidth()
         ) { tab ->
             when (tab) {
-                AboutSubTab.OVERVIEW -> OverviewSection(cc, uriHandler, onShowFeedback)
+                AboutSubTab.OVERVIEW -> OverviewSection(cc, uriHandler, onShowFeedback, onOpenLicensingDedication)
                 AboutSubTab.SCENARIOS -> ScenariosSection(cc)
                 AboutSubTab.PRIVACY -> PrivacySection(cc, clipboardManager) { copiedLabel = it }
-                AboutSubTab.LICENSE -> LicenseSection(cc, clipboardManager) { copiedLabel = it }
+                AboutSubTab.LICENSE -> LicenseSection(cc, clipboardManager, onOpenLicensingDedication) { copiedLabel = it }
                 AboutSubTab.TERMS -> TermsSection(cc, clipboardManager) { copiedLabel = it }
             }
         }
@@ -282,7 +304,8 @@ private fun SubTabItem(
 private fun OverviewSection(
     cc: com.dialex.theme.CcPalette,
     uriHandler: androidx.compose.ui.platform.UriHandler,
-    onShowFeedback: (() -> Unit)?
+    onShowFeedback: (() -> Unit)?,
+    onOpenLicensingDedication: (() -> Unit)? = null
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         // Section: Executive Summary & The Problem
@@ -398,7 +421,7 @@ private fun OverviewSection(
 
                     DisableSelection {
                         OutlinedButton(
-                            onClick = { uriHandler.openUri("https://github.com/Kolta-Labs/DialexAI") },
+                            onClick = { uriHandler.openUri("https://github.com/Keltstone/DialexAI") },
                             shape = RoundedCornerShape(6.dp),
                             modifier = Modifier.height(28.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp)
@@ -435,7 +458,7 @@ private fun OverviewSection(
                 ) {
                     SpecRow("Project Maintainer", "Kolta Labs", cc)
                     SpecRow("Software License", "PolyForm Noncommercial License 1.0.0", cc)
-                    SpecRow("Source Code", "github.com/Kolta-Labs/DialexAI", cc)
+                    SpecRow("Source Code", "github.com/Keltstone/DialexAI", cc)
                 }
             }
         }
@@ -483,7 +506,7 @@ private fun OverviewSection(
                         }
 
                         OutlinedButton(
-                            onClick = { uriHandler.openUri("https://github.com/Kolta-Labs/DialexAI/issues") },
+                            onClick = { uriHandler.openUri("https://github.com/Keltstone/DialexAI/issues") },
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.height(34.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp)
@@ -494,7 +517,7 @@ private fun OverviewSection(
                         }
 
                         OutlinedButton(
-                            onClick = { uriHandler.openUri("https://github.com/Kolta-Labs/DialexAI") },
+                            onClick = { uriHandler.openUri("https://github.com/Keltstone/DialexAI") },
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.height(34.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp)
@@ -503,6 +526,23 @@ private fun OverviewSection(
                             Spacer(Modifier.width(6.dp))
                             Text("Source Repository", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.5.sp), color = cc.textMuted)
                         }
+                    }
+
+                    if (onOpenLicensingDedication != null) {
+                        Spacer(Modifier.height(8.dp))
+                        HorizontalDivider(color = cc.border.copy(alpha = 0.25f), thickness = 0.75.dp)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Statutory Licensing Dedication & Third-Party Credits",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 11.sp,
+                                color = cc.textMuted.copy(alpha = 0.65f)
+                            ),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { onOpenLicensingDedication() }
+                                .padding(vertical = 3.dp)
+                        )
                     }
                 }
             }
@@ -676,6 +716,7 @@ private fun PrivacySection(
 private fun LicenseSection(
     cc: com.dialex.theme.CcPalette,
     clipboardManager: androidx.compose.ui.platform.ClipboardManager,
+    onOpenLicensingDedication: (() -> Unit)? = null,
     onCopied: (String) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -771,6 +812,25 @@ private fun LicenseSection(
                             color = cc.textMuted,
                             modifier = Modifier.padding(14.dp)
                         )
+                    }
+                }
+
+                if (onOpenLicensingDedication != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onOpenLicensingDedication() }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "View Complete Statutory Licensing Dedication & Third-Party OSS Notices",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, color = cc.accent, fontWeight = FontWeight.Medium)
+                        )
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = cc.accent, modifier = Modifier.size(15.dp))
                     }
                 }
             }

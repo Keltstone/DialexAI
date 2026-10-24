@@ -2,7 +2,7 @@ cask "kritix-ai-bundled" do
   version "1.0.0"
   sha256 :no_check
 
-  url "https://github.com/Kolta-Labs/DialexAI/releases/download/v#{version}/KritixAI-#{version}-with-engine.dmg"
+  url "https://github.com/Keltstone/DialexAI/releases/download/v#{version}/KritixAI-#{version}-with-engine.dmg"
   name "Kritix AI (Bundled Engine)"
   desc "Autonomous QA Testing Studio & Cockpit (Bundled with Socratix Engine)"
   homepage "https://dialex.ai"

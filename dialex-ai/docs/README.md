@@ -98,7 +98,7 @@ mkdir -p ~/Workspace && cd ~/Workspace
 git clone https://github.com/keltstone/Kolt.git
 
 # 3. Clone DialexAI alongside Kolt
-git clone https://github.com/Kolta-Labs/DialexAI.git
+git clone https://github.com/Keltstone/DialexAI.git
 
 # 4. Confirm directory structure:
 # ~/Workspace/

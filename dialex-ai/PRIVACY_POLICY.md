@@ -2,7 +2,7 @@
 
 **Effective Date:** September 21, 2026  
 **Version:** 1.0.0  
-**Maintained by:** Kolta Labs (<https://github.com/Kolta-Labs/DialexAI>)  
+**Maintained by:** Kolta Labs (<https://github.com/Keltstone/DialexAI>)  
 **Data Protection Contact:** `privacy@koltalabs.com`
 
 ---
@@ -109,4 +109,4 @@ If you have questions, feedback, or concerns regarding our privacy practices or 
 
 **Kolta Labs — Privacy & Governance**  
 Email: `privacy@koltalabs.com`  
-Repository: <https://github.com/Kolta-Labs/DialexAI>
+Repository: <https://github.com/Keltstone/DialexAI>

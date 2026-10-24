@@ -35,7 +35,7 @@ artix repl
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │  ARTIX AI DEVELOPER REPL  v1.0.0                                       │
-│  Connected: git@github.com:Kolta-Labs/DialexAI.git [Branch: feature/auth]│
+│  Connected: git@github.com:Keltstone/DialexAI.git [Branch: feature/auth]│
 ├────────────────────────────────────────────────────────────────────────┤
 │  Type /help for slash commands. Use @file, @spec, @rule to attach context.│
 │                                                                        │

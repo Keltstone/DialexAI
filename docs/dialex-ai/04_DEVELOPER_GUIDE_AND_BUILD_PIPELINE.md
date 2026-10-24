@@ -28,8 +28,8 @@ Clone `Kolt` into the same parent folder alongside `DialexAI`:
 
 ```bash
 mkdir -p ~/Workspace && cd ~/Workspace
-git clone https://github.com/Kolta-Labs/Kolt.git
-git clone https://github.com/Kolta-Labs/DialexAI.git
+git clone https://github.com/keltstone/Kolt.git
+git clone https://github.com/Keltstone/DialexAI.git
 
 # Verify layout:
 # ~/Workspace/

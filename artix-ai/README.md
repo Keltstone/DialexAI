@@ -11,6 +11,20 @@
 
 ---
 
+## 🚀 Release Details (v0.11.0-enterprise)
+
+- **Current Version:** `v0.11.0-enterprise`
+- **Release Changelog:** [CHANGELOG.md](CHANGELOG.md)
+- **Detailed Release Notes:** [RELEASE_NOTES.md](RELEASE_NOTES.md)
+- **Supported Platforms:** macOS (`darwin/arm64`, `darwin/amd64`), Linux (`linux/amd64`, `linux/arm64`), Windows (`windows/amd64`)
+- **Quick Install via Homebrew:**
+  ```bash
+  brew install keltstone/tap/artix --with-engine
+  ```
+- **Desktop Application:** `brew install --cask artix-ai` (or `artix-ai-bundled`)
+
+---
+
 ## 1. Architectural Philosophy: The Dialectic Engine
 
 Most AI coding tools operate under the **"Solo Sycophant Problem"**: a single LLM attempts to act as product manager, architect, developer, and tester simultaneously. It invents missing requirements, validates its own assumptions, and generates unverified code directly into the developer's working files.

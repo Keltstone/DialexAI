@@ -2,7 +2,7 @@ cask "kritix-ai" do
   version "1.0.0"
   sha256 :no_check
 
-  url "https://github.com/Kolta-Labs/DialexAI/releases/download/v#{version}/KritixAI-#{version}-without-engine.dmg"
+  url "https://github.com/Keltstone/DialexAI/releases/download/v#{version}/KritixAI-#{version}-without-engine.dmg"
   name "Kritix AI"
   desc "Autonomous QA Testing Studio & Enterprise Verification Cockpit (Client App)"
   homepage "https://dialex.ai"

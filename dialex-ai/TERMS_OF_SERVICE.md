@@ -2,7 +2,7 @@
 
 **Effective Date:** January 1, 2026  
 **Version:** 1.0.0  
-**Maintained by:** Kolta Labs (<https://github.com/Kolta-Labs/DialexAI>)  
+**Maintained by:** Kolta Labs (<https://github.com/Keltstone/DialexAI>)  
 **Licensing Inquiries:** `licensing@koltalabs.com`
 
 ---

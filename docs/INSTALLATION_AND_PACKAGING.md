@@ -24,22 +24,22 @@ Install directly via the shorthand tap (Homebrew automatically taps on install):
 
 ```bash
 # Install Sentinix Security Review CLI & Daemon
-brew install kolta-labs/tap/sentinix
+brew install keltstone/tap/sentinix
 
 # Install Artix AI CLI
-brew install kolta-labs/tap/artix
+brew install keltstone/tap/artix
 
 # Install Kritix AI CLI
-brew install kolta-labs/tap/kritix
+brew install keltstone/tap/kritix
 
 # Install Socratix Deliberation Engine
-brew install kolta-labs/tap/socratix
+brew install keltstone/tap/socratix
 ```
 
 Alternatively, tap the repository manually:
 
 ```bash
-brew tap koltalabs/dialexai https://github.com/Kolta-Labs/DialexAI
+brew tap keltstone/dialexai https://github.com/Keltstone/DialexAI
 brew install sentinix
 ```
 
@@ -94,7 +94,7 @@ Run the automated installer on macOS, Linux, or Windows (WSL/Git Bash):
 ./scripts/install.sh
 
 # Or install directly via curl:
-curl -fsSL https://raw.githubusercontent.com/Kolta-Labs/DialexAI/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keltstone/DialexAI/main/scripts/install.sh | bash
 ```
 
 #### Script Options & Flags

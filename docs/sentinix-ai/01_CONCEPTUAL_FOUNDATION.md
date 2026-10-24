@@ -1,4 +1,4 @@
-# Sentinix AI: Conceptual Foundation & Defensive Principles
+# <img src="../../logos/sentinix/logo_sentinix.png" width="32" height="32" style="vertical-align:middle; margin-right:8px;" /> Sentinix AI: Conceptual Foundation & Defensive Principles
 
 **Module:** `sentinix-ai`  
 **Author:** Kolta Labs Security & Systems Engineering Group  

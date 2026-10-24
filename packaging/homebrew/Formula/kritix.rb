@@ -1,10 +1,10 @@
 class Kritix < Formula
   desc "Kritix AI — Autonomous QA Testing Studio & Enterprise Verification CLI"
   homepage "https://dialex.ai"
-  url "https://github.com/Kolta-Labs/DialexAI/archive/refs/tags/v1.0.0.tar.gz"
+  url "https://github.com/Keltstone/DialexAI/archive/refs/tags/v1.0.0.tar.gz"
   version "1.0.0"
   license "Apache-2.0"
-  head "https://github.com/Kolta-Labs/DialexAI.git", branch: "main"
+  head "https://github.com/Keltstone/DialexAI.git", branch: "main"
 
   option "with-engine", "Install with the Socratix deliberation engine"
 

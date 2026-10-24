@@ -1,4 +1,4 @@
-# Sentinix AI: Rule Packs Ecosystem & Stack Guide
+# <img src="../../../logos/sentinix/logo_sentinix.png" width="32" height="32" style="vertical-align:middle; margin-right:8px;" /> Sentinix AI: Rule Packs Ecosystem & Stack Guide
 
 **Module:** `sentinix-ai`  
 **Total Rules:** 135 Built-in Enterprise Rules  

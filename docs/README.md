@@ -105,7 +105,7 @@ graph TD
 
 ---
 
-### 6. [Sentinix AI Platform Wiki](sentinix-ai/01_CONCEPTUAL_FOUNDATION.md)
+### 6. <img src="../logos/sentinix/logo_sentinix.png" width="22" height="22" style="vertical-align:middle;" /> [Sentinix AI Platform Wiki](sentinix-ai/01_CONCEPTUAL_FOUNDATION.md)
 *Continuous security review, PR gating, baseline tracking, and vulnerability posture engine.*
 - [01. Conceptual Foundation & Defensive Principles](sentinix-ai/01_CONCEPTUAL_FOUNDATION.md)  
   *Change-delta paradigm (head vs. base), content-based fingerprinting, epistemic coverage statements, and separation of duties.*

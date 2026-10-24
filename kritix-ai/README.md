@@ -4,6 +4,19 @@
 
 ---
 
+## 🚀 Release Details (v0.3.0-enterprise-hardened)
+
+- **Current Version:** `v0.3.0-enterprise-hardened`
+- **Release Changelog:** [CHANGELOG.md](CHANGELOG.md)
+- **Supported Platforms:** macOS (`darwin/arm64`, `darwin/amd64`), Linux (`linux/amd64`, `linux/arm64`), Windows (`windows/amd64`)
+- **Quick Install via Homebrew:**
+  ```bash
+  brew install keltstone/tap/kritix --with-engine
+  ```
+- **Desktop Application:** `brew install --cask kritix-ai` (or `kritix-ai-bundled`)
+
+---
+
 ## ⚡ The Core Philosophy: Deterministic-First Token Optimization
 
 Most AI testing agents dump full raw HTML DOMs and network event streams into massive LLM context windows, burning millions of tokens per test run ($10–$50 per suite) and causing crippling latency.

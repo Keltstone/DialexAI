@@ -11,6 +11,7 @@
 [CmdletBinding()]
 param (
     [switch]$All,
+    [switch]$Sentinix,
     [switch]$Artix,
     [switch]$Dialex,
     [switch]$Kritix,
@@ -44,6 +45,7 @@ if (-not (Test-Path $BinDir)) {
 
 $InstallTarget = "all"
 if ($EngineOnly) { $InstallTarget = "engine" }
+elseif ($Sentinix) { $InstallTarget = "sentinix" }
 elseif ($Artix) { $InstallTarget = "artix" }
 elseif ($Dialex) { $InstallTarget = "dialex" }
 elseif ($Kritix) { $InstallTarget = "kritix" }
@@ -147,6 +149,20 @@ if ($InstallMode -eq "cli" -or $InstallMode -eq "both") {
             Write-Host "  [v] Installed $BinDir\kritix.exe" -ForegroundColor Green
         }
     }
+
+    # Sentinix AI CLI & Daemon
+    if ($InstallTarget -eq "all" -or $InstallTarget -eq "sentinix") {
+        $srcSentinix = "$RepoRoot\dist\bin\sentinix.exe"
+        if (Test-Path $srcSentinix) {
+            Copy-Item $srcSentinix "$BinDir\sentinix.exe" -Force
+            Write-Host "  [v] Installed $BinDir\sentinix.exe" -ForegroundColor Green
+        }
+        $srcSentinixd = "$RepoRoot\dist\bin\sentinixd.exe"
+        if (Test-Path $srcSentinixd) {
+            Copy-Item $srcSentinixd "$BinDir\sentinixd.exe" -Force
+            Write-Host "  [v] Installed $BinDir\sentinixd.exe" -ForegroundColor Green
+        }
+    }
 }
 
 # ------------------------------------------------------------------------------
@@ -191,4 +207,4 @@ if ($UserPath -notlike "*$BinDir*") {
 Write-Host "`n==============================================================================" -ForegroundColor Green
 Write-Host "   🎉 DialexAI Ecosystem Windows Installation Finished!" -ForegroundColor Green
 Write-Host "==============================================================================" -ForegroundColor Green
-Write-Host "Quick commands: 'socratix serve', 'artix', 'kritix'"
+Write-Host "Quick commands: 'sentinix scan', 'socratix serve', 'artix', 'kritix'"

@@ -204,7 +204,7 @@ func ExportSARIF(findings []SecurityFindingInput) ([]byte, error) {
 					Driver: SARIFDriver{
 						Name:           "Kritix-DAST",
 						Version:        "1.0.0",
-						InformationURI: "https://github.com/koltalabs/dialexai/kritix-ai",
+						InformationURI: "https://github.com/Keltstone/DialexAI/tree/main/kritix-ai",
 						Rules:          rules,
 					},
 				},

@@ -53,5 +53,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/Kolta-Labs/DialexAI/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/Kolta-Labs/DialexAI/releases/tag/v1.0.0
+[Unreleased]: https://github.com/Keltstone/DialexAI/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Keltstone/DialexAI/releases/tag/v1.0.0

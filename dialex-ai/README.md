@@ -24,6 +24,22 @@ Dialex AI brings the world’s leading AI models into a structured debate counci
 
 ---
 
+## 🚀 Release Details (v1.0.0)
+
+- **Current Version:** `1.0.0`
+- **Release Changelog:** [CHANGELOG.md](CHANGELOG.md)
+- **Supported Platforms:** macOS (`.dmg`), Windows (`.msi`, `.exe`), Linux (`.deb`, `.rpm`), Android (`.apk`)
+- **Quick Install via Homebrew:**
+  ```bash
+  # Dialex AI Desktop with bundled engine
+  brew install --cask dialex-ai-bundled
+
+  # Dialex AI Client only (connects to external engine)
+  brew install --cask dialex-ai
+  ```
+
+---
+
 ## The Problem: The Single AI "Echo Chamber"
 
 When you ask a standard AI chatbot for advice on a major decision, it usually acts like an agreeable assistant. It nods along, tells you what sounds exciting, and confirms your initial bias:
@@ -203,7 +219,7 @@ Dialex includes ready-to-run **Playbooks**—pre-configured debate templates wit
 
 ```bash
 # Clone the repository
-git clone https://github.com/Kolta-Labs/DialexAI.git && cd DialexAI
+git clone https://github.com/Keltstone/DialexAI.git && cd DialexAI
 
 # Start the background engine with persistent storage
 docker compose -f selfhosting/docker-compose.yml up -d
@@ -216,8 +232,8 @@ The server will be available on `http://localhost:8787` (or across your private 
 
 ```bash
 # 1. Clone Kolt and DialexAI side-by-side in your workspace
-git clone https://github.com/Kolta-Labs/Kolt.git
-git clone https://github.com/Kolta-Labs/DialexAI.git
+git clone https://github.com/keltstone/Kolt.git
+git clone https://github.com/Keltstone/DialexAI.git
 
 # 2. Run tests and start the Desktop application
 cd DialexAI

@@ -2,14 +2,21 @@
 
 **By Kolta Labs.** Tools that make AI disagree with itself before you trust it.
 
-Dialex Suite is four products on one deliberation engine:
+Dialex Suite comprises five sovereign software systems built on local-first engineering and deliberation principles:
 
-| Product | Folder | What it is | Stack |
-|---|---|---|---|
-| **Dialex AI** | [`dialex-ai/`](./dialex-ai) | Desktop and Android app where several AI models debate a decision and a moderator synthesizes the result. | Kotlin Multiplatform, Compose |
-| **Artix AI** | [`artix-ai/`](./artix-ai) | Autonomous engineering platform & spec-to-patch workflow for AI-written code (CLI and desktop cockpit). | Go, Compose Desktop |
-| **Kritix AI** | [`kritix-ai/`](./kritix-ai) | Autonomous end-to-end testing platform with DOM pruning, self-healing locators, and DAST security audits. | Go, Compose Desktop |
-| **Socratix Engine** | [`socratix-engine/`](./socratix-engine) | The shared deliberation daemon: consensus, orchestration, mesh networking, model runners. | Go 1.27 |
+---
+
+## 🚀 Ecosystem Release Status & Version Matrix
+
+Each software system in the DialexAI monorepo is versioned and released independently to maintain focused, reliable release cycles:
+
+| Software | Release Status | Version | Release Log | Documentation | Primary Distribution |
+|---|---|---|---|---|---|
+| <img src="logos/sentinix/logo_sentinix.png" width="20" height="20" style="vertical-align:middle;" /> **Sentinix AI** | 🟢 **Production GA** | **`v1.0.0`** | [`sentinix-ai/CHANGELOG.md`](./sentinix-ai/CHANGELOG.md) | [`sentinix-ai/README.md`](./sentinix-ai/README.md) | `brew install keltstone/tap/sentinix` |
+| <img src="dialex-ai/logos/logo.png" width="20" height="20" style="vertical-align:middle;" /> **Dialex AI** | 🟡 **Client Release** | **`v1.0.0`** | [`dialex-ai/CHANGELOG.md`](./dialex-ai/CHANGELOG.md) | [`dialex-ai/README.md`](./dialex-ai/README.md) | `brew install --cask dialex-ai-bundled` |
+| **Artix AI** | 🔵 **Enterprise Track** | **`v0.11.0-enterprise`** | [`artix-ai/CHANGELOG.md`](./artix-ai/CHANGELOG.md) | [`artix-ai/README.md`](./artix-ai/README.md) | `brew install keltstone/tap/artix` |
+| **Kritix AI** | 🔵 **Enterprise Track** | **`v0.3.0-enterprise`** | [`kritix-ai/CHANGELOG.md`](./kritix-ai/CHANGELOG.md) | [`kritix-ai/README.md`](./kritix-ai/README.md) | `brew install keltstone/tap/kritix` |
+| **Socratix Engine** | 🟢 **Engine GA** | **`v1.0.0`** | [`socratix-engine/CHANGELOG.md`](./socratix-engine/CHANGELOG.md) | [`socratix-engine/README.md`](./socratix-engine/README.md) | `brew install keltstone/tap/socratix` |
 
 👉 **[Explore the Complete Technical Wiki Documentation Suite](docs/README.md)** — In-depth architectural guides, user manuals, and developer documentation for every engine.
 
@@ -60,15 +67,15 @@ See the full [**Installation & Packaging Guide**](docs/INSTALLATION_AND_PACKAGIN
 
 Install via shorthand tap (auto-taps on install):
 ```bash
-brew install kolta-labs/tap/sentinix # Sentinix security review & PR gate
-brew install kolta-labs/tap/artix    # Artix coding CLI
-brew install kolta-labs/tap/kritix   # Kritix QA studio CLI
-brew install kolta-labs/tap/socratix # Deliberation engine
+brew install keltstone/tap/sentinix # Sentinix security review & PR gate
+brew install keltstone/tap/artix    # Artix coding CLI
+brew install keltstone/tap/kritix   # Kritix QA studio CLI
+brew install keltstone/tap/socratix # Deliberation engine
 ```
 
 Alternatively, tap manually:
 ```bash
-brew tap koltalabs/dialexai https://github.com/Kolta-Labs/DialexAI
+brew tap keltstone/dialexai https://github.com/Keltstone/DialexAI
 
 # CLI Binaries
 brew install sentinix            # Continuous security review & PR gate
@@ -86,7 +93,7 @@ brew install --cask kritix-ai         # Kritix AI Testing Studio
 ### 2. Universal One-Line Installer
 ```bash
 # Automated installer (detects existing engine, asks express permission to update or skip)
-curl -fsSL https://raw.githubusercontent.com/Kolta-Labs/DialexAI/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Keltstone/DialexAI/main/scripts/install.sh | bash
 
 # Or from clone:
 ./scripts/install.sh --all --with-engine
