@@ -1,0 +1,15 @@
+name: Scribex check
+description: Fail the PR when anchored docs are stale or dead. Impact gate skips when no public contract changed.
+inputs:
+  base:
+    description: Git ref to diff against
+    default: origin/main
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with: { go-version: stable }
+    - shell: bash
+      run: |
+        go install scribex/cmd/scribex@latest 2>/dev/null || (cd "${{ github.action_path }}/.." && go build -o "$RUNNER_TEMP/scribex" ./cmd/scribex && echo "$RUNNER_TEMP" >> "$GITHUB_PATH")
+        scribex check -base "${{ inputs.base }}"

@@ -3,6 +3,7 @@ go 1.27.0
 use (
 	./artix-ai
 	./kritix-ai
+	./scribex-ai
 	./sentinix-ai
 	./socratix-engine
 )
