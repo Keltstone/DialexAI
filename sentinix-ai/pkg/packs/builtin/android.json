@@ -148,6 +148,582 @@
     "*.java"
    ],
    "pattern": "(execSQL|rawQuery)\\(\\s*\"[^\"]*\\$"
+  },
+  {
+   "id": "pending-intent-mutability",
+   "severity": "high",
+   "cwe": "CWE-927",
+   "message": "PendingIntent created with flag 0 allows malicious intent redirection",
+   "remediation": "Specify PendingIntent.FLAG_IMMUTABLE (or FLAG_MUTABLE if explicitly required).",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "PendingIntent\\.(?:getActivity|getBroadcast|getService|getForegroundService)\\([^)]*\\b0\\s*\\)"
+  },
+  {
+   "id": "tapjacking-protection",
+   "severity": "medium",
+   "cwe": "CWE-1021",
+   "message": "Touch filtering explicitly disabled allowing tapjacking and overlay attacks",
+   "remediation": "Set filterTouchesWhenObscured to true.",
+   "files": [
+    "*.kt",
+    "*.java",
+    "*.xml"
+   ],
+   "pattern": "(?:setFilterTouchesWhenObscured\\(false\\)|android:filterTouchesWhenObscured=\"false\")"
+  },
+  {
+   "id": "hardcoded-keystore-password",
+   "severity": "high",
+   "cwe": "CWE-798",
+   "message": "Hardcoded password used to load KeyStore",
+   "remediation": "Do not hardcode KeyStore passwords; for AndroidKeyStore pass null.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "keyStore\\.load\\s*\\([^,]+,\\s*\"[^\"]+\"\\.toCharArray\\(\\)\\)"
+  },
+  {
+   "id": "insecure-broadcast-receiver",
+   "severity": "medium",
+   "cwe": "CWE-925",
+   "message": "Dynamic BroadcastReceiver registered without explicit export flags",
+   "remediation": "Use ContextCompat.registerReceiver with RECEIVER_NOT_EXPORTED.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "registerReceiver\\s*\\([^,]+,\\s*[^,)]+\\s*\\)",
+   "unless": "RECEIVER_NOT_EXPORTED|RECEIVER_EXPORTED"
+  },
+  {
+   "id": "android/external-storage-write",
+   "severity": "high",
+   "cwe": "CWE-276",
+   "message": "Direct access to shared external storage exposes private app data to other applications",
+   "remediation": "Use internal app storage (context.filesDir) or Android MediaStore / Storage Access Framework.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "Environment\\.getExternalStorage(?:Public)?Directory\\("
+  },
+  {
+   "id": "android/static-iv-cbc",
+   "severity": "critical",
+   "cwe": "CWE-329",
+   "message": "Static or hardcoded Initialization Vector (IV) enables cryptographic replay and plaintext recovery",
+   "remediation": "Generate a unique cryptographically random IV using SecureRandom().nextBytes().",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "IvParameterSpec\\s*\\(\\s*(?:\"[^\"]+\"|[^\\n,)]*\\.toByteArray\\(\\)|new\\s+byte\\[\\])"
+  },
+  {
+   "id": "android/insecure-random",
+   "severity": "medium",
+   "cwe": "CWE-338",
+   "message": "Pseudo-random generator (java.util.Random / kotlin.random.Random) used for security token or cryptographic key",
+   "remediation": "Use java.security.SecureRandom for all security-sensitive values.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "(?i)(?:token|nonce|secret|key|salt|iv)\\s*[:=].*(?:java\\.util\\.Random|kotlin\\.random\\.Random)"
+  },
+  {
+   "id": "android/screen-recording-sensitive-screen",
+   "severity": "medium",
+   "cwe": "CWE-200",
+   "message": "FLAG_SECURE cleared on Activity window, allowing unauthorized screenshots and screen recording",
+   "remediation": "Keep WindowManager.LayoutParams.FLAG_SECURE enabled on sensitive authentication/financial screens.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "clearFlags\\s*\\([^)]*FLAG_SECURE"
+  },
+  {
+   "id": "android/clipboard-data-leak",
+   "severity": "medium",
+   "cwe": "CWE-200",
+   "message": "Sensitive data placed into system clipboard without EXTRA_IS_SENSITIVE flag",
+   "remediation": "Attach PersistableBundle with ClipDescription.EXTRA_IS_SENSITIVE to mask in clipboard history.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "clipboard\\.setPrimaryClip\\s*\\(",
+   "unless": "EXTRA_IS_SENSITIVE|isSensitive"
+  },
+  {
+   "id": "android/implicit-intent-broadcast",
+   "severity": "high",
+   "cwe": "CWE-927",
+   "message": "Implicit broadcast sent without targeting a specific package name",
+   "remediation": "Call intent.setPackage(context.packageName) or use explicit Intent.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "sendBroadcast\\s*\\(\\s*Intent\\s*\\([^)]*\\)\\s*\\)",
+   "unless": "setPackage"
+  },
+  {
+   "id": "android/sticky-broadcast-deprecated",
+   "severity": "high",
+   "cwe": "CWE-925",
+   "message": "sendStickyBroadcast is deprecated and susceptible to interception and spoofing",
+   "remediation": "Use regular broadcasts with permissions or dynamic state observers.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "\\bsendSticky(?:Ordered)?Broadcast\\s*\\("
+  },
+  {
+   "id": "android/intent-redirection",
+   "severity": "high",
+   "cwe": "CWE-926",
+   "message": "Untrusted Intent forwarded directly to startActivity enables Intent redirection attacks",
+   "remediation": "Validate component target against explicit whitelist before forwarding intents.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "startActivity\\s*\\(\\s*(?:getIntent\\(\\)\\.|intent\\.)getParcelableExtra\\("
+  },
+  {
+   "id": "android/content-provider-grant-uri-all",
+   "severity": "high",
+   "cwe": "CWE-732",
+   "message": "ContentProvider sets grantUriPermissions=true without restricting paths via grant-uri-permission",
+   "remediation": "Limit URI permission delegation to specific subpaths with <grant-uri-permission> tags.",
+   "files": [
+    "AndroidManifest.xml"
+   ],
+   "pattern": "<provider\\b[^>]*android:grantUriPermissions=\"true\"",
+   "unless": "grant-uri-permission"
+  },
+  {
+   "id": "android/custom-permission-normal",
+   "severity": "high",
+   "cwe": "CWE-276",
+   "message": "Custom permission defined with protectionLevel=normal can be granted automatically to third-party apps",
+   "remediation": "Use android:protectionLevel=\"signature\" for private internal permissions.",
+   "files": [
+    "AndroidManifest.xml"
+   ],
+   "pattern": "<permission\\b[^>]*android:protectionLevel=\"normal\""
+  },
+  {
+   "id": "android/dynamic-code-loading",
+   "severity": "critical",
+   "cwe": "CWE-94",
+   "message": "Dynamic code execution via DexClassLoader / PathClassLoader introduces remote code execution risk",
+   "remediation": "Avoid dynamic bytecode loading or verify code signing certificates cryptographically.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "(?:DexClassLoader|PathClassLoader|InMemoryDexClassLoader)\\s*\\("
+  },
+  {
+   "id": "android/biometric-weak-crypto",
+   "severity": "high",
+   "cwe": "CWE-287",
+   "message": "BiometricPrompt authenticated without CryptoObject; vulnerable to instrumentation and hooking bypasses",
+   "remediation": "Pass BiometricPrompt.CryptoObject(cipher) into authenticate() to unlock cryptographic keys.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "biometricPrompt\\.authenticate\\s*\\(\\s*promptInfo\\s*\\)"
+  },
+  {
+   "id": "android/hardcoded-aes-key",
+   "severity": "critical",
+   "cwe": "CWE-798",
+   "message": "Hardcoded byte array or string used as SecretKeySpec",
+   "remediation": "Generate and retrieve AES keys from AndroidKeyStore.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "SecretKeySpec\\s*\\(\\s*(?:\"[^\"]+\"|[^\\n,)]*\\.toByteArray\\(\\)|new\\s+byte\\[\\])"
+  },
+  {
+   "id": "android/rsa-no-padding",
+   "severity": "critical",
+   "cwe": "CWE-327",
+   "message": "RSA cipher initialized without OAEP padding (NoPadding enables chosen-ciphertext attacks)",
+   "remediation": "Use RSA/ECB/OAEPWithSHA-256AndMGF1Padding.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "Cipher\\.getInstance\\s*\\(\\s*\"RSA/(?:ECB|NONE)/NoPadding\""
+  },
+  {
+   "id": "android/webview-save-passwords",
+   "severity": "medium",
+   "cwe": "CWE-522",
+   "message": "WebView password auto-save enabled",
+   "remediation": "Disable password saving with webSettings.setSavePassword(false).",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "(?:setSavePassword\\(true\\)|savePassword\\s*=\\s*true)"
+  },
+  {
+   "id": "android/custom-hostname-verifier-all",
+   "severity": "critical",
+   "cwe": "CWE-295",
+   "message": "HostnameVerifier blindly trusts any host, enabling Man-in-the-Middle (MITM) attacks",
+   "remediation": "Use HttpsURLConnection.getDefaultHostnameVerifier() or pin explicit domain certificates.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "HostnameVerifier\\s*\\{[^}]*true\\s*\\}|ALLOW_ALL_HOSTNAME_VERIFIER",
+   "multiline": true
+  },
+  {
+   "id": "android/network-security-config-override-pins",
+   "severity": "high",
+   "cwe": "CWE-295",
+   "message": "Network Security Config specifies overridePins=true, permitting certificate pin bypasses",
+   "remediation": "Disable overridePins or restrict overrides strictly to debug-overrides.",
+   "files": [
+    "*.xml"
+   ],
+   "pattern": "<certificates\\b[^>]*overridePins=\"true\""
+  },
+  {
+   "id": "android/sensitive-log-leak",
+   "severity": "high",
+   "cwe": "CWE-532",
+   "message": "Sensitive credentials, passwords, or tokens printed to logcat",
+   "remediation": "Strip all authentication tokens, credentials, and PII from log output.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "\\b(?:Log\\.[dviwe]|println|Timber\\.[dviwe])\\s*\\([^)]*(?:password|passwd|authToken|bearerToken|apiKey|secretKey|creditCard|cvv)\\b"
+  },
+  {
+   "id": "android/hardcoded-google-api-key",
+   "severity": "high",
+   "cwe": "CWE-798",
+   "message": "Hardcoded Google/Firebase API key detected in source code or manifest",
+   "remediation": "Inject keys at build time via BuildConfig or environment variables and restrict key scopes in Google Cloud Console.",
+   "files": [
+    "*.kt",
+    "*.java",
+    "*.xml",
+    "AndroidManifest.xml"
+   ],
+   "pattern": "AIzaSy[0-9A-Za-z-_]{33}"
+  },
+  {
+   "id": "android/task-hijacking-strandhogg",
+   "severity": "medium",
+   "cwe": "CWE-1021",
+   "message": "Activity launchMode=singleTask without empty taskAffinity allows StrandHogg task hijacking",
+   "remediation": "Add android:taskAffinity=\"\" to singleTask activities.",
+   "files": [
+    "AndroidManifest.xml"
+   ],
+   "pattern": "<activity\\b[^>]*android:launchMode=\"singleTask\"",
+   "unless": "android:taskAffinity"
+  },
+  {
+   "id": "android/biometric-enrollment-invalidation",
+   "severity": "high",
+   "cwe": "CWE-287",
+   "message": "KeyGenParameterSpec explicitly disables key invalidation upon new biometric enrollment",
+   "remediation": "Set setInvalidatedByBiometricEnrollment(true) so cryptographic keys are wiped if new fingerprints are enrolled.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "\\.setInvalidatedByBiometricEnrollment\\s*\\(\\s*false\\s*\\)"
+  },
+  {
+   "id": "android/securerandom-fixed-seed",
+   "severity": "critical",
+   "cwe": "CWE-330",
+   "message": "SecureRandom initialized with a fixed seed undermines cryptographic entropy",
+   "remediation": "Do not pass a constant seed to SecureRandom; rely on system default hardware entropy.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "SecureRandom\\s*\\([^)]*\\)\\.setSeed\\s*\\("
+  },
+  {
+   "id": "android/app-link-missing-autoverify",
+   "severity": "high",
+   "cwe": "CWE-601",
+   "message": "HTTP/HTTPS intent filter missing autoVerify=true allows unauthorized apps to hijack App Links and OAuth callbacks",
+   "remediation": "Add android:autoVerify=\"true\" to intent-filter handling HTTP/HTTPS schemes.",
+   "files": [
+    "AndroidManifest.xml"
+   ],
+   "pattern": "<intent-filter\\b[^>]*>",
+   "unless": "android:autoVerify=\"true\""
+  },
+  {
+   "id": "android/custom-scheme-oauth",
+   "severity": "high",
+   "cwe": "CWE-926",
+   "message": "Custom scheme used for OAuth or authentication redirect; vulnerable to token theft by rogue applications",
+   "remediation": "Use verified HTTPS App Links rather than custom URI schemes for authentication redirects.",
+   "files": [
+    "AndroidManifest.xml"
+   ],
+   "pattern": "android:scheme=\"[a-zA-Z0-9_-]+\"[^>]*android:host=\"(?:oauth|auth|callback|login)\""
+  },
+  {
+   "id": "android/keyboard-personalized-learning-leak",
+   "severity": "medium",
+   "cwe": "CWE-200",
+   "message": "Sensitive input field missing flagNoPersonalizedLearning; third-party keyboards may log keystrokes to cloud dictionaries",
+   "remediation": "Add flagNoPersonalizedLearning to imeOptions.",
+   "files": [
+    "*.xml"
+   ],
+   "pattern": "imeOptions\\s*=\\s*\"[^\"]*\"",
+   "unless": "flagNoPersonalizedLearning|noPersonalizedLearning"
+  },
+  {
+   "id": "android/notification-lockscreen-leak",
+   "severity": "high",
+   "cwe": "CWE-200",
+   "message": "Notification set with VISIBILITY_PUBLIC exposes OTPs or sensitive user data on locked screens",
+   "remediation": "Set notification visibility to VISIBILITY_PRIVATE or VISIBILITY_SECRET.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "setVisibility\\s*\\(\\s*NotificationCompat\\.VISIBILITY_PUBLIC\\s*\\)"
+  },
+  {
+   "id": "android/backup-rule-includes-credentials",
+   "severity": "high",
+   "cwe": "CWE-530",
+   "message": "Backup configuration includes sensitive credential storage or all SharedPreferences in cloud backup",
+   "remediation": "Exclude files containing authentication tokens and cryptographic keys from backup rules.",
+   "files": [
+    "*.xml"
+   ],
+   "pattern": "<include\\b[^>]*domain=\"(?:sharedpref|root|database)\"[^>]*path=\"[^\"]*(?:token|auth|key|secret|credential|\\.)[^\"]*\""
+  },
+  {
+   "id": "android/content-provider-path-traversal",
+   "severity": "high",
+   "cwe": "CWE-22",
+   "message": "ContentProvider openFileHelper directly uses getLastPathSegment without canonical path bounds validation",
+   "remediation": "Verify canonicalPath starts with designated base directory before returning file descriptor.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "openFile(?:Helper)?\\s*\\([^)]*getLastPathSegment\\(\\)",
+   "unless": "canonicalPath|getCanonicalPath"
+  },
+  {
+   "id": "android/content-resolver-sql-injection",
+   "severity": "high",
+   "cwe": "CWE-89",
+   "message": "ContentResolver query built with string concatenation in selection parameter",
+   "remediation": "Use parameterized selection arguments (?) rather than string concatenation.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "contentResolver\\.query\\s*\\([^,]+,\\s*[^,]+,\\s*[^,]*\\+\\s*[^,]+"
+  },
+  {
+   "id": "android/unsafe-native-load",
+   "severity": "critical",
+   "cwe": "CWE-829",
+   "message": "System.load loading native library from writable app or storage path",
+   "remediation": "Bundle libraries in APK / AAB and use System.loadLibrary() to load from read-only system library path.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "System\\.load\\s*\\(\\s*(?:context\\.|Environment\\.|\"/data/|getExternal)"
+  },
+  {
+   "id": "android/insecure-network-security-cleartext-domain",
+   "severity": "high",
+   "cwe": "CWE-319",
+   "message": "Network Security Config domain-config enables cleartextTrafficPermitted=true",
+   "remediation": "Disable cleartext HTTP on all production domains.",
+   "files": [
+    "*.xml"
+   ],
+   "pattern": "<domain-config\\b[^>]*cleartextTrafficPermitted=\"true\""
+  },
+  {
+   "id": "android/trustkit-wildcard-pins",
+   "severity": "high",
+   "cwe": "CWE-295",
+   "message": "Certificate pinning configured with legacy SHA-1 hash instead of SHA-256",
+   "remediation": "Use sha256/ pin hashes and supply a backup pin per RFC 7469.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "CertificatePinner\\.Builder\\(\\)\\.add\\([^,]+,\\s*\"sha1/"
+  },
+  {
+   "id": "android/coroutine-unconfined-dispatcher-auth",
+   "severity": "medium",
+   "cwe": "CWE-662",
+   "message": "Authentication or token state mutation executed on Dispatchers.Unconfined risks cross-thread race conditions",
+   "remediation": "Use Dispatchers.Default or a single-threaded mutex dispatcher for state mutations.",
+   "files": [
+    "*.kt"
+   ],
+   "pattern": "withContext\\s*\\(\\s*Dispatchers\\.Unconfined\\s*\\)\\s*\\{[^}]*(?:token|auth|session|password)"
+  },
+  {
+   "id": "android/shared-user-id",
+   "severity": "high",
+   "cwe": "CWE-250",
+   "message": "sharedUserId attribute breaks Android app sandbox isolation and is deprecated",
+   "remediation": "Remove android:sharedUserId from manifest to enforce strict process sandboxing.",
+   "files": [
+    "AndroidManifest.xml"
+   ],
+   "pattern": "android:sharedUserId\\s*="
+  },
+  {
+   "id": "android/test-only-flag",
+   "severity": "high",
+   "cwe": "CWE-489",
+   "message": "android:testOnly=true enabled in application manifest",
+   "remediation": "Remove android:testOnly before distributing release APK.",
+   "files": [
+    "AndroidManifest.xml"
+   ],
+   "pattern": "android:testOnly\\s*=\\s*\"true\""
+  },
+  {
+   "id": "android/mock-location-allowed",
+   "severity": "medium",
+   "cwe": "CWE-200",
+   "message": "Mock location mode explicitly enabled or accepted without anti-spoofing verification",
+   "remediation": "Disable mock provider mode and verify isFromMockProvider in production fraud detection.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "(?:setMockMode\\s*\\(\\s*true\\s*\\)|setTestProviderEnabled\\s*\\([^,]+,\\s*true\\))"
+  },
+  {
+   "id": "android/unencrypted-room-database",
+   "severity": "high",
+   "cwe": "CWE-312",
+   "message": "Room database constructed without SQLCipher encryption factory",
+   "remediation": "Encrypt SQLite database with SQLCipher openHelperFactory(SupportFactory(passphrase)).",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "Room\\.databaseBuilder\\s*\\([^)]*\\)\\s*\\.build\\(\\)",
+   "unless": "openHelperFactory|SupportFactory|SQLCipher"
+  },
+  {
+   "id": "android/keystore-user-auth-timeout-infinite",
+   "severity": "high",
+   "cwe": "CWE-305",
+   "message": "KeyGenParameterSpec sets user authentication timeout to 0 (permanently unlocked upon first auth)",
+   "remediation": "Specify a non-zero timeout in seconds or require per-operation authentication.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "setUserAuthenticationParameters\\s*\\(\\s*0\\s*,"
+  },
+  {
+   "id": "android/unbounded-broadcast-permission",
+   "severity": "medium",
+   "cwe": "CWE-732",
+   "message": "registerReceiver invoked without receiver permission parameter",
+   "remediation": "Supply an explicit signature permission when registering dynamic receivers.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "registerReceiver\\s*\\([^,]+,\\s*[^,]+,\\s*null\\s*,\\s*null\\s*\\)"
+  },
+  {
+   "id": "android/insecure-webview-cache",
+   "severity": "low",
+   "cwe": "CWE-312",
+   "message": "Deprecated AppCache enabled in WebView",
+   "remediation": "Do not enable AppCache; use standard HTTP caching or set LOAD_NO_CACHE.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "setAppCacheEnabled\\s*\\(\\s*true\\s*\\)"
+  },
+  {
+   "id": "android/ssl-error-toast-exposure",
+   "severity": "low",
+   "cwe": "CWE-209",
+   "message": "onReceivedSslError displays raw SSL error text to user via Toast, leaking internal infrastructure details",
+   "remediation": "Log error securely internally and show generic error message to user.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "onReceivedSslError\\([^)]*\\)\\s*\\{[^}]*Toast\\.makeText"
+  },
+  {
+   "id": "android/file-provider-external-path",
+   "severity": "high",
+   "cwe": "CWE-552",
+   "message": "FileProvider exposes root of external storage via path=\".\"",
+   "remediation": "Restrict FileProvider paths to specific sub-directories rather than whole root.",
+   "files": [
+    "*.xml"
+   ],
+   "pattern": "<external-(?:path|files-path|cache-path)\\b[^>]*path=\"\\.\""
+  },
+  {
+   "id": "android/weak-kdf-iteration-count",
+   "severity": "high",
+   "cwe": "CWE-326",
+   "message": "PBKDF2 iteration count below 10,000 allows offline GPU dictionary attacks",
+   "remediation": "Use at least 100,000 iterations for PBKDF2 in modern Android applications.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "PBEKeySpec\\s*\\([^,]+,\\s*[^,]+,\\s*(?:[1-9][0-9]{0,3}|[1-9][0-9]{4})\\s*,"
+  },
+  {
+   "id": "android/insecure-bluetooth-insecure-rfcomm",
+   "severity": "high",
+   "cwe": "CWE-319",
+   "message": "createInsecureRfcommSocketToServiceRecord creates unencrypted Bluetooth connection without pairing",
+   "remediation": "Use createRfcommSocketToServiceRecord() to enforce Bluetooth encryption and pairing.",
+   "files": [
+    "*.kt",
+    "*.java"
+   ],
+   "pattern": "createInsecureRfcommSocketToServiceRecord\\s*\\("
   }
  ],
  "tests": [
@@ -222,6 +798,294 @@
    "file": "A.kt",
    "bad": "db.rawQuery(\"select * from t where n=$n\", null)",
    "good": "db.rawQuery(\"select * from t where n=?\", arrayOf(n))"
+  },
+  {
+   "rule": "pending-intent-mutability",
+   "file": "A.kt",
+   "bad": "val pi = PendingIntent.getActivity(context, 0, intent, 0)",
+   "good": "val pi = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE)"
+  },
+  {
+   "rule": "tapjacking-protection",
+   "file": "A.kt",
+   "bad": "view.setFilterTouchesWhenObscured(false)",
+   "good": "view.setFilterTouchesWhenObscured(true)"
+  },
+  {
+   "rule": "hardcoded-keystore-password",
+   "file": "A.kt",
+   "bad": "keyStore.load(stream, \"HardcodedSecretKey123!\".toCharArray())",
+   "good": "keyStore.load(null)"
+  },
+  {
+   "rule": "insecure-broadcast-receiver",
+   "file": "A.kt",
+   "bad": "context.registerReceiver(receiver, filter)",
+   "good": "ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)"
+  },
+  {
+   "rule": "android/external-storage-write",
+   "file": "FileManager.kt",
+   "bad": "val file = File(Environment.getExternalStorageDirectory(), \"data.txt\")",
+   "good": "val file = File(context.filesDir, \"data.txt\")"
+  },
+  {
+   "rule": "android/static-iv-cbc",
+   "file": "Crypto.kt",
+   "bad": "val iv = IvParameterSpec(\"1234567890123456\".toByteArray())",
+   "good": "val iv = IvParameterSpec(randomIV)"
+  },
+  {
+   "rule": "android/insecure-random",
+   "file": "Auth.kt",
+   "bad": "val token = java.util.Random().nextLong().toString()",
+   "good": "val token = SecureRandom().nextLong().toString()"
+  },
+  {
+   "rule": "android/screen-recording-sensitive-screen",
+   "file": "PaymentActivity.kt",
+   "bad": "window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)",
+   "good": "window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)"
+  },
+  {
+   "rule": "android/clipboard-data-leak",
+   "file": "ClipUtil.kt",
+   "bad": "clipboard.setPrimaryClip(ClipData.newPlainText(\"auth\", token))",
+   "good": "clipboard.setPrimaryClip(ClipData.newPlainText(\"auth\", token).apply { description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) } })"
+  },
+  {
+   "rule": "android/implicit-intent-broadcast",
+   "file": "Notifier.kt",
+   "bad": "context.sendBroadcast(Intent(\"com.example.EVENT\"))",
+   "good": "context.sendBroadcast(Intent(\"com.example.EVENT\").setPackage(context.packageName))"
+  },
+  {
+   "rule": "android/sticky-broadcast-deprecated",
+   "file": "Legacy.kt",
+   "bad": "context.sendStickyBroadcast(intent)",
+   "good": "context.sendBroadcast(intent, \"com.example.PERMISSION\")"
+  },
+  {
+   "rule": "android/intent-redirection",
+   "file": "DeepLinkActivity.kt",
+   "bad": "startActivity(intent.getParcelableExtra(\"next\"))",
+   "good": "if (isAllowed(target)) startActivity(safeIntent)"
+  },
+  {
+   "rule": "android/content-provider-grant-uri-all",
+   "file": "AndroidManifest.xml",
+   "bad": "<provider android:name=\".AppProvider\" android:exported=\"false\" android:grantUriPermissions=\"true\"></provider>",
+   "good": "<provider android:name=\".AppProvider\" android:exported=\"false\" android:grantUriPermissions=\"true\"><grant-uri-permission android:pathPrefix=\"/safe\"/></provider>"
+  },
+  {
+   "rule": "android/custom-permission-normal",
+   "file": "AndroidManifest.xml",
+   "bad": "<permission android:name=\"com.example.DATA\" android:protectionLevel=\"normal\"/>",
+   "good": "<permission android:name=\"com.example.DATA\" android:protectionLevel=\"signature\"/>"
+  },
+  {
+   "rule": "android/dynamic-code-loading",
+   "file": "PluginLoader.kt",
+   "bad": "val loader = DexClassLoader(dexPath, optDir, null, parent)",
+   "good": "val loader = context.classLoader"
+  },
+  {
+   "rule": "android/biometric-weak-crypto",
+   "file": "Biometrics.kt",
+   "bad": "biometricPrompt.authenticate(promptInfo)",
+   "good": "biometricPrompt.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher))"
+  },
+  {
+   "rule": "android/hardcoded-aes-key",
+   "file": "Vault.kt",
+   "bad": "val key = SecretKeySpec(\"MyHardcodedAESKey123\".toByteArray(), \"AES\")",
+   "good": "val key = keyStore.getKey(ALIAS, null) as SecretKey"
+  },
+  {
+   "rule": "android/rsa-no-padding",
+   "file": "RsaUtil.kt",
+   "bad": "val cipher = Cipher.getInstance(\"RSA/ECB/NoPadding\")",
+   "good": "val cipher = Cipher.getInstance(\"RSA/ECB/OAEPWithSHA-256AndMGF1Padding\")"
+  },
+  {
+   "rule": "android/webview-save-passwords",
+   "file": "BrowserActivity.kt",
+   "bad": "webSettings.setSavePassword(true)",
+   "good": "webSettings.setSavePassword(false)"
+  },
+  {
+   "rule": "android/custom-hostname-verifier-all",
+   "file": "TlsHelper.kt",
+   "bad": "val verifier = HostnameVerifier { _, _ -> true }",
+   "good": "val verifier = HttpsURLConnection.getDefaultHostnameVerifier()"
+  },
+  {
+   "rule": "android/network-security-config-override-pins",
+   "file": "network_security_config.xml",
+   "bad": "<certificates src=\"user\" overridePins=\"true\"/>",
+   "good": "<certificates src=\"system\" overridePins=\"false\"/>"
+  },
+  {
+   "rule": "android/sensitive-log-leak",
+   "file": "LoginManager.kt",
+   "bad": "Log.d(\"AUTH\", \"user password=\" + password)",
+   "good": "Log.d(\"AUTH\", \"user authentication completed\")"
+  },
+  {
+   "rule": "android/hardcoded-google-api-key",
+   "file": "MapConfig.kt",
+   "bad": "val key = \"AIzaSyB1234567890abcdefghijklmnopqrstuv\"",
+   "good": "val key = BuildConfig.MAPS_API_KEY"
+  },
+  {
+   "rule": "android/task-hijacking-strandhogg",
+   "file": "AndroidManifest.xml",
+   "bad": "<activity android:name=\".MainActivity\" android:launchMode=\"singleTask\"></activity>",
+   "good": "<activity android:name=\".MainActivity\" android:launchMode=\"singleTask\" android:taskAffinity=\"\"></activity>"
+  },
+  {
+   "rule": "android/biometric-enrollment-invalidation",
+   "file": "KeyGen.kt",
+   "bad": "builder.setInvalidatedByBiometricEnrollment(false)",
+   "good": "builder.setInvalidatedByBiometricEnrollment(true)"
+  },
+  {
+   "rule": "android/securerandom-fixed-seed",
+   "file": "SeedGen.kt",
+   "bad": "SecureRandom().setSeed(123456L)",
+   "good": "val rng = SecureRandom()"
+  },
+  {
+   "rule": "android/app-link-missing-autoverify",
+   "file": "AndroidManifest.xml",
+   "bad": "<intent-filter><action android:name=\"android.intent.action.VIEW\"/></intent-filter>",
+   "good": "<intent-filter android:autoVerify=\"true\"><action android:name=\"android.intent.action.VIEW\"/></intent-filter>"
+  },
+  {
+   "rule": "android/custom-scheme-oauth",
+   "file": "AndroidManifest.xml",
+   "bad": "<data android:scheme=\"myapp\" android:host=\"oauth\"/>",
+   "good": "<data android:scheme=\"https\" android:host=\"auth.example.com\"/>"
+  },
+  {
+   "rule": "android/keyboard-personalized-learning-leak",
+   "file": "input.xml",
+   "bad": "<EditText android:imeOptions=\"actionDone\"/>",
+   "good": "<EditText android:imeOptions=\"actionDone|flagNoPersonalizedLearning\"/>"
+  },
+  {
+   "rule": "android/notification-lockscreen-leak",
+   "file": "Notify.kt",
+   "bad": "builder.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)",
+   "good": "builder.setVisibility(NotificationCompat.VISIBILITY_PRIVATE)"
+  },
+  {
+   "rule": "android/backup-rule-includes-credentials",
+   "file": "backup_rules.xml",
+   "bad": "<include domain=\"sharedpref\" path=\"auth_tokens.xml\"/>",
+   "good": "<exclude domain=\"sharedpref\" path=\"auth_tokens.xml\"/>"
+  },
+  {
+   "rule": "android/content-provider-path-traversal",
+   "file": "SafeProvider.kt",
+   "bad": "return openFileHelper(uri, uri.getLastPathSegment())",
+   "good": "val canonical = file.canonicalPath; return pfd"
+  },
+  {
+   "rule": "android/content-resolver-sql-injection",
+   "file": "Resolver.kt",
+   "bad": "contentResolver.query(uri, null, \"user = \" + user, null)",
+   "good": "contentResolver.query(uri, null, \"user = ?\", arrayOf(user))"
+  },
+  {
+   "rule": "android/unsafe-native-load",
+   "file": "NativeBridge.kt",
+   "bad": "System.load(context.filesDir.path + \"/lib.so\")",
+   "good": "System.loadLibrary(\"securelib\")"
+  },
+  {
+   "rule": "android/insecure-network-security-cleartext-domain",
+   "file": "network_security_config.xml",
+   "bad": "<domain-config cleartextTrafficPermitted=\"true\"><domain>api.corp.test</domain></domain-config>",
+   "good": "<domain-config cleartextTrafficPermitted=\"false\"><domain>api.corp.test</domain></domain-config>"
+  },
+  {
+   "rule": "android/trustkit-wildcard-pins",
+   "file": "PinConfig.kt",
+   "bad": "CertificatePinner.Builder().add(\"bank.com\", \"sha1/AAABBBCCC=\")",
+   "good": "CertificatePinner.Builder().add(\"bank.com\", \"sha256/AAABBBCCC=\")"
+  },
+  {
+   "rule": "android/coroutine-unconfined-dispatcher-auth",
+   "file": "AuthStore.kt",
+   "bad": "withContext(Dispatchers.Unconfined) { session.token = t }",
+   "good": "withContext(Dispatchers.Default) { session.token = t }"
+  },
+  {
+   "rule": "android/shared-user-id",
+   "file": "AndroidManifest.xml",
+   "bad": "<manifest android:sharedUserId=\"com.example.shared\">",
+   "good": "<manifest>"
+  },
+  {
+   "rule": "android/test-only-flag",
+   "file": "AndroidManifest.xml",
+   "bad": "<application android:testOnly=\"true\">",
+   "good": "<application android:testOnly=\"false\">"
+  },
+  {
+   "rule": "android/mock-location-allowed",
+   "file": "LocService.kt",
+   "bad": "locationManager.setMockMode(true)",
+   "good": "locationManager.setMockMode(false)"
+  },
+  {
+   "rule": "android/unencrypted-room-database",
+   "file": "AppDb.kt",
+   "bad": "Room.databaseBuilder(context, AppDatabase::class.java, \"bank.db\").build()",
+   "good": "Room.databaseBuilder(context, AppDatabase::class.java, \"bank.db\").openHelperFactory(SupportFactory(p)).build()"
+  },
+  {
+   "rule": "android/keystore-user-auth-timeout-infinite",
+   "file": "KeySpec.kt",
+   "bad": "spec.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)",
+   "good": "spec.setUserAuthenticationParameters(30, KeyProperties.AUTH_BIOMETRIC_STRONG)"
+  },
+  {
+   "rule": "android/unbounded-broadcast-permission",
+   "file": "Receiver.kt",
+   "bad": "context.registerReceiver(receiver, filter, null, null)",
+   "good": "context.registerReceiver(receiver, filter, \"com.example.PRIVATE_PERM\", null)"
+  },
+  {
+   "rule": "android/insecure-webview-cache",
+   "file": "Web.kt",
+   "bad": "webSettings.setAppCacheEnabled(true)",
+   "good": "webSettings.setAppCacheEnabled(false)"
+  },
+  {
+   "rule": "android/ssl-error-toast-exposure",
+   "file": "SslHandler.kt",
+   "bad": "fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) { Toast.makeText(ctx, error.toString(), Toast.LENGTH_LONG).show() }",
+   "good": "fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) { handler.cancel() }"
+  },
+  {
+   "rule": "android/file-provider-external-path",
+   "file": "file_paths.xml",
+   "bad": "<paths><external-path name=\"all\" path=\".\"/></paths>",
+   "good": "<paths><files-path name=\"safe\" path=\"shared/\"/></paths>"
+  },
+  {
+   "rule": "android/weak-kdf-iteration-count",
+   "file": "Kdf.kt",
+   "bad": "val spec = PBEKeySpec(password, salt, 1000, 256)",
+   "good": "val spec = PBEKeySpec(password, salt, 100000, 256)"
+  },
+  {
+   "rule": "android/insecure-bluetooth-insecure-rfcomm",
+   "file": "Bluetooth.kt",
+   "bad": "val socket = device.createInsecureRfcommSocketToServiceRecord(MY_UUID)",
+   "good": "val socket = device.createRfcommSocketToServiceRecord(MY_UUID)"
   }
  ]
 }

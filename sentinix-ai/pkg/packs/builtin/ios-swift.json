@@ -1,0 +1,152 @@
+{
+  "name": "ios-swift",
+  "version": "1.0.0",
+  "stacks": [
+    "ios",
+    "swift"
+  ],
+  "author": "Kolta Labs",
+  "rules": [
+    {
+      "id": "ios/ats-disabled",
+      "severity": "high",
+      "cwe": "CWE-319",
+      "message": "App Transport Security (ATS) disabled via NSAllowsArbitraryLoads",
+      "remediation": "Remove NSAllowsArbitraryLoads or restrict exceptions to specific domains.",
+      "files": [
+        "Info.plist",
+        "*Info.plist"
+      ],
+      "pattern": "<key>NSAllowsArbitraryLoads</key>\\s*<true\\s*/>",
+      "multiline": true
+    },
+    {
+      "id": "ios/insecure-keychain-accessibility",
+      "severity": "high",
+      "cwe": "CWE-312",
+      "message": "Insecure Keychain accessibility: kSecAttrAccessibleAlways permits decryption when device is locked",
+      "remediation": "Use kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly or kSecAttrAccessibleWhenUnlockedThisDeviceOnly.",
+      "files": [
+        "*.swift"
+      ],
+      "pattern": "kSecAttrAccessibleAlways\\b"
+    },
+    {
+      "id": "ios/weak-crypto-md5-sha1",
+      "severity": "medium",
+      "cwe": "CWE-327",
+      "message": "Insecure cryptographic hash (CC_MD5 or CC_SHA1) detected",
+      "remediation": "Migrate to CryptoKit SHA256 or SHA512.",
+      "files": [
+        "*.swift"
+      ],
+      "pattern": "\\b(CC_MD5|CC_SHA1)\\s*\\("
+    },
+    {
+      "id": "ios/sqlite-injection",
+      "severity": "high",
+      "cwe": "CWE-89",
+      "message": "Potential SQL injection via string interpolation in sqlite3_exec",
+      "remediation": "Use sqlite3_prepare_v2 with parameterized sqlite3_bind values.",
+      "files": [
+        "*.swift"
+      ],
+      "pattern": "sqlite3_exec\\s*\\([^,]+,\\s*\"[^\"]*\\\\\\([^)]+\\)[^\"]*\""
+    },
+    {
+      "id": "ios/uiwebview-deprecated",
+      "severity": "critical",
+      "cwe": "CWE-477",
+      "message": "UIWebView is deprecated and insecure; susceptible to arbitrary script execution",
+      "remediation": "Migrate to WKWebView.",
+      "files": [
+        "*.swift"
+      ],
+      "pattern": "\\bUIWebView\\b"
+    },
+    {
+      "id": "ios/pasteboard-leak",
+      "severity": "medium",
+      "cwe": "CWE-200",
+      "message": "Data written directly to shared UIPasteboard without local-only restrictions",
+      "remediation": "Set UIPasteboardOption.localOnly when writing sensitive credentials.",
+      "files": [
+        "*.swift"
+      ],
+      "pattern": "UIPasteboard\\.general\\.string\\s*=",
+      "unless": "setItems|localOnly"
+    },
+    {
+      "id": "ios/biometric-fallback-bypass",
+      "severity": "high",
+      "cwe": "CWE-287",
+      "message": "Biometric policy evaluation falls back directly to device passcode",
+      "remediation": "Use .deviceOwnerAuthenticationWithBiometrics for biometric-guarded features.",
+      "files": [
+        "*.swift"
+      ],
+      "pattern": "evaluatePolicy\\(\\s*\\.deviceOwnerAuthentication\\b"
+    },
+    {
+      "id": "ios/file-protection-none",
+      "severity": "high",
+      "cwe": "CWE-311",
+      "message": "File written with FileProtectionType.none disables OS encryption at rest",
+      "remediation": "Use FileProtectionType.complete or completeUnlessOpen.",
+      "files": [
+        "*.swift"
+      ],
+      "pattern": "FileProtectionType\\.none\\b"
+    }
+  ],
+  "tests": [
+    {
+      "rule": "ios/ats-disabled",
+      "file": "Info.plist",
+      "bad": "<dict>\n<key>NSAllowsArbitraryLoads</key>\n<true/>\n</dict>",
+      "good": "<dict>\n<key>NSAllowsArbitraryLoads</key>\n<false/>\n</dict>"
+    },
+    {
+      "rule": "ios/insecure-keychain-accessibility",
+      "file": "KeyManager.swift",
+      "bad": "query[kSecAttrAccessible as String] = kSecAttrAccessibleAlways",
+      "good": "query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly"
+    },
+    {
+      "rule": "ios/weak-crypto-md5-sha1",
+      "file": "Digest.swift",
+      "bad": "CC_MD5(buffer, len, &digest)",
+      "good": "let hash = SHA256.hash(data: data)"
+    },
+    {
+      "rule": "ios/sqlite-injection",
+      "file": "Database.swift",
+      "bad": "sqlite3_exec(db, \"SELECT * FROM users WHERE name = '\\(userInput)'\", nil, nil, nil)",
+      "good": "sqlite3_prepare_v2(db, \"SELECT * FROM users WHERE name = ?\", -1, &stmt, nil)"
+    },
+    {
+      "rule": "ios/uiwebview-deprecated",
+      "file": "WebController.swift",
+      "bad": "let webView = UIWebView(frame: .zero)",
+      "good": "let webView = WKWebView(frame: .zero)"
+    },
+    {
+      "rule": "ios/pasteboard-leak",
+      "file": "Share.swift",
+      "bad": "UIPasteboard.general.string = authToken",
+      "good": "UIPasteboard.general.setItems([[UIPasteboard.typeListString[0] as! String: authToken]], options: [.localOnly: true])"
+    },
+    {
+      "rule": "ios/biometric-fallback-bypass",
+      "file": "Auth.swift",
+      "bad": "context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { _, _ in }",
+      "good": "context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { _, _ in }"
+    },
+    {
+      "rule": "ios/file-protection-none",
+      "file": "Storage.swift",
+      "bad": "attributes[.protectionKey] = FileProtectionType.none",
+      "good": "attributes[.protectionKey] = FileProtectionType.complete"
+    }
+  ]
+}

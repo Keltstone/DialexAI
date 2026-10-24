@@ -9,7 +9,7 @@ import (
 
 func TestBuiltinPacksPassTheirOwnTests(t *testing.T) {
 	ps, err := Builtin()
-	if err != nil || len(ps) != 3 {
+	if err != nil || len(ps) < 3 {
 		t.Fatalf("%d packs, %v", len(ps), err)
 	}
 }

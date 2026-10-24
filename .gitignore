@@ -92,22 +92,45 @@ captures/
 output-metadata.json
 
 # ------------------------------------------------------------------------------
-# 6. Compose Desktop & Go Engine Binaries
+# 6. Compose Desktop & Engine Binaries
 # ------------------------------------------------------------------------------
-# Compiled Go engine binaries
+# Compiled Go & Rust engine binaries
 socratix-engine/bin/
 socratix-engine/dist/
 socratix-engine/socratix
 socratix-engine/socratix.exe
 socratix-engine/dialex
 socratix-engine/dialex.exe
-socratix-engine/bin/
-socratix-engine/dist/
 artix-ai/bin/
 artix-ai/dist/
-artix-ai/bin/
-artix-ai/dist/
+artix-ai/artix
+artix-ai/artixd
+kritix-ai/bin/
+kritix-ai/dist/
+kritix-ai/kritix
+sentinix-ai/bin/
+sentinix-ai/dist/
+sentinix-ai/sentinix
+sentinix-ai/sentinixd
 
+# Rust target builds
+**/target/
+Cargo.lock.bak
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+
+# .NET artifacts
+**/obj/
+
+# Local databases & scanner caches
+sentinix.db*
+.kritix/
 
 # Release staging & output packages (anchored to root)
 /dist/
@@ -124,7 +147,7 @@ artix-ai/dist/
 *.zip
 
 # ------------------------------------------------------------------------------
-# 7. IDE & Editor Artifacts
+# 7. IDE, Editor Artifacts & AI Agent Metadata
 # ------------------------------------------------------------------------------
 .idea/
 *.iml
@@ -137,12 +160,28 @@ render.experimental.xml
 .vscode/
 .fleet/
 
-# AI Agent Local Metadata
+# AI Agent Local Metadata & Model Rules
+.claude/
 .gemini/
-.claude/*
-!.claude/CLAUDE.md
 .copilot/
 .agents/
+.antigravity/
+.junie/
+.cursor/
+*.cursorrules
+.cursorrules
+*.clinerules
+.clinerules
+*.roorules
+.roorules
+*.windsurfrules
+.windsurfrules
+*.rules
+.rules
+**/copilot-instructions.md
+**/GEMINI.md
+**/QWEN.md
+**/CONVENTIONS.md
 
 # ------------------------------------------------------------------------------
 # 8. Operating System Files

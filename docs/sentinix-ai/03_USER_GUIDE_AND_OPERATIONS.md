@@ -108,60 +108,87 @@ sentinix surface v2.4.0
 
 ## 2. Rule Packs & Custom Policy Authoring
 
-Sentinix includes built-in detection packs for Kotlin, Android, Kotlin Multiplatform (KMP), Ktor, Spring, and Secrets. Organizations can author and distribute custom rule packs.
+Sentinix includes built-in detection packs across **10 technology stacks** comprising **135 enterprise rules**, plus full support for custom organization rule packs, per-rule enforcement configuration, and team-level custom rules.
 
-### 2.1 Built-in Detection Scope
-* **Android Security:** Exported activities/services without permission guards, `android:debuggable=true`, insecure `FileProvider` configurations, cleartext HTTP permissions.
-* **Kotlin & KMP:** SQL queries built via string concatenation/interpolation, insecure random number generation (`java.util.Random`), hardcoded cryptographic keys, weak ciphers (DES, RC4, MD5), insecure multiplatform storage.
-* **Web Frameworks (Ktor & Spring):** Open CORS wildcards (`*`), disabled CSRF verification, Spring Actuator endpoints exposed without authentication, `permitAll()` on sensitive route trees.
-* **Secrets Scanner:** Hardcoded cloud credentials (AWS, Google Cloud, Azure), private keys (`-----BEGIN RSA PRIVATE KEY-----`), GitHub/GitLab tokens, Slack/Teams webhooks, and high-entropy secret strings.
-* **Inline Suppression:** Silence a specific secret alert by placing `sentinix:ignore` anywhere on the affected line (e.g. in test fixtures).
+### 2.1 Built-in Detection Scope (10 Stacks, 135 Rules)
+
+Each pack runs via deterministic, zero-dependency RE2 regex patterns at sub-millisecond speeds:
+
+| Stack Pack | Rules | Detection Trigger | Documentation |
+| :--- | :--- | :--- | :--- |
+| **Android** | 60 | `AndroidManifest.xml`, `com.android.*` Gradle plugin | [Android Pack Guide](packs/01_ANDROID_PACK.md) |
+| **Kotlin Multiplatform (KMP)** | 8 | `commonMain/` folder, `multiplatform` plugin | [KMP Pack Guide](packs/02_KMP_PACK.md) |
+| **Kotlin Backend (Spring/Ktor)** | 10 | `*.kt` with Spring/Ktor dependencies | [Kotlin Backend Guide](packs/03_KOTLIN_BACKEND_PACK.md) |
+| **iOS & Swift** | 8 | `*.swift`, `Info.plist`, `Podfile`, `Package.swift` | [iOS Swift Guide](packs/04_IOS_SWIFT_PACK.md) |
+| **Go** | 8 | `*.go`, `go.mod` | [Go Guide](packs/05_GO_PACK.md) |
+| **.NET & C#** | 8 | `*.cs`, `*.csproj`, `appsettings*.json` | [.NET Guide](packs/06_DOTNET_PACK.md) |
+| **PHP** | 8 | `*.php`, `composer.json` | [PHP Guide](packs/07_PHP_PACK.md) |
+| **Rust** | 7 | `*.rs`, `Cargo.toml` | [Rust Guide](packs/08_RUST_PACK.md) |
+| **Python** | 9 | `*.py`, `requirements.txt`, `pyproject.toml` | [Python Guide](packs/09_PYTHON_PACK.md) |
+| **Node.js & React** | 9 | `*.js`, `*.jsx`, `*.ts`, `*.tsx`, `package.json` | [Node/React Guide](packs/10_NODE_REACT_PACK.md) |
+
+For comprehensive catalogues of all individual rules, consult the [Packs Directory](packs/INDEX.md).
 
 ---
 
-### 2.2 Authoring a Custom Rule Pack
-A rule pack is a JSON document containing a unique identifier, an array of declarative rules, and embedded unit tests.
+### 2.2 Per-Rule Enforcement Configuration (`.sentinix/policy.json`)
 
-Create `company-security-pack.json`:
+Maintainers can configure the enforcement level for every rule in any pack:
+
 ```json
 {
-  "name": "internal-compliance-pack",
-  "version": "1.0.0",
+  "rules": {
+    "android/exported-component": "Block",
+    "android/allow-backup": "Warn",
+    "android/mock-location-allowed": "Notice",
+    "go/command-injection": "Block",
+    "node/insecure-cookie-flag": "Ignore"
+  }
+}
+```
+
+* **`Block`:** Fails the pull request or scan gate (exit code `1`).
+* **`Warn`:** Posts a prominent warning on the PR without blocking merge.
+* **`Notice`:** Recorded quietly in findings and audit log for visibility.
+* **`Ignore`:** Completely suppresses rule execution.
+
+Policies can also be configured via the REST API (`PUT /api/projects/:id/policy`) and managed in the Web Dashboard.
+
+---
+
+### 2.3 Team-Level In-Repo Custom Rules (`.sentinix/custom-rules.json`)
+
+Development teams can commit custom security patterns directly within their repository:
+
+```json
+{
   "rules": [
     {
-      "id": "internal/no-plaintext-http",
+      "id": "team/prohibit-raw-http-client",
       "severity": "high",
-      "title": "Unencrypted HTTP URL detected",
-      "cwe": "CWE-319",
-      "owasp": "A02:2021-Cryptographic Failures",
-      "pattern": "http://[a-zA-Z0-9.-]+",
-      "file_regex": ".*\\.(kt|java|go|ts|py)$",
-      "tests": [
-        {
-          "content": "val url = \"http://api.internal.corp\"",
-          "matches": true
-        },
-        {
-          "content": "val url = \"https://api.internal.corp\"",
-          "matches": false
-        }
-      ]
+      "cwe": "CWE-693",
+      "message": "Direct OkHttpClient usage prohibited; use SecureInternalClient with mTLS",
+      "remediation": "Replace with SecureInternalClient.sharedInstance",
+      "files": ["*.kt", "*.java"],
+      "pattern": "OkHttpClient\\.Builder\\(\\)"
     }
   ]
 }
 ```
 
-### 2.3 Signing Rule Packs (Cryptographic Verification)
-Sentinix will refuse to load custom rule packs unless they are signed by a trusted Ed25519 key pair, ensuring rules cannot be modified in transit.
+Sentinix scans custom rules alongside built-in packs with identical sub-millisecond evaluation and baseline support.
+
+---
+
+### 2.4 Authoring & Signing Cryptographic Rule Packs
+
+Organizations distributing company-wide rule packs can sign them with Ed25519 keys:
 
 ```bash
 # 1. Generate an Ed25519 key pair
 sentinix packs keygen sec-team
 
-# Outputs: sec-team.key (Private Key) and sec-team.pub (Public Key)
-
-# 2. Sign the rule pack
-# Note: The tool automatically executes the embedded tests. If tests fail, signing is aborted.
+# 2. Sign the rule pack (automatically runs embedded bad/good tests)
 sentinix packs sign company-security-pack.json sec-team.key > company-security-pack.signed.json
 
 # 3. Create trusted keys registry (trusted-keys.json)

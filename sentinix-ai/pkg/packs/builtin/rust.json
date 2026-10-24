@@ -1,0 +1,133 @@
+{
+  "name": "rust",
+  "version": "1.0.0",
+  "stacks": [
+    "rust"
+  ],
+  "author": "Kolta Labs",
+  "rules": [
+    {
+      "id": "rust/unsafe-block",
+      "severity": "medium",
+      "cwe": "CWE-242",
+      "message": "Unannotated unsafe block bypasses compiler memory safety guarantees",
+      "remediation": "Document safety invariants with // SAFETY: comment or use safe abstractions.",
+      "files": [
+        "*.rs"
+      ],
+      "pattern": "\\bunsafe\\s*\\{",
+      "unless": "SAFETY:"
+    },
+    {
+      "id": "rust/transmute",
+      "severity": "high",
+      "cwe": "CWE-89",
+      "message": "Arbitrary type transmutation via mem::transmute can trigger undefined behavior",
+      "remediation": "Use safe From/Into traits or audited bytemuck/zerocopy casting.",
+      "files": [
+        "*.rs"
+      ],
+      "pattern": "\\b(?:std::mem::)?transmute\\s*(?:<[^>]+>)?\\s*\\("
+    },
+    {
+      "id": "rust/command-injection",
+      "severity": "high",
+      "cwe": "CWE-78",
+      "message": "Shell execution wrapper detected; risk of argument and command injection",
+      "remediation": "Execute binaries directly with Command::new(\"binary\").arg(arg) without shell wrappers.",
+      "files": [
+        "*.rs"
+      ],
+      "pattern": "Command::new\\s*\\(\\s*[\"'](?:sh|bash|cmd|powershell)[\"']\\s*\\)\\s*\\.arg\\s*\\(\\s*[\"']-[cC][\"']\\s*\\)"
+    },
+    {
+      "id": "rust/raw-pointer-deref",
+      "severity": "high",
+      "cwe": "CWE-476",
+      "message": "Raw pointer dereference detected; risks null or dangling pointer dereference",
+      "remediation": "Validate pointer with NonNull or use safe references.",
+      "files": [
+        "*.rs"
+      ],
+      "pattern": "\\*\\s*(?:const_ptr|raw_ptr|ptr)\\b"
+    },
+    {
+      "id": "rust/panic-in-production",
+      "severity": "medium",
+      "cwe": "CWE-703",
+      "message": "Direct panic! invocation in application logic aborts thread execution",
+      "remediation": "Return a Result<T, E> and propagate errors cleanly with the ? operator.",
+      "files": [
+        "*.rs"
+      ],
+      "pattern": "\\bpanic!\\s*\\(",
+      "unless": "cfg\\(test\\)"
+    },
+    {
+      "id": "rust/insecure-rand",
+      "severity": "medium",
+      "cwe": "CWE-338",
+      "message": "thread_rng() used to generate security token or cryptographic key",
+      "remediation": "Use rand::rngs::OsRng or getrandom for cryptographically secure random values.",
+      "files": [
+        "*.rs"
+      ],
+      "pattern": "(?i)(?:token|nonce|secret|password|key)\\s*[:=].*thread_rng\\(\\)"
+    },
+    {
+      "id": "rust/ffi-cstring-as-ptr",
+      "severity": "high",
+      "cwe": "CWE-416",
+      "message": "Temporary CString immediately converted to pointer; memory is dropped before FFI call",
+      "remediation": "Bind the CString to a local let variable before obtaining its pointer.",
+      "files": [
+        "*.rs"
+      ],
+      "pattern": "CString::new\\([^)]*\\)\\.unwrap\\(\\)\\.as_ptr\\(\\)"
+    }
+  ],
+  "tests": [
+    {
+      "rule": "rust/unsafe-block",
+      "file": "memory.rs",
+      "bad": "let ptr = unsafe { slice.as_ptr() };",
+      "good": "let ptr = slice.as_ptr();"
+    },
+    {
+      "rule": "rust/transmute",
+      "file": "cast.rs",
+      "bad": "let val: u32 = unsafe { std::mem::transmute(floatVal) };",
+      "good": "let val: u32 = floatVal.to_bits();"
+    },
+    {
+      "rule": "rust/command-injection",
+      "file": "runner.rs",
+      "bad": "let output = Command::new(\"sh\").arg(\"-c\").arg(userInput).output();",
+      "good": "let output = Command::new(\"git\").arg(\"status\").output();"
+    },
+    {
+      "rule": "rust/raw-pointer-deref",
+      "file": "ptr.rs",
+      "bad": "let val = unsafe { *raw_ptr };",
+      "good": "let val = *ref_val;"
+    },
+    {
+      "rule": "rust/panic-in-production",
+      "file": "service.rs",
+      "bad": "panic!(\"invalid state\");",
+      "good": "return Err(ServiceError::InvalidState);"
+    },
+    {
+      "rule": "rust/insecure-rand",
+      "file": "token.rs",
+      "bad": "let token: u64 = rand::thread_rng().gen();",
+      "good": "let token: [u8; 32] = OsRng.gen();"
+    },
+    {
+      "rule": "rust/ffi-cstring-as-ptr",
+      "file": "ffi.rs",
+      "bad": "unsafe { ffi_call(CString::new(name).unwrap().as_ptr()); }",
+      "good": "let c_str = CString::new(name).unwrap(); unsafe { ffi_call(c_str.as_ptr()); }"
+    }
+  ]
+}

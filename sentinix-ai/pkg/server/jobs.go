@@ -467,6 +467,12 @@ func (a *App) finishReview(ctx context.Context, h githost.Host, ev *githost.Even
 		}
 	}
 
+	if proj != nil && a.Store != nil {
+		if rulePols, err := a.Store.RulePolicies(proj.ID); err == nil && len(rulePols) > 0 {
+			evFindings := policy.EvaluateFindings(allNew, &policy.ProjectPolicy{Rules: rulePols})
+			allNew = evFindings.Active()
+		}
+	}
 	grouped := policy.GroupByCategory(allNew)
 	expectedTools := []string{"detekt", "konsist", "ktlint", "lint"}
 

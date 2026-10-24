@@ -71,10 +71,11 @@ The **AI add-on** is optional and off by default. It adds council triage of find
 
 ### What it checks out of the box
 
-- **Kotlin, Android and Kotlin Multiplatform:** manifest settings, WebView misuse, insecure storage, weak cryptography, SQL built from strings, and pitfalls specific to shared code.
-- **Ktor and Spring:** disabled CSRF protection, open CORS, `permitAll`, exposed actuator endpoints.
-- **Secrets:** cloud keys, private keys and hardcoded credentials.
-- **Dependencies** (opt-in): known-vulnerable packages for Go, npm, PyPI and Maven.
+- **10 Technology Stacks (135 Built-in Rules):** Android (60 rules covering OWASP MASVS L1/L2 and fintech hardening), Kotlin Multiplatform (8 rules), Kotlin Backend (10 rules), iOS / Swift (8 rules), Go (8 rules), .NET / C# (8 rules), PHP (8 rules), Rust (7 rules), Python / Django (9 rules), Node.js / React (9 rules).
+- **Per-Rule Policy Enforcement:** Maintainers can configure any rule to `Block`, `Warn`, `Notice`, or `Ignore` via `.sentinix/policy.json` or REST API.
+- **Team-Level Custom Rules:** Drop-in declarative `.sentinix/custom-rules.json` for repository-specific standards.
+- **Secrets:** Cloud API keys, private keys, high-entropy tokens, with line-level masking and `sentinix:ignore` suppression.
+- **Dependencies** (opt-in): Known-vulnerable packages for Go, npm, PyPI and Maven via OSV.
 - **Anything else:** `semgrep`, `gitleaks` and `osv-scanner` are picked up automatically when installed, and you can add your own signed rule packs.
 
 ### Supported git hosts
@@ -415,17 +416,71 @@ The **Attack surface** screen lists endpoints, permissions and dependency change
 
 Rule packs are how you teach Sentinix about your stack, with no changes to Sentinix itself. A pack is **data only**: it cannot run code or reach the network, which is what makes it safe to share.
 
-### Built in
+### Built in (10 Stacks, 135 Rules)
 
-These are always available, and are chosen automatically from what the repository contains.
+These are always available, and are chosen automatically from what the repository contains:
 
-| Pack | Applies when | Covers |
-| --- | --- | --- |
-| `android` | `AndroidManifest.xml`, or a Gradle file using `com.android.` | Exported components, backups, cleartext traffic, `debuggable`, WebView JavaScript interface, file access and SSL bypass, world-accessible files, secrets in SharedPreferences, trust-all certificates, weak crypto, SQL string templates |
-| `kotlin-backend` | Kotlin files | Spring CSRF disabled and `permitAll`, CORS any origin, exposed actuator endpoints, SQL string templates, weak crypto |
-| `kmp` | A `commonMain` directory, or the multiplatform Gradle plugin | Cleartext URLs, secrets printed, secrets in plain Settings in shared code |
+| Pack | Rules | Applies when | Focus & Key Protections | Documentation |
+| --- | --- | --- | --- | --- |
+| `android` | 60 | `AndroidManifest.xml` or `com.android.*` Gradle plugin | Exported components, task hijacking (StrandHogg), App Links autoVerify, OAuth schemes, hardware Keystore biometric invalidation, clipboard masking, unencrypted Room, dynamic code loading, cleartext traffic | [docs/packs/01_ANDROID_PACK.md](docs/packs/01_ANDROID_PACK.md) |
+| `kmp` | 8 | `commonMain/` folder or `multiplatform` plugin | Multiplatform cleartext URLs, log leaks, plain Settings secrets, mutable companion state, Ktor certs | [docs/packs/02_KMP_PACK.md](docs/packs/02_KMP_PACK.md) |
+| `kotlin-backend` | 10 | Kotlin files with Spring/Ktor | Spring CSRF disable, `permitAll` root trees, open CORS, actuator exposure, SQL injection, JWT weak HMAC | [docs/packs/03_KOTLIN_BACKEND_PACK.md](docs/packs/03_KOTLIN_BACKEND_PACK.md) |
+| `ios-swift` | 8 | `*.swift`, `Info.plist`, `Podfile`, `Package.swift` | ATS disabled, insecure Keychain accessibility (`kSecAttrAccessibleAlways`), CC_MD5/SHA1, UIWebView, pasteboard leak | [docs/packs/04_IOS_SWIFT_PACK.md](docs/packs/04_IOS_SWIFT_PACK.md) |
+| `go` | 8 | `*.go`, `go.mod` | SQL injection via Sprintf, `InsecureSkipVerify: true`, math/rand tokens, shell command injection, pprof exposed | [docs/packs/05_GO_PACK.md](docs/packs/05_GO_PACK.md) |
+| `dotnet` | 8 | `*.cs`, `*.csproj`, `appsettings*.json` | SQL injection, `BinaryFormatter` deserialization, weak MD5/SHA1, connection strings, disabled antiforgery | [docs/packs/06_DOTNET_PACK.md](docs/packs/06_DOTNET_PACK.md) |
+| `php` | 8 | `*.php`, `composer.json` | SQL injection, `system()` / `exec()` injection, `unserialize()` object injection, RFI, SSRF via curl | [docs/packs/07_PHP_PACK.md](docs/packs/07_PHP_PACK.md) |
+| `rust` | 7 | `*.rs`, `Cargo.toml` | Unsafe blocks, `mem::transmute`, shell command injection, raw pointer deref, production panics, CString FFI | [docs/packs/08_RUST_PACK.md](docs/packs/08_RUST_PACK.md) |
+| `python` | 9 | `*.py`, `requirements.txt`, `pyproject.toml` | SQL injection, `pickle` / `yaml.load` deserialization, `os.system` / `shell=True`, Django debug mode, SSRF | [docs/packs/09_PYTHON_PACK.md](docs/packs/09_PYTHON_PACK.md) |
+| `node-react` | 9 | `*.js`, `*.jsx`, `*.ts`, `*.tsx`, `package.json` | `dangerouslySetInnerHTML`, `eval()` / `new Function()`, `child_process.exec`, SQL injection, JWT 'none' | [docs/packs/10_NODE_REACT_PACK.md](docs/packs/10_NODE_REACT_PACK.md) |
 
-Findings carry rule IDs such as `android/debuggable`. Launcher activities are exempt from the exported-component rule, because Android requires them to be exported.
+For comprehensive descriptions of all 135 rules, see [docs/packs/INDEX.md](docs/packs/INDEX.md).
+
+Findings carry rule IDs such as `android/debuggable` or `go/command-injection`. Launcher activities are exempt from the exported-component rule, because Android requires them to be exported.
+
+### Per-Rule Enforcement Policy (`.sentinix/policy.json`)
+
+Maintainers can configure the enforcement level for every rule in any pack:
+
+```json
+{
+  "rules": {
+    "android/exported-component": "Block",
+    "android/allow-backup": "Warn",
+    "android/mock-location-allowed": "Notice",
+    "go/command-injection": "Block",
+    "node/insecure-cookie-flag": "Ignore"
+  }
+}
+```
+
+- **Block:** Gate fails on pull request (exit code `1`).
+- **Warn:** Displays a warning comment without failing the gate.
+- **Notice:** Recorded in findings and audit log for visibility.
+- **Ignore:** Rule is skipped entirely.
+
+Policies can also be configured dynamically via the REST API (`PUT /api/projects/:id/policy`) and Web Dashboard.
+
+### Team Custom Rules (`.sentinix/custom-rules.json`)
+
+Teams can declare repository-specific patterns directly in their project:
+
+```json
+{
+  "rules": [
+    {
+      "id": "team/no-raw-http-client",
+      "severity": "high",
+      "cwe": "CWE-693",
+      "message": "Use SecureHttpClient rather than raw OkHttpClient",
+      "remediation": "Replace with SecureHttpClient.instance",
+      "files": ["*.kt", "*.java"],
+      "pattern": "OkHttpClient\\.Builder\\(\\)"
+    }
+  ]
+}
+```
+
+Sentinix scans custom rules alongside built-in packs with identical sub-millisecond evaluation and baseline support.
 
 ### Writing your own
 

@@ -42,6 +42,67 @@
    ],
    "pattern": "settings\\.(putString|set\\w*)\\(\\s*\"(password|token|secret|api_?key)\\w*\"",
    "path_contains": "commonMain"
+  },
+  {
+   "id": "ktor-trust-all-certs",
+   "severity": "critical",
+   "cwe": "CWE-295",
+   "message": "Ktor client configured to trust all certificates",
+   "remediation": "Use system certificate verification without overriding trustManager.",
+   "files": [
+    "*.kt"
+   ],
+   "pattern": "trustManager\\s*=\\s*\\{\\s*true\\s*\\}|TrustAllCerts",
+   "path_contains": "commonMain"
+  },
+  {
+   "id": "mutable-global-state",
+   "severity": "medium",
+   "cwe": "CWE-662",
+   "message": "Mutable companion object var in common code risks cross-thread race conditions",
+   "remediation": "Use StateFlow or immutable state containers.",
+   "files": [
+    "*.kt"
+   ],
+   "pattern": "\\bcompanion\\s+object\\s*\\{[^}]*\\bvar\\s+\\w+",
+   "multiline": true,
+   "path_contains": "commonMain"
+  },
+  {
+   "id": "weak-hash-common",
+   "severity": "high",
+   "cwe": "CWE-327",
+   "message": "Weak cryptographic hash (MD5/SHA1) used in shared code",
+   "remediation": "Use SHA-256 or higher from a multiplatform crypto library.",
+   "files": [
+    "*.kt"
+   ],
+   "pattern": "(?i)Digest\\.(?:MD5|SHA1)\\b",
+   "path_contains": "commonMain"
+  },
+  {
+   "id": "hardcoded-api-key",
+   "severity": "high",
+   "cwe": "CWE-798",
+   "message": "Hardcoded API key in shared common module",
+   "remediation": "Inject secrets dynamically via BuildKonfig or backend proxy.",
+   "files": [
+    "*.kt"
+   ],
+   "pattern": "(?i)val\\s+(?:apiKey|apiSecret|clientSecret|bearerToken)\\s*=\\s*\"[a-zA-Z0-9_\\-]{16,}\"",
+   "path_contains": "commonMain"
+  },
+  {
+   "id": "insecure-random-token",
+   "severity": "medium",
+   "cwe": "CWE-338",
+   "message": "kotlin.random.Random is pseudo-random and insecure for tokens or secrets",
+   "remediation": "Use platform-specific secure random for cryptographic values.",
+   "files": [
+    "*.kt"
+   ],
+   "pattern": "(?i)(?:token|nonce|secret|session)\\s*=\\s*.*Random\\.next(?:Bytes|Int|Long)",
+   "path_contains": "commonMain"
   }
  ],
  "tests": [
@@ -62,6 +123,36 @@
    "file": "src/commonMain/A.kt",
    "bad": "settings.putString(\"token\", t)",
    "good": "settings.putString(\"theme\", t)"
+  },
+  {
+   "rule": "ktor-trust-all-certs",
+   "file": "src/commonMain/Net.kt",
+   "bad": "val client = HttpClient { engine { trustManager = { true } } }",
+   "good": "val client = HttpClient { engine { } }"
+  },
+  {
+   "rule": "mutable-global-state",
+   "file": "src/commonMain/Repo.kt",
+   "bad": "companion object {\n    var currentUser: User? = null\n}",
+   "good": "companion object {\n    val currentUserFlow = MutableStateFlow<User?>(null)\n}"
+  },
+  {
+   "rule": "weak-hash-common",
+   "file": "src/commonMain/Crypto.kt",
+   "bad": "val d = Digest.MD5(bytes)",
+   "good": "val d = Digest.SHA256(bytes)"
+  },
+  {
+   "rule": "hardcoded-api-key",
+   "file": "src/commonMain/Config.kt",
+   "bad": "val apiKey = \"AIzaSyD-73928172938472918237\"",
+   "good": "val apiKey = BuildKonfig.API_KEY"
+  },
+  {
+   "rule": "insecure-random-token",
+   "file": "src/commonMain/Session.kt",
+   "bad": "val sessionToken = Random.nextInt(100000, 999999).toString()",
+   "good": "val sessionToken = SecureRandomUtil.generateToken()"
   }
  ]
 }

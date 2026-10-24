@@ -1,0 +1,192 @@
+{
+  "name": "node-react",
+  "version": "1.0.0",
+  "stacks": [
+    "node",
+    "react",
+    "javascript",
+    "typescript"
+  ],
+  "author": "Kolta Labs",
+  "rules": [
+    {
+      "id": "react/dangerously-set-inner-html",
+      "severity": "high",
+      "cwe": "CWE-79",
+      "message": "Use of dangerouslySetInnerHTML bypasses React XSS escaping",
+      "remediation": "Sanitize with DOMPurify.sanitize() or use standard JSX children.",
+      "files": [
+        "*.jsx",
+        "*.tsx",
+        "*.js",
+        "*.ts"
+      ],
+      "pattern": "dangerouslySetInnerHTML\\s*=\\s*\\{\\{",
+      "unless": "DOMPurify\\.sanitize"
+    },
+    {
+      "id": "node/eval-injection",
+      "severity": "critical",
+      "cwe": "CWE-95",
+      "message": "Dynamic code evaluation via eval() or new Function() enables remote code execution",
+      "remediation": "Use JSON.parse() or static mapping objects instead of dynamic evaluation.",
+      "files": [
+        "*.js",
+        "*.jsx",
+        "*.ts",
+        "*.tsx"
+      ],
+      "pattern": "\\b(?:eval|new\\s+Function)\\s*\\("
+    },
+    {
+      "id": "node/command-injection",
+      "severity": "critical",
+      "cwe": "CWE-78",
+      "message": "Command execution via child_process.exec allows command injection through shell interpretation",
+      "remediation": "Use child_process.execFile() with an array of arguments rather than a shell string.",
+      "files": [
+        "*.js",
+        "*.jsx",
+        "*.ts",
+        "*.tsx"
+      ],
+      "pattern": "child_process\\.(?:exec|execSync)\\s*\\("
+    },
+    {
+      "id": "node/sql-injection",
+      "severity": "high",
+      "cwe": "CWE-89",
+      "message": "Potential SQL injection via template string interpolation in database query",
+      "remediation": "Use parameterized queries: db.query('SELECT * FROM users WHERE id = $1', [id]).",
+      "files": [
+        "*.js",
+        "*.jsx",
+        "*.ts",
+        "*.tsx"
+      ],
+      "pattern": "(?:\\.query|\\.execute)\\s*\\(\\s*`[^`]*\\$\\{"
+    },
+    {
+      "id": "node/cors-wildcard",
+      "severity": "medium",
+      "cwe": "CWE-942",
+      "message": "Permissive CORS configuration with wildcard origin",
+      "remediation": "Specify allowed domains explicitly in cors({ origin: ['https://trusted.corp'] }).",
+      "files": [
+        "*.js",
+        "*.jsx",
+        "*.ts",
+        "*.tsx"
+      ],
+      "pattern": "cors\\s*\\(\\s*\\{\\s*origin\\s*:\\s*[\"']\\*[\"']"
+    },
+    {
+      "id": "node/path-traversal-join",
+      "severity": "high",
+      "cwe": "CWE-22",
+      "message": "Direct file read using joined user request parameter risks path traversal",
+      "remediation": "Normalize and verify that target path begins with the base directory.",
+      "files": [
+        "*.js",
+        "*.ts",
+        "*.jsx",
+        "*.tsx"
+      ],
+      "pattern": "fs\\.(?:readFileSync|createReadStream|readFile)\\s*\\(\\s*path\\.(?:join|resolve)\\([^,]+,\\s*(?:req\\.|request\\.|params\\.)"
+    },
+    {
+      "id": "node/jwt-none-algorithm",
+      "severity": "critical",
+      "cwe": "CWE-327",
+      "message": "JWT verification explicitly permits 'none' algorithm",
+      "remediation": "Restrict algorithms to ['HS256'] or ['RS256'].",
+      "files": [
+        "*.js",
+        "*.ts"
+      ],
+      "pattern": "jwt\\.verify\\s*\\([^,]+,\\s*[^,]+,\\s*\\{\\s*algorithms:\\s*\\[.*['\"]none['\"].*\\]"
+    },
+    {
+      "id": "react/href-javascript",
+      "severity": "high",
+      "cwe": "CWE-79",
+      "message": "Inline javascript: URI in href leads to cross-site scripting",
+      "remediation": "Use buttons with onClick event handlers instead of javascript: pseudo-URLs.",
+      "files": [
+        "*.jsx",
+        "*.tsx",
+        "*.js",
+        "*.ts"
+      ],
+      "pattern": "href\\s*=\\s*\\{\\s*[\"']javascript:"
+    },
+    {
+      "id": "node/insecure-cookie-flag",
+      "severity": "medium",
+      "cwe": "CWE-614",
+      "message": "Cookie created with httpOnly: false exposes cookie to client-side scripts",
+      "remediation": "Configure httpOnly: true and secure: true.",
+      "files": [
+        "*.js",
+        "*.ts"
+      ],
+      "pattern": "res\\.cookie\\s*\\([^,]+,\\s*[^,]+,\\s*\\{[^}]*httpOnly\\s*:\\s*false"
+    }
+  ],
+  "tests": [
+    {
+      "rule": "react/dangerously-set-inner-html",
+      "file": "Widget.tsx",
+      "bad": "<div dangerouslySetInnerHTML={{ __html: rawUserContent }} />",
+      "good": "<div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(rawUserContent) }} />"
+    },
+    {
+      "rule": "node/eval-injection",
+      "file": "calculator.js",
+      "bad": "const result = eval(userExpression);",
+      "good": "const result = JSON.parse(userExpression);"
+    },
+    {
+      "rule": "node/command-injection",
+      "file": "gitHelper.ts",
+      "bad": "child_process.exec(`git checkout ${branchName}`);",
+      "good": "child_process.execFile('git', ['checkout', branchName]);"
+    },
+    {
+      "rule": "node/sql-injection",
+      "file": "userModel.js",
+      "bad": "const res = await pool.query(`SELECT * FROM users WHERE email = '${email}'`);",
+      "good": "const res = await pool.query('SELECT * FROM users WHERE email = $1', [email]);"
+    },
+    {
+      "rule": "node/cors-wildcard",
+      "file": "app.js",
+      "bad": "app.use(cors({ origin: '*' }));",
+      "good": "app.use(cors({ origin: 'https://app.corp.internal' }));"
+    },
+    {
+      "rule": "node/path-traversal-join",
+      "file": "fileServer.js",
+      "bad": "const data = fs.readFileSync(path.join(uploadDir, req.query.filename));",
+      "good": "const data = fs.readFileSync(safePath);"
+    },
+    {
+      "rule": "node/jwt-none-algorithm",
+      "file": "auth.js",
+      "bad": "jwt.verify(token, secret, { algorithms: ['none', 'HS256'] });",
+      "good": "jwt.verify(token, secret, { algorithms: ['HS256'] });"
+    },
+    {
+      "rule": "react/href-javascript",
+      "file": "Nav.tsx",
+      "bad": "<a href={'javascript:void(0)'}>Click</a>",
+      "good": "<button type=\"button\" onClick={handleClick}>Click</button>"
+    },
+    {
+      "rule": "node/insecure-cookie-flag",
+      "file": "session.js",
+      "bad": "res.cookie('token', jwtToken, { httpOnly: false });",
+      "good": "res.cookie('token', jwtToken, { httpOnly: true, secure: true });"
+    }
+  ]
+}

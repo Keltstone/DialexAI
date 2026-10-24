@@ -143,3 +143,119 @@ func IsLoosening(oldPol, newPol CategoryPolicy) bool {
 	return false
 }
 
+// RuleEnforcementLevel defines the action taken when a specific rule matches.
+type RuleEnforcementLevel string
+
+const (
+	LevelBlock  RuleEnforcementLevel = "block"
+	LevelWarn   RuleEnforcementLevel = "warn"
+	LevelNotice RuleEnforcementLevel = "notice"
+	LevelIgnore RuleEnforcementLevel = "ignore"
+)
+
+func ParseEnforcementLevel(s string) (RuleEnforcementLevel, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "block":
+		return LevelBlock, true
+	case "warn", "warning":
+		return LevelWarn, true
+	case "notice", "info":
+		return LevelNotice, true
+	case "ignore", "off", "disable", "disabled":
+		return LevelIgnore, true
+	default:
+		return "", false
+	}
+}
+
+// ProjectPolicy defines per-project or repository-level rule enforcement policy.
+type ProjectPolicy struct {
+	Version      string                          `json:"version,omitempty"`
+	DefaultLevel RuleEnforcementLevel            `json:"default_level,omitempty"`
+	Rules        map[string]RuleEnforcementLevel `json:"rules,omitempty"`
+}
+
+func LoadProjectPolicy(path string) (*ProjectPolicy, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var p ProjectPolicy
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// EffectiveLevel returns the resolved enforcement level for a given rule.
+func (p *ProjectPolicy) EffectiveLevel(ruleID string, defaultSeverity engines.Severity) RuleEnforcementLevel {
+	if p != nil && p.Rules != nil {
+		if lvl, ok := p.Rules[ruleID]; ok {
+			if norm, valid := ParseEnforcementLevel(string(lvl)); valid {
+				return norm
+			}
+		}
+	}
+	if p != nil && p.DefaultLevel != "" {
+		if norm, valid := ParseEnforcementLevel(string(p.DefaultLevel)); valid {
+			return norm
+		}
+	}
+	// Institutional default: high & critical block, medium & low warn, info notices
+	if defaultSeverity >= engines.High {
+		return LevelBlock
+	} else if defaultSeverity >= engines.Low {
+		return LevelWarn
+	}
+	return LevelNotice
+}
+
+// EvaluatedFindings partitions findings into blocked, warned, noticed, and ignored.
+type EvaluatedFindings struct {
+	Blocked []engines.Finding
+	Warned  []engines.Finding
+	Noticed []engines.Finding
+	Ignored []engines.Finding
+}
+
+func EvaluateFindings(fs []engines.Finding, pol *ProjectPolicy) EvaluatedFindings {
+	var ev EvaluatedFindings
+	for _, f := range fs {
+		level := pol.EffectiveLevel(f.Rule, f.Severity)
+		f.Level = string(level)
+		switch level {
+		case LevelBlock:
+			ev.Blocked = append(ev.Blocked, f)
+		case LevelWarn:
+			ev.Warned = append(ev.Warned, f)
+		case LevelNotice:
+			ev.Noticed = append(ev.Noticed, f)
+		case LevelIgnore:
+			ev.Ignored = append(ev.Ignored, f)
+		default:
+			ev.Blocked = append(ev.Blocked, f)
+		}
+	}
+	return ev
+}
+
+// Active returns all non-ignored findings (Blocked, Warned, and Noticed).
+func (ev EvaluatedFindings) Active() []engines.Finding {
+	var out []engines.Finding
+	out = append(out, ev.Blocked...)
+	out = append(out, ev.Warned...)
+	out = append(out, ev.Noticed...)
+	return out
+}
+
+// PolicyFails returns true if there are any findings assigned the 'block' enforcement level.
+func PolicyFails(ev EvaluatedFindings) bool {
+	for _, f := range ev.Blocked {
+		if f.Source != "ci-unattested" {
+			return true
+		}
+	}
+	return false
+}
+
+

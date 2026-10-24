@@ -301,12 +301,105 @@ func (a *App) getProjectPolicy(w http.ResponseWriter, r *http.Request) {
 		fail(w, err, 500)
 		return
 	}
+	rulePols, err := a.Store.RulePolicies(id)
+	if err != nil {
+		fail(w, err, 500)
+		return
+	}
 	writeJSON(w, map[string]any{
 		"project":     p.ID,
 		"enforcement": p.Enforcement,
 		"fail_on":     p.FailOn,
 		"policies":    pols,
+		"rules":       rulePols,
 	})
+}
+
+func (a *App) getProjectRulePolicies(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !a.canReadProject(r, id) {
+		http.NotFound(w, r)
+		return
+	}
+	p, err := a.Store.Project(id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	pols, err := a.Store.RulePolicies(p.ID)
+	if err != nil {
+		fail(w, err, 500)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"project": p.ID,
+		"rules":   pols,
+	})
+}
+
+func (a *App) setProjectRulePolicy(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	p, err := a.Store.Project(id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	var req struct {
+		Rule  string                      `json:"rule"`
+		Level policy.RuleEnforcementLevel `json:"level"`
+		Rules map[string]string           `json:"rules"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if req.Rules != nil {
+		for rID, lvl := range req.Rules {
+			if _, ok := policy.ParseEnforcementLevel(lvl); !ok {
+				http.Error(w, "invalid enforcement level: "+lvl, http.StatusBadRequest)
+				return
+			}
+			if err := a.Store.SetRulePolicy(p.ID, rID, policy.RuleEnforcementLevel(lvl)); err != nil {
+				fail(w, err, 500)
+				return
+			}
+		}
+	} else if req.Rule != "" {
+		if _, ok := policy.ParseEnforcementLevel(string(req.Level)); !ok {
+			http.Error(w, "invalid enforcement level: "+string(req.Level), http.StatusBadRequest)
+			return
+		}
+		if err := a.Store.SetRulePolicy(p.ID, req.Rule, req.Level); err != nil {
+			fail(w, err, 500)
+			return
+		}
+	} else {
+		http.Error(w, "missing rule or rules mapping", http.StatusBadRequest)
+		return
+	}
+	pols, _ := a.Store.RulePolicies(p.ID)
+	writeJSON(w, map[string]any{
+		"project": p.ID,
+		"rules":   pols,
+	})
+}
+
+func (a *App) deleteProjectRulePolicy(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	rule := r.PathValue("rule")
+	p, err := a.Store.Project(id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if rule == "" {
+		http.Error(w, "missing rule parameter", http.StatusBadRequest)
+		return
+	}
+	if err := a.Store.DeleteRulePolicy(p.ID, rule); err != nil {
+		fail(w, err, 500)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *App) updateProjectPolicy(w http.ResponseWriter, r *http.Request) {
