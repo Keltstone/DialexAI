@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "android/exported-component": "Block",
+    "android/biometric-weak-crypto": "Block",
+    "android/hardcoded-keystore-password": "Block",
+    "android/sensitive-log-leak": "Warn",
+    "android/allow-backup": "Notice",
+    "android/mock-location-allowed": "Ignore"
+  }
+}

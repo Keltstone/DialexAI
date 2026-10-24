@@ -1,0 +1,23 @@
+{
+  "name": "banking-rules",
+  "version": "1.0.0",
+  "rules": [
+    {
+      "id": "prohibit-direct-keystore-load",
+      "severity": "high",
+      "cwe": "CWE-798",
+      "message": "Direct KeyStore.load with password prohibited; use HardwareStrongBoxKeyStoreProvider",
+      "remediation": "Replace with HardwareStrongBoxKeyStoreProvider.getHardwareKey()",
+      "files": ["*.kt", "*.java"],
+      "pattern": "KeyStore\\.getInstance\\(\"AndroidKeyStore\"\\)"
+    }
+  ],
+  "tests": [
+    {
+      "rule": "prohibit-direct-keystore-load",
+      "file": "Test.kt",
+      "bad": "val ks = KeyStore.getInstance(\"AndroidKeyStore\")",
+      "good": "val ks = HardwareStrongBoxKeyStoreProvider.getHardwareKey()"
+    }
+  ]
+}

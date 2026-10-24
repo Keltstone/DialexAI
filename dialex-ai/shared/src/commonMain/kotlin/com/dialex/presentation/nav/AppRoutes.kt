@@ -46,3 +46,7 @@ data class Graph(val projectId: String) : AppRoute
 /** Deliberation Arena & Null Hypothesis Benchmark Suite. */
 @Serializable
 data object BenchmarkArena : AppRoute
+
+/** Subtle statutory licensing dedication, third-party attribution ledger, and disclaimers. */
+@Serializable
+data object LicensingDedication : AppRoute

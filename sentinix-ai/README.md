@@ -175,19 +175,74 @@ That last sentence matters. It is there so a short list is never mistaken for a 
 
 Prefer a report that never fails the build? Add `-report-only`: findings are printed (and uploaded, if you use `-server`) but the exit code stays `0` unless an engine failed.
 
-### Adopting Sentinix on an existing codebase
+### Adopting Sentinix on an existing codebase (5-Minute Setup)
 
-Run it on a mature project and you will get findings that have lived there for years. You do not want them to block anyone tomorrow, and you do not want to ignore them forever. A **baseline** solves both: record today's findings once, then fail only on new ones.
+Protecting your repository takes less than 5 minutes and requires **zero servers or databases**:
 
+#### Step 1: Install the CLI
 ```bash
-./sentinix scan -baseline .sentinix-baseline.json -update-baseline .
+# macOS & Linux (Homebrew)
+brew install keltstone/tap/sentinix
+
+# Or via 1-Line Universal Installer (macOS, Linux)
+curl -sSL https://raw.githubusercontent.com/Keltstone/DialexAI/main/scripts/install.sh | bash -s -- --app sentinix
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/Keltstone/DialexAI/main/scripts/install.ps1 | iex
 ```
 
+#### Step 2: Establish the baseline
+Run it on a mature project and you will get findings that have lived there for years. You do not want them to block anyone tomorrow, and you do not want to ignore them forever. A **baseline** records today's findings once with content-based fingerprints, so future scans **only** fail on newly introduced issues:
+
 ```bash
-./sentinix scan -baseline .sentinix-baseline.json -fail-on high .
+sentinix scan -baseline .sentinix-baseline.json -update-baseline .
 ```
 
-Commit `.sentinix-baseline.json`. It stores fingerprints, so it survives refactors and line shifts.
+#### Step 3: (Optional) Tune policy and custom rules
+- **`.sentinix/policy.json`:** Control which rules `Block`, `Warn`, `Notice`, or `Ignore` in this repository:
+  ```json
+  {
+    "rules": {
+      "android/exported-component": "Block",
+      "android/allow-backup": "Warn",
+      "node/insecure-cookie-flag": "Ignore"
+    }
+  }
+  ```
+- **`.sentinix/custom-rules.json`:** Add proprietary team checks (e.g., internal mTLS HTTP client enforcement).
+
+#### Step 4: Add the GitHub Actions workflow
+Create `.github/workflows/sentinix.yml`:
+```yaml
+name: Sentinix Security Gate
+on: [push, pull_request]
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Sentinix
+        run: brew install keltstone/tap/sentinix || (curl -sSL https://raw.githubusercontent.com/Keltstone/DialexAI/main/scripts/install.sh | bash -s -- --app sentinix)
+      - name: Scan PR Changes
+        run: sentinix scan -baseline .sentinix-baseline.json -fail-on high -sarif sentinix.sarif .
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: sentinix.sarif
+```
+
+#### Step 5: Commit and push
+```bash
+git add .sentinix-baseline.json .sentinix/ .github/workflows/sentinix.yml
+git commit -m "chore(security): protect repo with Sentinix AI"
+git push
+```
+
+Commit `.sentinix-baseline.json`. Because it stores content hashes rather than line numbers, normal code editing and line shifts will never invalidate your baseline.
 
 ### Handy details
 

@@ -21,6 +21,167 @@
 
 ---
 
+## 🚀 The 5-Minute Quickstart: Setup Sentinix in Any Repo
+
+You can set up Sentinix in any repository (Android, iOS, Go, Python, React, etc.) in under 5 minutes with zero server infrastructure required.
+
+### Step 1: Install the Sentinix CLI
+
+Choose your operating system or environment:
+
+```bash
+# macOS & Linux (Homebrew)
+brew install keltstone/tap/sentinix
+
+# Or via 1-Line Universal Installer (macOS, Linux)
+curl -sSL https://raw.githubusercontent.com/Keltstone/DialexAI/main/scripts/install.sh | bash -s -- --app sentinix
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/Keltstone/DialexAI/main/scripts/install.ps1 | iex
+
+# Go Developers (from source)
+go install github.com/Keltstone/DialexAI/sentinix-ai/cmd/sentinix@main
+```
+
+Verify the installation:
+```bash
+sentinix version
+```
+
+---
+
+### Step 2: Establish the Security Baseline (30 Seconds)
+
+Running a security scanner on an existing codebase often uncovers pre-existing technical debt. Sentinix solves this using **content-fingerprinted baselines** — pre-existing issues are recorded so they never block your current sprint:
+
+```bash
+# From the root of your project:
+sentinix scan -baseline .sentinix-baseline.json -update-baseline .
+```
+
+Sentinix scans the repository, fingerprints all existing issues, and generates `.sentinix-baseline.json`. Future scans will now **only** report and fail on newly introduced vulnerabilities.
+
+---
+
+### Step 3: (Optional) Tune Rule Enforcements (`.sentinix/policy.json`)
+
+To customize how individual rules behave in your repository, create `.sentinix/policy.json`:
+
+```json
+{
+  "rules": {
+    "android/exported-component": "Block",
+    "android/biometric-weak-crypto": "Block",
+    "android/sensitive-log-leak": "Warn",
+    "android/allow-backup": "Notice",
+    "android/mock-location-allowed": "Ignore"
+  }
+}
+```
+
+* **`Block`:** Fails the CI gate on pull request (exit code 1).
+* **`Warn`:** Emits a prominent warning without blocking merge.
+* **`Notice`:** Recorded quietly in findings and audit log for visibility.
+* **`Ignore`:** Completely suppresses rule execution.
+
+---
+
+### Step 4: (Optional) Add Team Custom Rules (`.sentinix/custom-rules.json`)
+
+If your team enforces internal SDKs or architectural standards, declare them directly in `.sentinix/custom-rules.json`:
+
+```json
+{
+  "name": "internal-standards",
+  "version": "1.0.0",
+  "rules": [
+    {
+      "id": "corp/prohibit-direct-http-client",
+      "severity": "high",
+      "cwe": "CWE-693",
+      "message": "Direct OkHttpClient usage prohibited; use SecureCorpHttpClient with mTLS",
+      "remediation": "Replace with SecureCorpHttpClient.create()",
+      "files": ["*.kt", "*.java"],
+      "pattern": "OkHttpClient\\.Builder\\(\\)"
+    }
+  ],
+  "tests": [
+    {
+      "rule": "corp/prohibit-direct-http-client",
+      "file": "Test.kt",
+      "bad": "val client = OkHttpClient.Builder().build()",
+      "good": "val client = SecureCorpHttpClient.create()"
+    }
+  ]
+}
+```
+
+---
+
+### Step 5: Add CI Workflow (GitHub Actions / GitLab CI)
+
+#### For GitHub Actions:
+Create `.github/workflows/sentinix.yml`:
+
+```yaml
+name: Sentinix Security Gate
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  push:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+  security-events: write  # Uploads SARIF to GitHub Security Tab
+  pull-requests: write
+
+jobs:
+  sentinix-scan:
+    name: Sentinix Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Sentinix CLI
+        run: |
+          brew install keltstone/tap/sentinix || \
+          (curl -sSL https://raw.githubusercontent.com/Keltstone/DialexAI/main/scripts/install.sh | bash -s -- --app sentinix)
+
+      - name: Execute Scan Against Baseline
+        run: |
+          sentinix scan \
+            -baseline .sentinix-baseline.json \
+            -fail-on high \
+            -sarif sentinix.sarif \
+            .
+
+      - name: Upload SARIF to GitHub Security Tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: sentinix.sarif
+          category: sentinix-security-gate
+```
+
+---
+
+### Step 6: Commit and Push
+
+```bash
+git add .sentinix-baseline.json .sentinix/ .github/workflows/sentinix.yml
+git commit -m "chore(security): protect repository with Sentinix AI gate"
+git push
+```
+
+Your repository is now secured! Future pull requests will be automatically analyzed against the 135 built-in rules, your custom rules, and your policy enforcement levels.
+
+---
+
 ## Scenario 1: Serverless GitHub Actions
 
 Run Sentinix without maintaining a 24/7 server. Scans execute directly on GitHub Actions runners, using Git itself to track the baseline and uploading findings to GitHub's native **Security** tab.
@@ -29,7 +190,7 @@ Run Sentinix without maintaining a 24/7 server. Scans execute directly on GitHub
 On your workstation, generate your initial baseline file and push it to GitHub:
 ```bash
 # Install Sentinix via Homebrew shorthand
-brew install kolta-labs/tap/sentinix
+brew install keltstone/tap/sentinix
 
 # Generate baseline on your main branch
 sentinix scan -baseline .sentinix-baseline.json -update-baseline .
@@ -70,7 +231,7 @@ jobs:
       - name: Install Sentinix CLI
         run: |
           # Install via Homebrew
-          brew install kolta-labs/tap/sentinix
+          brew install keltstone/tap/sentinix
           
           # Verify installation
           sentinix version
@@ -117,7 +278,7 @@ sentinix:
   image: golang:1.23-alpine
   before_script:
     - apk add --no-cache git ca-certificates
-    - go install github.com/Kolta-Labs/DialexAI/sentinix-ai/cmd/sentinix@main
+    - go install github.com/Keltstone/DialexAI/sentinix-ai/cmd/sentinix@main
   script:
     - sentinix scan -baseline .sentinix-baseline.json -fail-on high -sarif sentinix.sarif .
   artifacts:
@@ -321,7 +482,7 @@ kubectl create secret generic sentinix-secrets \
 replicaCount: 1 # Run single replica (scheduler executes internally)
 
 image:
-  repository: ghcr.io/kolta-labs/sentinix
+  repository: ghcr.io/keltstone/sentinix
   tag: "1.0.0"
   pullPolicy: IfNotPresent
 
@@ -370,7 +531,7 @@ Ensure developers catch vulnerabilities locally before committing code.
 
 ### Step 1: Install CLI
 ```bash
-brew install kolta-labs/tap/sentinix
+brew install keltstone/tap/sentinix
 ```
 
 ### Step 2: Add Git Pre-Commit Hook

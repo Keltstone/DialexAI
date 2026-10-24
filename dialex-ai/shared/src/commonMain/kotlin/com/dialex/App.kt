@@ -42,8 +42,10 @@ import com.dialex.domain.repository.GraphRepository
 import com.dialex.domain.repository.BenchmarkRepository
 import com.dialex.presentation.arena.BenchmarkRoute
 import com.dialex.presentation.graph.GraphRoute
+import com.dialex.presentation.legal.licensing.LicensingRoute
 import com.dialex.presentation.nav.BenchmarkArena
 import com.dialex.presentation.nav.Graph
+import com.dialex.presentation.nav.LicensingDedication
 import com.dialex.presentation.profile.ProfileLockDialog
 import com.dialex.engine.EngineClient
 import com.dialex.ui.LocalWindowMaximizeToggle
@@ -921,6 +923,13 @@ fun App(
                                             )
                                         }
                                     }
+                                    is LicensingDedication -> {
+                                        LicensingRoute(
+                                            backStack = backStack,
+                                            onBack = { backStack.removeLast() },
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1044,6 +1053,13 @@ fun App(
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 }
+                            }
+                            is LicensingDedication -> {
+                                LicensingRoute(
+                                    backStack = backStack,
+                                    onBack = { backStack.removeLast() },
+                                    modifier = Modifier.fillMaxSize()
+                                )
                             }
                             is Workspace -> {
                                 MobileNavigationShell(

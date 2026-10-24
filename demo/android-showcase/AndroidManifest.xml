@@ -1,0 +1,23 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.enterprise.banking">
+    <application
+        android:label="EnterpriseBank"
+        android:allowBackup="true"
+        android:debuggable="true">
+
+        <!-- Exported without permission: High Risk -->
+        <activity
+            android:name=".PaymentActivity"
+            android:exported="true">
+        </activity>
+
+        <!-- App Link with autoVerify disabled -->
+        <activity android:name=".OAuthCallbackActivity">
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="bank.corp.internal" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
