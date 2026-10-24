@@ -13,3 +13,6 @@ runs:
       run: |
         go install scribex/cmd/scribex@latest 2>/dev/null || (cd "${{ github.action_path }}/.." && go build -o "$RUNNER_TEMP/scribex" ./cmd/scribex && echo "$RUNNER_TEMP" >> "$GITHUB_PATH")
         scribex check -base "${{ inputs.base }}"
+    - if: github.event_name == 'pull_request' && env.GITHUB_TOKEN != ''
+      shell: bash
+      run: scribex comment -repo "$GITHUB_REPOSITORY" -pr "${{ github.event.number }}" -base "${{ inputs.base }}"

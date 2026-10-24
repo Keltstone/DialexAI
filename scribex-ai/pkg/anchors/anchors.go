@@ -15,9 +15,10 @@ var open = regexp.MustCompile(`^\s*<!--\s*@scribex:anchor\(([^)#]+)#([^)\s]+)\)(
 type Lookup func(file, sym string) (string, bool)
 
 type Issue struct {
-	Line int // 1-based
-	Ref  string
-	Msg  string
+	Line  int // 1-based
+	Ref   string
+	Msg   string
+	Stale bool // fixable by sync; false = dead anchor
 }
 
 func (i Issue) String() string { return fmt.Sprintf(":%d %s: %s", i.Line, i.Ref, i.Msg) }
@@ -42,13 +43,13 @@ func Process(md string, look Lookup, sync bool) ([]Issue, string) {
 		ref := m[1] + "#" + m[2]
 		sig, ok := look(m[1], m[2])
 		if !ok {
-			issues = append(issues, Issue{i + 1, ref, "symbol not found (dead anchor)"})
+			issues = append(issues, Issue{i + 1, ref, "symbol not found (dead anchor)", false})
 			out = append(out, in[i])
 			continue
 		}
 		want := Hash(sig)
 		if m[3] != want {
-			issues = append(issues, Issue{i + 1, ref, "stale: signature changed or never synced"})
+			issues = append(issues, Issue{i + 1, ref, "stale: signature changed or never synced", true})
 		}
 		if !sync {
 			out = append(out, in[i])
@@ -64,4 +65,14 @@ func Process(md string, look Lookup, sync bool) ([]Issue, string) {
 		}
 	}
 	return issues, strings.Join(out, "\n")
+}
+
+// Count returns the number of anchors in md.
+func Count(md string) (n int) {
+	for _, l := range strings.Split(md, "\n") {
+		if open.MatchString(l) {
+			n++
+		}
+	}
+	return
 }
