@@ -44,6 +44,8 @@ type Engine struct {
 	// runs on the current tree. Reproduced -> evidence says so; otherwise the finding stays, marked unconfirmed.
 	Run    ai.Runner
 	PoCCmd []string
+	// Packs add classes (and prompt hints) from signed hunt packs; see LoadPack.
+	Packs []*Pack
 }
 
 func (e *Engine) Name() string { return "llm-audit" }
@@ -94,16 +96,16 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 				return out, fmt.Errorf("REDACTION_UNAVAILABLE: %w", err)
 			}
 		}
-		for _, class := range classesFor(ep) {
+		for _, class := range e.classesFor(ep) {
 			for _, p := range passes {
 				if calls >= e.MaxCalls {
 					e.Truncated = true
 					return out, nil
 				}
 				calls++
-				user := fmt.Sprintf("Entry point (%s): %s\nVulnerability class: %s\n%s\n%s\n"+
+				user := fmt.Sprintf("Entry point (%s): %s\nVulnerability class: %s\n%s%s\n%s\n"+
 					`Reply {"vulnerable":bool,"severity":"low|medium|high|critical","confidence":0..1,"reason":"short"}.`,
-					strings.Join(ep.Kinds, "+"), ep.Name, class, p.ask, ai.Untrusted(code))
+					strings.Join(ep.Kinds, "+"), ep.Name, class, p.ask, e.hint(class), ai.Untrusted(code))
 				reply, err := m.Complete(ctx, ai.SysRules, user)
 				if err != nil {
 					continue
@@ -123,7 +125,7 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 				f := engines.Finding{
 					Rule: "hunt/" + class, Engine: e.Name(), Category: engines.CategorySecurity,
 					File: ep.File, Line: 1, Severity: sev, Message: truncate(a.Reason, 300),
-					CWE: cwe[class], Match: ep.Name + ":" + class, Source: "llm", Level: "notice",
+					CWE: e.cweOf(class), Match: ep.Name + ":" + class, Source: "llm", Level: "notice",
 				}
 				if e.Run != nil && len(e.PoCCmd) > 0 && calls < e.MaxCalls {
 					calls++
@@ -144,19 +146,54 @@ func truncate(s string, n int) string {
 	return s
 }
 
-// classesFor is the union of the classes of every kind the entry point has, without repeats.
-func classesFor(ep Entry) []string {
+// classesFor is the union of the built-in and pack classes of every kind the entry point has, without repeats.
+func (e *Engine) classesFor(ep Entry) []string {
 	var out []string
 	seen := map[string]bool{}
+	add := func(c string) {
+		if !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
 	for _, k := range ep.Kinds {
 		for _, c := range classes[k] {
-			if !seen[c] {
-				seen[c] = true
-				out = append(out, c)
+			add(c)
+		}
+		for _, p := range e.Packs {
+			for _, c := range p.Classes[k] {
+				add(c.ID)
 			}
 		}
 	}
 	return out
+}
+
+func (e *Engine) class(id string) (c Class, ok bool) {
+	for _, p := range e.Packs {
+		for _, cs := range p.Classes {
+			for _, c := range cs {
+				if c.ID == id {
+					return c, true
+				}
+			}
+		}
+	}
+	return
+}
+
+func (e *Engine) hint(id string) string {
+	if c, ok := e.class(id); ok && c.Hint != "" {
+		return "Check specifically: " + c.Hint + "\n"
+	}
+	return ""
+}
+
+func (e *Engine) cweOf(id string) string {
+	if c, ok := e.class(id); ok && c.CWE != "" {
+		return c.CWE
+	}
+	return cwe[id]
 }
 
 // proof returns the short evidence line: whether a model-written test reproduced the issue.

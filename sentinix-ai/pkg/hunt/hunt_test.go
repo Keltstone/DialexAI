@@ -2,6 +2,7 @@ package hunt
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"sentinix/pkg/ai"
 	"sentinix/pkg/bench"
 	"sentinix/pkg/engines"
+	"sentinix/pkg/packs"
 )
 
 const benchDir = "../../bench/hunt-android"
@@ -98,3 +100,30 @@ func TestPoCReproducedAndUnconfirmed(t *testing.T) {
 }
 
 var errTest = errors.New("test failed: exploit works")
+
+func TestSignedPackAddsClass(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	body := `{"name":"x","version":"1","classes":{"component":[{"id":"tapjacking","cwe":"CWE-1021","hint":"overlay on exported activity"}]}}`
+	signed, err := packs.Sign([]byte(body), priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadPack(signed, nil); err == nil {
+		t.Fatal("unsigned-by-trusted pack loaded")
+	}
+	p, err := LoadPack(signed, []ed25519.PublicKey{pub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &Engine{Models: []ai.Model{fake{local: true}}, Policy: "local-only", MaxCalls: 100, Packs: []*Pack{p}}
+	if got := e.classesFor(Entry{Kinds: []string{"component"}}); got[len(got)-1] != "tapjacking" || e.cweOf("tapjacking") != "CWE-1021" {
+		t.Fatal(got)
+	}
+	if !strings.Contains(e.hint("tapjacking"), "overlay on exported activity") || e.hint("authz") != "" {
+		t.Fatal("hint not scoped to its class")
+	}
+	bad, _ := packs.Sign([]byte(`{"name":"x","version":"1","classes":{"nope":[{"id":"a-b"}]}}`), priv)
+	if _, err := LoadPack(bad, []ed25519.PublicKey{pub}); err == nil {
+		t.Fatal("unknown kind accepted")
+	}
+}

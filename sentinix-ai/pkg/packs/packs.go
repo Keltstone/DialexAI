@@ -126,6 +126,15 @@ func Parse(body []byte) (*Pack, error) {
 
 // Load verifies the signature against any trusted key, then parses.
 func Load(data []byte, trusted []ed25519.PublicKey) (*Pack, error) {
+	body, err := Verify(data, trusted)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(body)
+}
+
+// Verify checks a Signed document against any trusted key and returns the signed body. Reused by hunt packs.
+func Verify(data []byte, trusted []ed25519.PublicKey) ([]byte, error) {
 	var s Signed
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, err
@@ -136,7 +145,7 @@ func Load(data []byte, trusted []ed25519.PublicKey) (*Pack, error) {
 	}
 	for _, k := range trusted {
 		if ed25519.Verify(k, s.Body, sig) {
-			return Parse(s.Body)
+			return s.Body, nil
 		}
 	}
 	return nil, fmt.Errorf("pack signature not trusted")

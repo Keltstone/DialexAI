@@ -630,6 +630,8 @@ func huntCmd(args []string) {
 	maxCalls := fl.Int("max-calls", 200, "hard cap on model calls")
 	sbImage := fl.String("sandbox-image", "", "container image; with -poc-cmd, model-written PoC tests run in it (no network)")
 	pocCmd := fl.String("poc-cmd", "", "test command for PoC tests, e.g. \"./gradlew test\" (needs -sandbox-image)")
+	huntPacks := fl.String("hunt-packs", "", "directory of signed hunt packs (extra vulnerability classes)")
+	trust := fl.String("trust", "", "file of trusted pack public keys (needed with -hunt-packs)")
 	fl.Parse(args)
 	root := "."
 	if fl.NArg() > 0 {
@@ -641,6 +643,20 @@ func huntCmd(args []string) {
 	ms, err := ai.LoadModels(*models)
 	die(err)
 	e := &hunt.Engine{Models: ms, Policy: *policy, MaxCalls: *maxCalls}
+	if *huntPacks != "" {
+		keys, err := packs.ReadKeys(*trust)
+		die(err)
+		files, _ := filepath.Glob(filepath.Join(*huntPacks, "*.json"))
+		for _, f := range files {
+			b, err := os.ReadFile(f)
+			die(err)
+			p, err := hunt.LoadPack(b, keys)
+			if err != nil {
+				die(fmt.Errorf("%s: %w", f, err))
+			}
+			e.Packs = append(e.Packs, p)
+		}
+	}
 	if *pocCmd != "" {
 		if *sbImage == "" {
 			die(fmt.Errorf("-poc-cmd runs model-written code: -sandbox-image is required"))
