@@ -1,0 +1,5 @@
+// Singleton object
+object DatabaseConfig {
+    val url: String = "jdbc:sqlite::memory:"
+    fun connect() {}
+}

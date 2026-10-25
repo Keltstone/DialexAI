@@ -1,0 +1,3 @@
+// Value class
+@JvmInline
+value class Password(val value: String)

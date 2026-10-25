@@ -1,0 +1,3 @@
+ScopeTest	class ScopeTest
+ScopeTest.pub	public val pub
+ScopeTest.pubFun	fun pubFun()

@@ -1,0 +1,6 @@
+package p
+
+type (
+	First  struct{ A int }
+	Second struct{ B string }
+)

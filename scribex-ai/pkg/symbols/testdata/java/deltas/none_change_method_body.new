@@ -1,0 +1,1 @@
+public class P { public int calc() { int x = 1; int y = 2; return x + y; } }

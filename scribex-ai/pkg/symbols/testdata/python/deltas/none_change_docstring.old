@@ -1,0 +1,3 @@
+def f():
+    """old doc"""
+    pass

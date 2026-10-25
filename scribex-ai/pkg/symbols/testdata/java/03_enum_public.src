@@ -1,0 +1,6 @@
+public enum Status {
+    PENDING,
+    ACTIVE,
+    DISABLED;
+    public boolean isActive() { return this == ACTIVE; }
+}

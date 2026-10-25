@@ -1,0 +1,2 @@
+export const client: HttpClient = createClient();
+export const timestamp: number = Date.now();

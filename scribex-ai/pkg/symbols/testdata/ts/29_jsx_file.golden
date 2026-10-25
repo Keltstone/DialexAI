@@ -1,0 +1,1 @@
+Button	export function Button(props: { label: string })

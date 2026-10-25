@@ -1,0 +1,1 @@
+export function calc(x: string): number { return 0; }

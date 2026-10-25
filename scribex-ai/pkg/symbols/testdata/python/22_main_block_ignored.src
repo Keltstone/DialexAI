@@ -1,0 +1,5 @@
+def real_func():
+    return "ok"
+
+if __name__ == "__main__":
+    def run_main(): pass

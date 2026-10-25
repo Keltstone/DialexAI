@@ -1,0 +1,6 @@
+process	@overload def process(x: int) -> int:
+@overload def process(x: str) -> str:
+def process(x):
+process(_)	def process(x):
+process(int)	@overload def process(x: int) -> int:
+process(str)	@overload def process(x: str) -> str:

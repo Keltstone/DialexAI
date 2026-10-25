@@ -1,0 +1,1 @@
+oldMethod	@Deprecated("Use newMethod instead", ReplaceWith("newMethod()"), DeprecationLevel.WARNING) fun oldMethod()

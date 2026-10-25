@@ -1,0 +1,4 @@
+Int.pow	infix fun Int.pow(exp: Int): Int
+Point.plus	operator fun Point.plus(other: Point): Point
+fetch	suspend fun fetch(): String
+parse	inline fun<reified T> parse(raw: String): T?

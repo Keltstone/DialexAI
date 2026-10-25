@@ -1,0 +1,3 @@
+Config	public interface Config
+Config.DEFAULT_HOST	String DEFAULT_HOST = "localhost"
+Config.MAX_CONNECTIONS	int MAX_CONNECTIONS = 100

@@ -1,0 +1,5 @@
+Direction	export enum Direction
+Direction.Down	Down = "DOWN"
+Direction.Left	Left = "LEFT"
+Direction.Right	Right = "RIGHT"
+Direction.Up	Up = "UP"

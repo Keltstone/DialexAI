@@ -1,0 +1,4 @@
+User	export class User
+User.constructor	constructor(name: string)
+User.greet	greet(): string
+User.name	name: string

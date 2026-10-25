@@ -1,0 +1,5 @@
+__all__ = ["fn_one"]
+__all__ += ["fn_two"]
+
+def fn_one(): pass
+def fn_two(): pass

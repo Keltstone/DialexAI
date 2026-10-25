@@ -1,0 +1,2 @@
+Point	public record Point(double x, double y)
+Point.distance	public double distance()

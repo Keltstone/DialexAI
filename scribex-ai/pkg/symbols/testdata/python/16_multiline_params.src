@@ -1,0 +1,6 @@
+def configure(
+    host: str,  # connection host
+    port: int = 8080,
+    secure: bool = True
+) -> None:
+    pass

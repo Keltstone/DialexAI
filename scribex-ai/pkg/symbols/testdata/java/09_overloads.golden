@@ -1,0 +1,5 @@
+MathHelper	public class MathHelper
+MathHelper.multiply	public int multiply(int a, int b)
+public double multiply(double a, double b)
+MathHelper.multiply(double,double)	public double multiply(double a, double b)
+MathHelper.multiply(int,int)	public int multiply(int a, int b)

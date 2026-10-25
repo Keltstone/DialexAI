@@ -1,0 +1,2 @@
+double	fun double(x: Int): Int
+identity	fun<T> identity(x: T): T

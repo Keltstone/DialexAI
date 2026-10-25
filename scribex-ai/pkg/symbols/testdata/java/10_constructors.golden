@@ -1,0 +1,5 @@
+Connection	public class Connection
+Connection.<init>	public Connection(String url)
+public Connection(String url, int timeout)
+Connection.<init>(String)	public Connection(String url)
+Connection.<init>(String,int)	public Connection(String url, int timeout)

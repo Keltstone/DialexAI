@@ -1,0 +1,3 @@
+AppConfig	class AppConfig:
+AppConfig.ENV	ENV: str = "prod"
+AppConfig.PORT	PORT: int = 443

@@ -1,0 +1,4 @@
+Callable	export interface Callable
+Callable.()	(): void;
+Callable.[]	[index: number]: boolean;
+Callable.new	new(arg: string): any;

@@ -1,0 +1,5 @@
+package p
+
+func Max[T any](a, b T) T {
+	return a
+}

@@ -1,0 +1,2 @@
+/* New block comment */
+fun greet(): String = "hi"

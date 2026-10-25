@@ -1,0 +1,3 @@
+StatusActive	const StatusActive = iota
+StatusClosed	const StatusClosed = iota
+StatusPending	const StatusPending = iota

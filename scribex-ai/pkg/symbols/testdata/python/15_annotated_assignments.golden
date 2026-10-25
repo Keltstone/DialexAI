@@ -1,0 +1,2 @@
+retry_count	retry_count: int
+timeout_seconds	timeout_seconds: float

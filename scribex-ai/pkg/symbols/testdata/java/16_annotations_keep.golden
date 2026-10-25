@@ -1,0 +1,4 @@
+AnnotatedClass	public class AnnotatedClass
+AnnotatedClass.castMethod	public void castMethod()
+AnnotatedClass.oldMethod	@Deprecated public void oldMethod()
+AnnotatedClass.toString	public String toString()

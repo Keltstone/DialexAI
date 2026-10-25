@@ -1,0 +1,5 @@
+__all__ = ["exported_fn", "ExportedClass"]
+
+def exported_fn(): pass
+def hidden_fn(): pass
+class ExportedClass: pass

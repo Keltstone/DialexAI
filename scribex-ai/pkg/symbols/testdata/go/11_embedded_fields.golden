@@ -1,0 +1,1 @@
+AdminUser	type AdminUser struct { User Role string }

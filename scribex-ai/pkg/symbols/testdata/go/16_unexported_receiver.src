@@ -1,0 +1,7 @@
+package p
+
+type privateHelper struct{}
+
+func (p privateHelper) Hidden() {}
+
+func PublicRunner() {}

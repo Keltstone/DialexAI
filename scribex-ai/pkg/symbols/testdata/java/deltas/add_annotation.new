@@ -1,0 +1,1 @@
+public class P { @Deprecated public void oldMethod() {} }

@@ -1,0 +1,1 @@
+filter_items	def filter_items(items: list, predicate = lambda x: x> 0) -> list:

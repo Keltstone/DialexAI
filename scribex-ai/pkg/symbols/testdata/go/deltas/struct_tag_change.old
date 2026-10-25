@@ -1,0 +1,2 @@
+package p
+type S struct { X int `json:"x"` }

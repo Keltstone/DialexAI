@@ -29,7 +29,7 @@ It is the **sixth tool** in the Dialex Suite, joining **Dialex AI**, **Artix AI*
 ## 3. Product Principles & Architecture
 
 ### 3.1 Non-Negotiables
-1. **Deterministic Over Generative**: AST parsing and symbol graph resolution (Tree-sitter / SCIP) determine *what* changed and *where* docs are anchored. AI is only used to synthesize clear, contextual prose.
+1. **Deterministic Over Generative**: Deterministic parsing and symbol graph resolution determine *what* changed and *where* docs are anchored. AI is only used to synthesize clear, contextual prose.
 2. **Zero-Token Impact Gate**: If a PR only alters internal function implementation without changing public APIs, exported types, config schemas, or contracts, the LLM is **never invoked**.
 3. **In-Repo First, Enterprise Extended**: Works natively in git via Markdown, OpenAPI, and Mermaid.js, with first-class enterprise connectors for Confluence and Jira.
 4. **Non-Invasive Developer Experience**: Never spams developers. Generates clean companion commits or actionable, consolidated PR review suggestions.
@@ -40,12 +40,12 @@ It is the **sixth tool** in the Dialex Suite, joining **Dialex AI**, **Artix AI*
 flowchart TB
     subgraph GitLayer ["Git & CI/CD Layer"]
         PR["PR / Push Event"]
-        AST["Tree-sitter / Polyglot AST Engine"]
+        AST["Polyglot Symbol Scanner"]
     end
 
     subgraph CoreEngine ["Scribex Core Engine"]
         ImpactGate["Zero-Token Impact Gate"]
-        Graph["Code-to-Doc Anchor Graph (SCIP / Annotations)"]
+        Graph["Code-to-Doc Anchor Graph (Annotations)"]
         Compressor["AST Skeletonizer & Context Pruner"]
         Agent["Multi-Tier RAG & Synthesis Agent"]
         Verify["Deterministic Truth Verifier"]
@@ -111,7 +111,7 @@ For external Confluence pages, Scribex stores page-to-symbol mappings in `.scrib
 ## 6. Phased Implementation Roadmap
 
 ### Phase 1: MVP Core (CLI + In-Repo Sync)
-* Polyglot AST parser (Go, Kotlin/Java, TypeScript/JS, Python via Tree-sitter).
+* Polyglot symbol scanner (Go, Kotlin, Java, TypeScript/JS, Python).
 * Zero-token impact gate for PR diffs.
 * In-repo Markdown anchor sync (`<!-- @scribex:anchor -->`).
 * Mermaid sequence and dependency diagram generator.

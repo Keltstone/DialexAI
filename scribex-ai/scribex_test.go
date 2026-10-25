@@ -9,7 +9,10 @@ import (
 )
 
 func TestSymbolsAndAnchors(t *testing.T) {
-	g := symbols.Extract("a.go", []byte("package a\nfunc Verify(t string) error { return nil }\nfunc hidden() {}\ntype S struct{ X int }\nfunc (s *S) Do() {}\n"))
+	g, err := symbols.Extract("a.go", []byte("package a\nfunc Verify(t string) error { return nil }\nfunc hidden() {}\ntype S struct{ X int }\nfunc (s *S) Do() {}\n"))
+	if err != nil {
+		t.Fatalf("extract error: %v", err)
+	}
 	for _, k := range []string{"Verify", "S", "S.Do"} {
 		if g[k] == "" {
 			t.Fatalf("missing %s in %v", k, g)
@@ -18,13 +21,16 @@ func TestSymbolsAndAnchors(t *testing.T) {
 	if g["hidden"] != "" {
 		t.Fatal("unexported leaked")
 	}
-	if symbols.Extract("a.py", []byte("def pub(x): pass\ndef _priv(): pass\n"))["pub"] == "" {
+	pySyms, _ := symbols.Extract("a.py", []byte("def pub(x): pass\ndef _priv(): pass\n"))
+	if pySyms["pub"] == "" {
 		t.Fatal("py")
 	}
-	if symbols.Extract("a.ts", []byte("export function f(a: number): void {\n"))["f"] == "" {
+	tsSyms, _ := symbols.Extract("a.ts", []byte("export function f(a: number): void {\n}\n"))
+	if tsSyms["f"] == "" {
 		t.Fatal("ts")
 	}
-	if symbols.Extract("a.kt", []byte("private fun x() {}\nfun y(a: Int): Int = a\n"))["x"] != "" {
+	ktSyms, _ := symbols.Extract("a.kt", []byte("private fun x() {}\nfun y(a: Int): Int = a\n"))
+	if ktSyms["x"] != "" {
 		t.Fatal("kt private")
 	}
 

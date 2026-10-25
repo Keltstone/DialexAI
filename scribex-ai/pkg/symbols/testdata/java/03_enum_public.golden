@@ -1,0 +1,5 @@
+Status	public enum Status
+Status.ACTIVE	ACTIVE
+Status.DISABLED	DISABLED
+Status.PENDING	PENDING
+Status.isActive	public boolean isActive()

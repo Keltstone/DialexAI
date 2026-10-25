@@ -1,0 +1,2 @@
+CustomFactory	class CustomFactory
+CustomFactory.Builder.build	fun build(): CustomFactory

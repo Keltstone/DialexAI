@@ -1,0 +1,3 @@
+Result	sealed class Result<out T>
+Result.Failure	data class Failure(val error: Throwable): Result<Nothing>()
+Result.Success	data class Success<T>(val data: T): Result<T>()

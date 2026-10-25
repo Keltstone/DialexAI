@@ -1,0 +1,9 @@
+// Enum with entries, arguments, and body
+enum class Priority(val level: Int) {
+    LOW(1),
+    MEDIUM(2),
+    HIGH(3) {
+        fun isUrgent(): Boolean = true
+    };
+    fun isHigh(): Boolean = level >= 3
+}

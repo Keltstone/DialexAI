@@ -1,0 +1,1 @@
+export class C { #hidden = 1; public visible = 2; }

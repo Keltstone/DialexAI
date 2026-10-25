@@ -1,0 +1,3 @@
+// Top level property
+val appVersion: String = "1.0.0"
+var counter: Int = 0

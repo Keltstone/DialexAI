@@ -1,0 +1,9 @@
+// Private, internal, and protected members excluded
+class ScopeTest {
+    public val pub = 1
+    private val priv = 2
+    internal val inter = 3
+    protected val prot = 4
+    fun pubFun() {}
+    private fun privFun() {}
+}

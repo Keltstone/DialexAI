@@ -1,0 +1,3 @@
+DatabaseConfig	object DatabaseConfig
+DatabaseConfig.connect	fun connect()
+DatabaseConfig.url	val url: String

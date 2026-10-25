@@ -1,0 +1,6 @@
+public class P {
+    public void test(
+        int a,
+        String b
+    ) {}
+}

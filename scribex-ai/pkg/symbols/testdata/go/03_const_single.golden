@@ -1,0 +1,2 @@
+ApiUrl	const ApiUrl = "https://example.com"
+MaxRetries	const MaxRetries = 3

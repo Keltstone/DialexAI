@@ -23,7 +23,7 @@ Validates JWT bearer tokens.
 
 Repos file: `name path team`. RBAC file: `sha256(token) admin|viewer team,team`; send the token as the HTTP Basic password.
 
-Languages: Go (AST), TS/JS, Python, Kotlin, Java (regex). Spec: `spec/SPEC.md` (all 4 phases implemented).
+Languages: Go (AST), Kotlin, Java, TS/JS, Python (lexical scanner). Spec: `spec/SPEC.md`.
 CI: `action/action.yml`. Prose is never LLM-rewritten; mismatches are flagged, signatures synced deterministically.
 
 ## Configure the AI, secrets, CI

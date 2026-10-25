@@ -1,0 +1,2 @@
+// Top level function
+fun greet(name: String): String = "Hello, $name"

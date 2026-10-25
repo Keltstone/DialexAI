@@ -1,0 +1,2 @@
+// Annotation class
+annotation class Route(val path: String, val method: String = "GET")

@@ -1,0 +1,2 @@
+def calc(x: float) -> int:
+    return int(x)

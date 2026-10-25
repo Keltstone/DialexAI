@@ -1,0 +1,1 @@
+ReadCloser	type ReadCloser interface { Reader Close() error }

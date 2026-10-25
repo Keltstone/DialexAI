@@ -1,0 +1,2 @@
+public class P { /* block comment */
+ public void run() {} }

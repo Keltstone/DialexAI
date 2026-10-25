@@ -1,0 +1,2 @@
+/* block comment */
+export function run(): void {}

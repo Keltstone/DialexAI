@@ -1,0 +1,2 @@
+First	type First struct { A int }
+Second	type Second struct { B string }

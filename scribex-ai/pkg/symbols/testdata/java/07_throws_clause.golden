@@ -1,0 +1,2 @@
+FileLoader	public class FileLoader
+FileLoader.load	public byte[] load(String path) throws java.io.IOException, IllegalArgumentException

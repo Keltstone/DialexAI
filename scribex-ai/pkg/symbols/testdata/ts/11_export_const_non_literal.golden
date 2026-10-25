@@ -1,0 +1,2 @@
+client	export const client: HttpClient
+timestamp	export const timestamp: number

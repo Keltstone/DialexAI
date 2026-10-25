@@ -1,0 +1,2 @@
+regexTrap	export const regexTrap = /\}\{/
+useRegex	export function useRegex(): boolean

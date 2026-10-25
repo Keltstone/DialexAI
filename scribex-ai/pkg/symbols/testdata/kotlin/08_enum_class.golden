@@ -1,0 +1,5 @@
+Priority	enum class Priority(val level: Int)
+Priority.HIGH	HIGH(3)
+Priority.LOW	LOW(1)
+Priority.MEDIUM	MEDIUM(2)
+Priority.isHigh	fun isHigh(): Boolean

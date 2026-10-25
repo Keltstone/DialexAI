@@ -1,0 +1,7 @@
+// Outer and inner class
+class Outer {
+    val outerField: String = "outer"
+    inner class Inner {
+        val innerField: Int = 1
+    }
+}

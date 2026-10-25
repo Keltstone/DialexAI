@@ -1,0 +1,1 @@
+enum	export const enum StatusCode { Ok

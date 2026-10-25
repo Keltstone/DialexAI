@@ -1,0 +1,2 @@
+Formatter	public class Formatter
+Formatter.format	public static String format(String template, int flags, Object... values)

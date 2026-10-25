@@ -54,7 +54,8 @@ func Symbols(root, file string) map[string]string {
 	if err != nil {
 		return nil
 	}
-	return symbols.Extract(file, src)
+	syms, _ := symbols.Extract(file, src)
+	return syms
 }
 
 // Check validates (and with sync, repairs) every anchor under root. Stale issues fixed by sync are not reported.
@@ -131,7 +132,7 @@ func Deltas(root, base string) ([]Delta, error) {
 	for _, f := range strings.Fields(string(out)) {
 		cur := Symbols(root, f)
 		oldSrc, _ := exec.Command("git", "-C", root, "show", base+":./"+f).Output()
-		old := symbols.Extract(f, oldSrc)
+		old, _ := symbols.Extract(f, oldSrc)
 		for k, v := range cur {
 			if ov, ok := old[k]; !ok {
 				ds = append(ds, Delta{f, k, "added"})

@@ -1,0 +1,1 @@
+fun calc(): Int { val b = 1; return b }

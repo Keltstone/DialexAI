@@ -1,0 +1,2 @@
+MathUtils.PI	export const PI
+MathUtils.square	export function square(n: number): number

@@ -1,0 +1,2 @@
+retry_count: int = 5
+timeout_seconds: float = 30.5

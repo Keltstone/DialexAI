@@ -1,0 +1,5 @@
+Outer	public class Outer
+Outer.Inner	public class Inner
+Outer.Inner.text	public String text
+Outer.StaticNested	public static class StaticNested
+Outer.StaticNested.val	public int val

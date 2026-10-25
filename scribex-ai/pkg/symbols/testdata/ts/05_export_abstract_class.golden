@@ -1,0 +1,2 @@
+BaseService	export abstract class BaseService
+BaseService.run	abstract run(): void

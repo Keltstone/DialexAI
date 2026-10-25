@@ -19,7 +19,11 @@ import (
 )
 
 func TestJiraAndTrace(t *testing.T) {
-	ds := []docs.Delta{{"a.go", "Login", "changed"}, {"a.go", "Extra", "added"}, {"a.go", "S.Gone", "removed"}}
+	ds := []docs.Delta{
+		{File: "a.go", Sym: "Login", Kind: "changed"},
+		{File: "a.go", Sym: "Extra", Kind: "added"},
+		{File: "a.go", Sym: "S.Gone", Kind: "removed"},
+	}
 	f := jira.Check("Change Login to take ctx", ds)
 	if len(f) != 2 || !strings.Contains(f[0], "scope creep") || !strings.Contains(f[1], "breaking") {
 		t.Fatalf("%v", f)
@@ -78,7 +82,10 @@ func TestDashboardRBAC(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\nfunc P() {}\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "R.md"), []byte("<!-- @scribex:anchor(a.go#P) -->\n<!-- @scribex:end -->\n<!-- @scribex:anchor(a.go#Dead) -->\n<!-- @scribex:end -->\n"), 0o644)
 	h := dashboard.Handler(
-		[]dashboard.Repo{{"r1", dir, "core"}, {"r2", dir, "web"}},
+		[]dashboard.Repo{
+			{Name: "r1", Path: dir, Team: "core"},
+			{Name: "r2", Path: dir, Team: "web"},
+		},
 		[]dashboard.Principal{{Hash: dashboard.HashToken("adm"), Admin: true}, {Hash: dashboard.HashToken("v"), Teams: map[string]bool{"core": true}}}, dir)
 	get := func(tok string) (int, []dashboard.Health) {
 		r := httptest.NewRequest("GET", "/api/health", nil)

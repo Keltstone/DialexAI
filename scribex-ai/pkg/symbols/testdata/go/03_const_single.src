@@ -1,0 +1,4 @@
+package p
+
+const MaxRetries = 3
+const ApiUrl = "https://example.com"

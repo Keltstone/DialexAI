@@ -1,0 +1,2 @@
+def process(payload: str) -> None:
+    pass

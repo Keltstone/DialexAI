@@ -1,0 +1,4 @@
+Service	public interface Service
+Service.execute	void execute()
+Service.getName	default String getName()
+Service.log	static void log()

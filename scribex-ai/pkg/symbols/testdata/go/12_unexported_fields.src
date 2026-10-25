@@ -1,0 +1,6 @@
+package p
+
+type SecretData struct {
+	PublicID string
+	secret   string
+}

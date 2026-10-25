@@ -1,0 +1,3 @@
+class TabIndented:
+	def method_one(self):
+		pass

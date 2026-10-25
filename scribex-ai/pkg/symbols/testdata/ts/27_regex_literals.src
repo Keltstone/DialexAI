@@ -1,0 +1,2 @@
+export const regexTrap = /\}\{/;
+export function useRegex(): boolean { return /test/.test("t"); }

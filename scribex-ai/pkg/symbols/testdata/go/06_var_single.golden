@@ -1,0 +1,2 @@
+Counter	var Counter int
+DefaultName	var DefaultName

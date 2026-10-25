@@ -1,0 +1,5 @@
+// Overloaded functions
+class Calculator {
+    fun add(x: Int, y: Int): Int = x + y
+    fun add(x: Double, y: Double): Double = x + y
+}

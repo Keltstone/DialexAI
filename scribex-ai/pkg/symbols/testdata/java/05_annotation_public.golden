@@ -1,0 +1,3 @@
+Query	public @interface Query
+Query.timeout	int timeout() default 1000
+Query.value	String value() default ""

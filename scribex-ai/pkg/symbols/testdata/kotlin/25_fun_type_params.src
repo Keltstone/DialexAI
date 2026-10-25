@@ -1,0 +1,3 @@
+// Function type parameters and nullable generic variance
+fun <T> transform(input: List<T>, action: (T) -> Unit): Unit {}
+class Box<out T>(val value: T?)

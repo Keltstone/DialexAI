@@ -1,0 +1,1 @@
+COMPUTED_VAL = get_env_or_default("KEY")

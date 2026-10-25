@@ -1,0 +1,3 @@
+def long_signature(alpha: int, \
+                   beta: str) -> bool:
+    return True

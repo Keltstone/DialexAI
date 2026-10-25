@@ -1,0 +1,2 @@
+export let activeConnections: number = 0;
+export var globalState: any = {};

@@ -1,0 +1,3 @@
+Running	const Running Status = 1
+Status	type Status int
+Stopped	const Stopped Status = 2

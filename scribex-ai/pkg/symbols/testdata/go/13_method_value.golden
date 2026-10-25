@@ -1,0 +1,2 @@
+Point	type Point struct { X, Y int }
+Point.Distance	func(p Point) Distance() int

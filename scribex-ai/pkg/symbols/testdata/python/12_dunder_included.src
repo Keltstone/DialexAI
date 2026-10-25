@@ -1,0 +1,6 @@
+class Collection:
+    def __init__(self, items: list):
+        self.items = items
+
+    def __len__(self) -> int:
+        return len(self.items)

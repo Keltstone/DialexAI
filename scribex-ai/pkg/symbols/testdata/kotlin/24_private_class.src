@@ -1,0 +1,8 @@
+// Private class hides its members
+private class HiddenClass {
+    val field: Int = 1
+    fun method() {}
+}
+class VisibleClass {
+    val visible = true
+}

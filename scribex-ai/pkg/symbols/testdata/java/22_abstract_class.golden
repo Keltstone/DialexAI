@@ -1,0 +1,3 @@
+BaseService	public abstract class BaseService
+BaseService.run	public abstract void run()
+BaseService.stop	public void stop()

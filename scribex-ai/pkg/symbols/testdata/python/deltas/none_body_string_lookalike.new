@@ -1,0 +1,2 @@
+def fake():
+    s = 'def other(): pass'

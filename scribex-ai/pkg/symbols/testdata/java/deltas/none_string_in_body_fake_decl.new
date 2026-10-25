@@ -1,0 +1,1 @@
+public class P { public String get() { return "public int otherFake = 1;"; } }

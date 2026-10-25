@@ -1,0 +1,2 @@
+baz	export { foo, bar as baz } from "./module";
+foo	export { foo, bar as baz } from "./module";

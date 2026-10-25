@@ -1,0 +1,3 @@
+@cached
+def fetch():
+    pass

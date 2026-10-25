@@ -1,0 +1,4 @@
+public class UnicodeMath {
+    public static final double π = 3.14159;
+    public double calculate(double λ) { return λ * π; }
+}

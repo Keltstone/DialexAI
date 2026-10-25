@@ -1,0 +1,5 @@
+Calculator	class Calculator
+Calculator.add	fun add(x: Int, y: Int): Int
+fun add(x: Double, y: Double): Double
+Calculator.add(Double,Double)	fun add(x: Double, y: Double): Double
+Calculator.add(Int,Int)	fun add(x: Int, y: Int): Int
