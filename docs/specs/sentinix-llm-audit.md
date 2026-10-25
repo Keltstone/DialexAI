@@ -16,7 +16,14 @@ Contracts:
 - Engine: `hunt.Engine{Models, Policy, MaxCalls}` implements engines.Engine, Name()="llm-audit".
 - Rule id `hunt/<class>`; class vocabulary: confused-deputy, deeplink-host, webview-bridge, path-traversal, authz, injection, intent-redirect.
 - Model JSON answer: `{"vulnerable":bool,"severity":"low|medium|high|critical","confidence":0..1,"reason":"short","poc":"optional"}`.
-- Table hunt_results(finding_id, entrypoint, class, pass, model, status, poc).
+- No hunt_results table: finding Source="llm", Match=entry:class, Evidence="PoC reproduced|unconfirmed: ...". Dashboard shows "AI-suggested, unverified".
+- Never gates: policy.Fails/CategoryFails skip Source=llm; EffectiveLevel(hunt/*)=notice unless a rule policy says otherwise.
+- Call cap -> Engine.Gap() -> scan gaps (not Skipped(): that fails PR status).
+- PoC (opt-in): `-sandbox-image img -poc-cmd "cmd"`; model writes test, ai.Reproduce runs it on current tree in sandbox; must FAIL (exploit works).
+- Server: `sentinixd -hunt-max-calls N`, only AI-enabled projects.
+- MCP: `sentinix mcp serve [dir]`, read-only tools sentinix_scan, sentinix_entrypoints.
+- Hunt packs: `-hunt-packs dir -trust keys`, signed JSON {name,version,classes:{kind:[{id,cwe,hint}]}}; reuse packs.Sign/Verify.
+- Variant: `-variant advisory.txt` adds class hunt/variant (advisory text wrapped as untrusted).
 
 Edge:
 - Code is untrusted: wrapped via ai untrusted(); answers parsed as data only; no tools/shell/network for models.
@@ -26,4 +33,4 @@ Edge:
 
 Where: sentinix-ai/pkg/hunt, cmd/sentinix/main.go, bench/hunt-android (own expected.json, keyed hunt/<class>).
 
-Status: done (stages 1-3, CLI, Anthropic provider, sentinixd -hunt-max-calls for AI-enabled projects); hunt_results table, dashboard badge, PoC, MCP, hunt packs pending.
+Status: done. Pending: live-model benchmark (opt-in), PR-comment rendering of gaps.

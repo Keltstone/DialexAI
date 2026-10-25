@@ -127,3 +127,15 @@ func TestSignedPackAddsClass(t *testing.T) {
 		t.Fatal("unknown kind accepted")
 	}
 }
+
+func TestVariantClassCarriesAdvisoryAsData(t *testing.T) {
+	e := &Engine{Variant: "tile url overwritten via exported intent"}
+	got := e.classesFor(Entry{Kinds: []string{"route"}})
+	if got[len(got)-1] != "variant" {
+		t.Fatal(got)
+	}
+	h := e.hint("variant")
+	if !strings.Contains(h, "UNTRUSTED CODE") || !strings.Contains(h, "tile url") {
+		t.Fatal(h)
+	}
+}

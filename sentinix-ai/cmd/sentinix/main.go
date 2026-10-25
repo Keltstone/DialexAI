@@ -632,6 +632,7 @@ func huntCmd(args []string) {
 	pocCmd := fl.String("poc-cmd", "", "test command for PoC tests, e.g. \"./gradlew test\" (needs -sandbox-image)")
 	huntPacks := fl.String("hunt-packs", "", "directory of signed hunt packs (extra vulnerability classes)")
 	trust := fl.String("trust", "", "file of trusted pack public keys (needed with -hunt-packs)")
+	variant := fl.String("variant", "", "file with a known vulnerability description; also hunt for variants of it")
 	fl.Parse(args)
 	root := "."
 	if fl.NArg() > 0 {
@@ -643,6 +644,11 @@ func huntCmd(args []string) {
 	ms, err := ai.LoadModels(*models)
 	die(err)
 	e := &hunt.Engine{Models: ms, Policy: *policy, MaxCalls: *maxCalls}
+	if *variant != "" {
+		b, err := os.ReadFile(*variant)
+		die(err)
+		e.Variant = string(b)
+	}
 	if *huntPacks != "" {
 		keys, err := packs.ReadKeys(*trust)
 		die(err)

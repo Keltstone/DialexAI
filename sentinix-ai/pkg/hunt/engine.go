@@ -46,6 +46,9 @@ type Engine struct {
 	PoCCmd []string
 	// Packs add classes (and prompt hints) from signed hunt packs; see LoadPack.
 	Packs []*Pack
+	// Variant is a known vulnerability description (advisory text). When set, every entry point is also
+	// checked for variants of that bug (rule hunt/variant). Treated as untrusted data.
+	Variant string
 }
 
 func (e *Engine) Name() string { return "llm-audit" }
@@ -166,6 +169,9 @@ func (e *Engine) classesFor(ep Entry) []string {
 			}
 		}
 	}
+	if e.Variant != "" {
+		add("variant")
+	}
 	return out
 }
 
@@ -183,6 +189,9 @@ func (e *Engine) class(id string) (c Class, ok bool) {
 }
 
 func (e *Engine) hint(id string) string {
+	if id == "variant" {
+		return "Look for a variant of this known vulnerability (same root cause, different code path):\n" + ai.Untrusted(truncate(e.Variant, 3000)) + "\n"
+	}
 	if c, ok := e.class(id); ok && c.Hint != "" {
 		return "Check specifically: " + c.Hint + "\n"
 	}
