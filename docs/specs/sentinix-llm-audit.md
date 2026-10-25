@@ -26,4 +26,4 @@ Edge:
 
 Where: sentinix-ai/pkg/hunt, cmd/sentinix/main.go, bench/hunt-android (own expected.json, keyed hunt/<class>).
 
-Status: done (stages 1-3 + CLI, fake-model bench); server/dashboard, MCP, hunt packs, live-model bench pending.
+Status: done (stages 1-3, CLI, Anthropic provider, sentinixd -hunt-max-calls for AI-enabled projects); hunt_results table, dashboard badge, PoC, MCP, hunt packs pending.

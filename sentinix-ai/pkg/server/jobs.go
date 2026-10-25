@@ -18,6 +18,7 @@ import (
 
 	"sentinix/pkg/advisories"
 	"sentinix/pkg/engines"
+	"sentinix/pkg/hunt"
 	"sentinix/pkg/githost"
 	"sentinix/pkg/packs"
 	"sentinix/pkg/policy"
@@ -108,6 +109,12 @@ func (a *App) engine(project ...string) ([]engines.Engine, error) {
 	out := []engines.Engine{pe, sec}
 	if a.OSV != nil {
 		out = append(out, advisories.Engine{Client: *a.OSV})
+	}
+	// ponytail: new engine per scan, so Truncated is not surfaced as a gap yet
+	if a.HuntMaxCalls > 0 && proj != "" && len(a.AIModels) > 0 {
+		if p, err := a.Store.Project(proj); err == nil && p.AI {
+			out = append(out, &hunt.Engine{Models: a.AIModels, Policy: p.ModelPolicy, MaxCalls: a.HuntMaxCalls})
+		}
 	}
 	return out, nil
 }

@@ -47,6 +47,7 @@ type App struct {
 	Workers         int
 	RequiredEngines []string
 	AIModels        []ai.Model // empty: AI add-on unavailable
+	HuntMaxCalls    int        // >0: AI-enabled projects also run the llm-audit engine, capped per scan
 	TestRunner     ai.Runner         // sandboxed runner for model-written tests; nil disables test generation
 	Integrations   *integrations.Set // nil: no chat, webhooks or tickets
 	Brand          report.Brand      // white-label name and accent for HTML reports

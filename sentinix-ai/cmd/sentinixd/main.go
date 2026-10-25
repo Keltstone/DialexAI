@@ -40,6 +40,7 @@ func main() {
 	osv := flag.String("osv", "", "OSV API URL (https://api.osv.dev or a mirror); empty disables dependency advisories")
 	rescan := flag.Duration("advisory-interval", 6*time.Hour, "how often stored SBOMs are re-matched against OSV")
 	integ := flag.String("integrations", "", "JSON file with Slack, Teams, webhook, Jira and Linear settings")
+	huntCalls := flag.Int("hunt-max-calls", 0, "model calls per scan for the advisory llm-audit engine on AI-enabled projects (0: off)")
 	aiCfg := flag.String("ai", "", "JSON list of OpenAI-compatible models for the optional AI add-on")
 	sbImage := flag.String("sandbox-image", "", "container image with scanners; when set, external engines and generated tests run in it with no network")
 	enterprise := flag.Bool("enterprise", false, "enterprise mode: requires sandbox for external engines")
@@ -103,6 +104,7 @@ func main() {
 	if *aiCfg != "" {
 		app.AIModels, err = loadModels(*aiCfg)
 		check(err)
+		app.HuntMaxCalls = *huntCalls
 	}
 	if *sbImage == "in-container" || (*sbImage == "" && os.Getenv("SENTINIX_CONTAINER") != "") {
 		ic := sandbox.InContainer{}
