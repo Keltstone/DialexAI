@@ -44,6 +44,14 @@ type Engine struct {
 
 func (e *Engine) Name() string { return "llm-audit" }
 
+// Skipped feeds the scan's "not covered" list (scheduler.scanAll reads it after Scan).
+func (e *Engine) Skipped() []string {
+	if e.Truncated {
+		return []string{fmt.Sprintf("llm-audit stopped at %d model calls", e.MaxCalls)}
+	}
+	return nil
+}
+
 type answer struct {
 	Vulnerable bool    `json:"vulnerable"`
 	Severity   string  `json:"severity"`
