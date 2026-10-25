@@ -126,6 +126,7 @@ func extractGo(path string, src []byte) (map[string]string, error) {
 
 			var lastType ast.Expr
 			var lastValues []ast.Expr
+			specIndex := 0
 
 			for _, s := range d.Specs {
 				switch s := s.(type) {
@@ -182,17 +183,21 @@ func extractGo(path string, src []byte) (map[string]string, error) {
 								sig += " " + pr(lastType)
 							}
 
-							valExpr := ""
+							var valExpr ast.Expr
 							if idx < len(s.Values) {
-								valExpr = pr(s.Values[idx])
+								valExpr = s.Values[idx]
 							} else if idx < len(lastValues) {
-								valExpr = pr(lastValues[idx])
+								valExpr = lastValues[idx]
 							}
-							if valExpr != "" {
-								sig += " = " + valExpr
+							if valExpr != nil {
+								sig += " = " + pr(valExpr)
+								if containsIota(valExpr) {
+									sig += fmt.Sprintf(" // iota=%d", specIndex)
+								}
 							}
 							out[n.Name] = sig
 						}
+						specIndex++
 					} else if d.Tok == token.VAR {
 						// Var: var Name Type (declared type only; if no declared type, name only)
 						for _, n := range s.Names {
@@ -224,4 +229,19 @@ func cleanGoSig(s string) string {
 		return strings.TrimSpace(s)
 	}
 	return scan.Join(toks)
+}
+
+func containsIota(e ast.Expr) bool {
+	if e == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(e, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && id.Name == "iota" {
+			found = true
+			return false
+		}
+		return !found
+	})
+	return found
 }

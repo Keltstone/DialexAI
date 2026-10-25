@@ -21,20 +21,29 @@ func TestSymbolsAndAnchors(t *testing.T) {
 	if g["hidden"] != "" {
 		t.Fatal("unexported leaked")
 	}
-	pySyms, _ := symbols.Extract("a.py", []byte("def pub(x): pass\ndef _priv(): pass\n"))
+	pySyms, err := symbols.Extract("a.py", []byte("def pub(x): pass\ndef _priv(): pass\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if pySyms["pub"] == "" {
 		t.Fatal("py")
 	}
-	tsSyms, _ := symbols.Extract("a.ts", []byte("export function f(a: number): void {\n}\n"))
+	tsSyms, err := symbols.Extract("a.ts", []byte("export function f(a: number): void {\n}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if tsSyms["f"] == "" {
 		t.Fatal("ts")
 	}
-	ktSyms, _ := symbols.Extract("a.kt", []byte("private fun x() {}\nfun y(a: Int): Int = a\n"))
+	ktSyms, err := symbols.Extract("a.kt", []byte("private fun x() {}\nfun y(a: Int): Int = a\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ktSyms["x"] != "" {
 		t.Fatal("kt private")
 	}
 
-	look := func(f, s string) (string, bool) { v, ok := g[s]; return v, ok }
+	look := func(f, s string) (string, bool, error) { v, ok := g[s]; return v, ok, nil }
 	md := "<!-- @scribex:anchor(a.go#Verify) -->\nprose\n<!-- @scribex:end -->\n<!-- @scribex:anchor(a.go#Gone) -->\n<!-- @scribex:end -->"
 	issues, out := anchors.Process(md, look, true, nil)
 	if len(issues) != 2 || !strings.Contains(out, "sig=") || !strings.Contains(out, "func Verify") {

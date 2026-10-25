@@ -160,15 +160,20 @@ func initCmd(root string) error {
 
 // gate prints the impact-gate verdict; returns false when no public contract changed (0 tokens).
 func gate(root, base string) (bool, error) {
-	ds, err := docs.Deltas(root, base)
+	res, err := docs.Deltas(root, base)
 	if err != nil {
 		return false, err
 	}
-	if len(ds) == 0 {
+	for _, u := range res.Unknown {
+		fmt.Printf("impact gate: cannot prove no change in %s: %s\n", u.File, u.Reason)
+	}
+	if len(res.Deltas) == 0 && len(res.Unknown) == 0 {
 		fmt.Println("impact gate: no public contract change; 0 tokens, nothing to do")
 		return false, nil
 	}
-	fmt.Printf("impact gate: %d contract delta(s)\n", len(ds))
+	if len(res.Deltas) > 0 {
+		fmt.Printf("impact gate: %d contract delta(s)\n", len(res.Deltas))
+	}
 	return true, nil
 }
 
@@ -208,15 +213,29 @@ func comment(root, base, repo string, pr int) error {
 	if repo == "" || pr == 0 || tok == "" {
 		return fmt.Errorf("need -repo, -pr and GITHUB_TOKEN")
 	}
+	var unanalysed []docs.Unknown
 	if base != "" { // impact gate: stay silent when nothing public changed
-		if run, err := gate(root, base); err != nil || !run {
+		res, err := docs.Deltas(root, base)
+		if err != nil {
 			return err
 		}
+		for _, u := range res.Unknown {
+			fmt.Printf("impact gate: cannot prove no change in %s: %s\n", u.File, u.Reason)
+		}
+		if len(res.Deltas) == 0 && len(res.Unknown) == 0 {
+			fmt.Println("impact gate: no public contract change; 0 tokens, nothing to do")
+			return nil
+		}
+		if len(res.Deltas) > 0 {
+			fmt.Printf("impact gate: %d contract delta(s)\n", len(res.Deltas))
+		}
+		unanalysed = res.Unknown
 	}
 	r, err := docs.Check(root, false, nil)
 	if err != nil {
 		return err
 	}
+	r.Unknown = unanalysed
 	api := os.Getenv("GITHUB_API_URL")
 	if api == "" {
 		api = "https://api.github.com"
@@ -270,7 +289,11 @@ func confluenceCmd(root string, a []string) error {
 			sigs := map[string]string{}
 			for _, s := range m.Symbols {
 				f, sym, _ := strings.Cut(s, "#")
-				if sig, ok := docs.Symbols(root, f)[sym]; ok {
+				symMap, err := docs.Symbols(root, f)
+				if err != nil {
+					return fmt.Errorf("%s: %w", f, err)
+				}
+				if sig, ok := symMap[sym]; ok {
 					sigs[s] = sig
 				}
 			}
@@ -302,6 +325,14 @@ func branch(root string) string {
 	return strings.TrimSpace(string(b))
 }
 
+func incompleteError(unknowns []docs.Unknown) error {
+	files := make([]string, len(unknowns))
+	for i, u := range unknowns {
+		files[i] = u.File
+	}
+	return fmt.Errorf("incomplete: cannot analyse %d file(s): %s", len(unknowns), strings.Join(files, ", "))
+}
+
 func jiraCmd(root, base, key string, post bool) error {
 	if base == "" {
 		return fmt.Errorf("jira needs -base")
@@ -316,10 +347,14 @@ func jiraCmd(root, base, key string, post bool) error {
 	if err != nil {
 		return err
 	}
-	ds, err := docs.Deltas(root, base)
+	res, err := docs.Deltas(root, base)
 	if err != nil {
 		return err
 	}
+	if len(res.Unknown) > 0 {
+		return incompleteError(res.Unknown)
+	}
+	ds := res.Deltas
 	c := jira.Client{Base: u, User: user, Token: tok}
 	text, err := c.Text(key)
 	if err != nil {
@@ -347,10 +382,14 @@ func traceCmd(root, base, key string, pr int, out string) error {
 	if key == "" {
 		key = jira.Key(branch(root))
 	}
-	ds, err := docs.Deltas(root, base)
+	res, err := docs.Deltas(root, base)
 	if err != nil {
 		return err
 	}
+	if len(res.Unknown) > 0 {
+		return incompleteError(res.Unknown)
+	}
+	ds := res.Deltas
 	ms, _ := manifest.Load(filepath.Join(root, ".scribex", "manifest.yaml"))
 	w := os.Stdout
 	if out != "" {

@@ -108,6 +108,175 @@ func broken(`
 	}
 }
 
+func TestGoIotaContract(t *testing.T) {
+	// 1. Reorder
+	oldSrc := `package test
+const (
+	A = iota
+	B
+)`
+	newSrc := `package test
+const (
+	B = iota
+	A
+)`
+	oldSyms, err := Extract("test.go", []byte(oldSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newSyms, err := Extract("test.go", []byte(newSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := computeDelta(oldSyms, newSyms); d != "CHANGED A,B" {
+		t.Errorf("reorder delta = %q, want 'CHANGED A,B'", d)
+	}
+
+	// 2. Insert in middle
+	oldMid := `package test
+const (
+	A = iota
+	C
+)`
+	newMid := `package test
+const (
+	A = iota
+	B
+	C
+)`
+	oldMidSyms, _ := Extract("test.go", []byte(oldMid))
+	newMidSyms, _ := Extract("test.go", []byte(newMid))
+	if d := computeDelta(oldMidSyms, newMidSyms); d != "CHANGED C ADDED B" && d != "ADDED B CHANGED C" {
+		t.Errorf("insert middle delta = %q, want 'CHANGED C ADDED B'", d)
+	}
+
+	// 3. Blank _ spec before
+	blankSrc := `package test
+const (
+	_ = iota
+	KB = 1 << (10 * iota)
+	MB
+)`
+	blankSyms, err := Extract("test.go", []byte(blankSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "const KB = 1 << (10 * iota) // iota=1"; blankSyms["KB"] != want {
+		t.Errorf("KB = %q, want %q", blankSyms["KB"], want)
+	}
+	if want := "const MB = 1 << (10 * iota) // iota=2"; blankSyms["MB"] != want {
+		t.Errorf("MB = %q, want %q", blankSyms["MB"], want)
+	}
+
+	// 4. Typed group
+	typedSrc := `package test
+type Level int
+const (
+	Low Level = iota
+	Medium
+	High
+)`
+	typedSyms, err := Extract("test.go", []byte(typedSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "const Low Level = iota // iota=0"; typedSyms["Low"] != want {
+		t.Errorf("Low = %q, want %q", typedSyms["Low"], want)
+	}
+	if want := "const Medium Level = iota // iota=1"; typedSyms["Medium"] != want {
+		t.Errorf("Medium = %q, want %q", typedSyms["Medium"], want)
+	}
+	if want := "const High Level = iota // iota=2"; typedSyms["High"] != want {
+		t.Errorf("High = %q, want %q", typedSyms["High"], want)
+	}
+
+	// 5. Bitmask shift group
+	bitmaskSrc := `package test
+const (
+	FlagA = 1 << iota
+	FlagB
+	FlagC
+)`
+	bitmaskSyms, err := Extract("test.go", []byte(bitmaskSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "const FlagA = 1 << iota // iota=0"; bitmaskSyms["FlagA"] != want {
+		t.Errorf("FlagA = %q, want %q", bitmaskSyms["FlagA"], want)
+	}
+	if want := "const FlagB = 1 << iota // iota=1"; bitmaskSyms["FlagB"] != want {
+		t.Errorf("FlagB = %q, want %q", bitmaskSyms["FlagB"], want)
+	}
+	if want := "const FlagC = 1 << iota // iota=2"; bitmaskSyms["FlagC"] != want {
+		t.Errorf("FlagC = %q, want %q", bitmaskSyms["FlagC"], want)
+	}
+
+	// 6. Two names per spec
+	multiSrc := `package test
+const (
+	X, Y = iota, iota * 2
+	Z, W
+)`
+	multiSyms, err := Extract("test.go", []byte(multiSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "const X = iota // iota=0"; multiSyms["X"] != want {
+		t.Errorf("X = %q, want %q", multiSyms["X"], want)
+	}
+	if want := "const Y = iota * 2 // iota=0"; multiSyms["Y"] != want {
+		t.Errorf("Y = %q, want %q", multiSyms["Y"], want)
+	}
+	if want := "const Z = iota // iota=1"; multiSyms["Z"] != want {
+		t.Errorf("Z = %q, want %q", multiSyms["Z"], want)
+	}
+	if want := "const W = iota * 2 // iota=1"; multiSyms["W"] != want {
+		t.Errorf("W = %q, want %q", multiSyms["W"], want)
+	}
+
+	// 7. Non-iota const group (no suffix)
+	nonIotaSrc := `package test
+const (
+	Normal1 = 1
+	Normal2 = 2
+)
+const Single = 5`
+	nonIotaSyms, err := Extract("test.go", []byte(nonIotaSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "const Normal1 = 1"; nonIotaSyms["Normal1"] != want {
+		t.Errorf("Normal1 = %q, want %q", nonIotaSyms["Normal1"], want)
+	}
+	if want := "const Normal2 = 2"; nonIotaSyms["Normal2"] != want {
+		t.Errorf("Normal2 = %q, want %q", nonIotaSyms["Normal2"], want)
+	}
+	if want := "const Single = 5"; nonIotaSyms["Single"] != want {
+		t.Errorf("Single = %q, want %q", nonIotaSyms["Single"], want)
+	}
+
+	// 8. Unexported name consuming an index
+	unexpSrc := `package test
+const (
+	First = iota
+	hidden
+	Second
+)`
+	unexpSyms, err := Extract("test.go", []byte(unexpSrc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "const First = iota // iota=0"; unexpSyms["First"] != want {
+		t.Errorf("First = %q, want %q", unexpSyms["First"], want)
+	}
+	if _, ok := unexpSyms["hidden"]; ok {
+		t.Errorf("hidden should not be exported")
+	}
+	if want := "const Second = iota // iota=2"; unexpSyms["Second"] != want {
+		t.Errorf("Second = %q, want %q", unexpSyms["Second"], want)
+	}
+}
+
 func TestGoldenCorpus(t *testing.T) {
 	langs := []struct {
 		dir  string

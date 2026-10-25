@@ -12,7 +12,7 @@ import (
 var open = regexp.MustCompile(`^\s*<!--\s*@scribex:anchor\(([^)#]+)#([^)\s]+)\)(?:\s+sig=([0-9a-f]+))?\s*-->\s*$`)
 
 // Lookup returns the current signature of file#sym, ok=false when missing.
-type Lookup func(file, sym string) (string, bool)
+type Lookup func(file, sym string) (sig string, ok bool, err error)
 
 type Issue struct {
 	Line  int // 1-based
@@ -47,7 +47,17 @@ func Process(md string, look Lookup, sync bool, prose Prose) ([]Issue, string) {
 			continue
 		}
 		ref := m[1] + "#" + m[2]
-		sig, ok := look(m[1], m[2])
+		sig, ok, err := look(m[1], m[2])
+		if err != nil {
+			issues = append(issues, Issue{
+				Line:  i + 1,
+				Ref:   ref,
+				Msg:   "cannot analyse " + m[1] + ": " + err.Error(),
+				Stale: false,
+			})
+			out = append(out, in[i])
+			continue
+		}
 		if !ok {
 			issues = append(issues, Issue{i + 1, ref, "symbol not found (dead anchor)", false})
 			out = append(out, in[i])

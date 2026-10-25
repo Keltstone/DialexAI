@@ -49,7 +49,7 @@ func TestConfigAndSecrets(t *testing.T) {
 }
 
 func TestAIRewriteOnlyForChangedSyncedAnchors(t *testing.T) {
-	look := func(f, s string) (string, bool) { return "func A(x int)", true }
+	look := func(f, s string) (string, bool, error) { return "func A(x int)", true, nil }
 	calls := 0
 	prose := func(ref, sig, old string) (string, error) { calls++; return "new prose", nil }
 	// never synced -> no LLM call
