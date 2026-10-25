@@ -224,5 +224,23 @@ func TestPolicyInitAndShow(t *testing.T) {
 	}
 }
 
+func TestHuntConfigCommands(t *testing.T) {
+	tmpDir := t.TempDir()
+	confPath := filepath.Join(tmpDir, ".sentinix", "hunt.json")
+
+	// 1. init
+	huntCmd([]string{"config", "init", confPath})
+	if _, err := os.Stat(confPath); err != nil {
+		t.Fatalf("expected config at %s: %v", confPath, err)
+	}
+
+	// 2. show
+	huntCmd([]string{"config", "show", tmpDir})
+	huntCmd([]string{"config", "show", "--explain", tmpDir})
+
+	// 3. validate
+	huntCmd([]string{"config", "validate", confPath})
+}
+
 
 

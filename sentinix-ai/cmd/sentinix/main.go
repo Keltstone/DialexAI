@@ -623,66 +623,163 @@ func auditCmd(args []string) {
 }
 
 
+func huntConfigCmd(args []string) {
+	if len(args) == 0 {
+		die(fmt.Errorf("usage: sentinix hunt config init|show|validate [--explain] [path]"))
+	}
+	switch args[0] {
+	case "init":
+		target := ""
+		if len(args) > 1 {
+			target = args[1]
+		}
+		err := hunt.InitConfigFile(target)
+		die(err)
+		if target == "" {
+			fmt.Println("Initialized Hunt v2 config at .sentinix/hunt.json")
+		} else {
+			fmt.Println("Initialized Hunt v2 config at", target)
+		}
+	case "show":
+		explain := false
+		root := "."
+		for _, a := range args[1:] {
+			if a == "--explain" {
+				explain = true
+			} else if !strings.HasPrefix(a, "-") {
+				root = a
+			}
+		}
+		cfg, err := hunt.ResolveConfig(root, nil, hunt.CLIFlags{})
+		die(err)
+		if explain {
+			fmt.Print(cfg.Explain())
+		} else {
+			b, _ := json.MarshalIndent(cfg, "", "  ")
+			fmt.Println(string(b))
+		}
+	case "validate":
+		target := filepath.Join(".", ".sentinix", "hunt.json")
+		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
+			target = args[1]
+		}
+		cfg, err := hunt.LoadConfigFile(target)
+		die(err)
+		err = cfg.Validate(nil)
+		die(err)
+		fmt.Printf("Config %s is VALID.\n", target)
+	default:
+		die(fmt.Errorf("unknown hunt config command %q; choose init, show, or validate", args[0]))
+	}
+}
+
 func huntCmd(args []string) {
+	if len(args) > 0 && args[0] == "config" {
+		huntConfigCmd(args[1:])
+		return
+	}
 	fl := flag.NewFlagSet("hunt", flag.ExitOnError)
-	models := fl.String("ai", "", "models JSON (required)")
-	policy := fl.String("policy", "local-only", "model policy: local-only|cloud-redacted|cloud")
-	maxCalls := fl.Int("max-calls", 200, "hard cap on model calls")
+	models := fl.String("ai", "", "models JSON (required unless in config)")
+	policy := fl.String("policy", "", "model policy: local-only|cloud-redacted|cloud")
+	maxCalls := fl.Int("max-calls", 0, "hard cap on model calls")
 	sbImage := fl.String("sandbox-image", "", "container image; with -poc-cmd, model-written PoC tests run in it (no network)")
 	pocCmd := fl.String("poc-cmd", "", "test command for PoC tests, e.g. \"./gradlew test\" (needs -sandbox-image)")
 	huntPacks := fl.String("hunt-packs", "", "directory of signed hunt packs (extra vulnerability classes)")
 	trust := fl.String("trust", "", "file of trusted pack public keys (needed with -hunt-packs)")
 	variant := fl.String("variant", "", "file with a known vulnerability description; also hunt for variants of it")
 	useTools := fl.Bool("tools", false, "let the model read files and grep inside the path before answering (read-only)")
-	toolSteps := fl.Int("tool-steps", 3, "max tool calls per task")
+	toolSteps := fl.Int("tool-steps", 0, "max tool calls per task")
 	platform := fl.String("platform", "", "audit only mobile or backend entry points (default: both)")
 	resume := fl.String("resume", "", "state file; finished tasks are skipped on re-run")
 	only := fl.String("only", "", "run only tasks whose file|class contains this text")
 	ghsa := fl.String("variant-ghsa", "", "public GitHub advisory id (GHSA-...); fetched and used like -variant")
+	gate := fl.String("gate", "", "gating policy: advisory|confirmed-only")
+	taskflow := fl.String("taskflow", "", "taskflow file or name")
+	dryRun := fl.Bool("dry-run", false, "plan tasks and display budget estimates without invoking models")
 	fl.Parse(args)
+
 	root := "."
 	if fl.NArg() > 0 {
 		root = fl.Arg(0)
 	}
-	if *models == "" {
+
+	var toolsFlag *bool
+	fl.Visit(func(f *flag.Flag) {
+		if f.Name == "tools" {
+			toolsFlag = useTools
+		}
+	})
+
+	cliFlags := hunt.CLIFlags{
+		AI:           *models,
+		Policy:       *policy,
+		MaxCalls:     *maxCalls,
+		SandboxImage: *sbImage,
+		PoCCmd:       *pocCmd,
+		HuntPacks:    *huntPacks,
+		Trust:        *trust,
+		Variant:      *variant,
+		VariantGHSA:  *ghsa,
+		Tools:        toolsFlag,
+		ToolSteps:    *toolSteps,
+		Platform:     *platform,
+		Resume:       *resume,
+		Only:         *only,
+		Gate:         *gate,
+		Taskflow:     *taskflow,
+		DryRun:       *dryRun,
+	}
+
+	cfg, err := hunt.ResolveConfig(root, nil, cliFlags)
+	die(err)
+
+	if cfg.ModelsFile == "" {
 		die(fmt.Errorf("usage: hunt -ai models.json [-policy p] [-max-calls n] [path]"))
 	}
-	ms, err := ai.LoadModels(*models)
+	ms, err := ai.LoadModels(cfg.ModelsFile)
 	die(err)
-	e := &hunt.Engine{Models: ms, Policy: *policy, MaxCalls: *maxCalls}
-	e.Tools, e.ToolSteps, e.Platform, e.Only = *useTools, *toolSteps, *platform, *only
-	if *resume != "" {
-		e.State, err = hunt.LoadState(*resume)
+
+	e := &hunt.Engine{
+		Models:   ms,
+		Policy:   cfg.Policy,
+		MaxCalls: cfg.MaxCalls,
+		Config:   &cfg,
+	}
+	e.Tools, e.ToolSteps, e.Platform, e.Only = cfg.Tools.Enabled, cfg.Tools.StepCap, cfg.Platform, cfg.Only
+	if cfg.Resume != "" {
+		e.State, err = hunt.LoadState(cfg.Resume)
 		die(err)
 	}
-	if *variant != "" {
-		b, err := os.ReadFile(*variant)
+	if cfg.Variant != "" {
+		b, err := os.ReadFile(cfg.Variant)
 		die(err)
 		e.Variant = string(b)
 	}
-	if *ghsa != "" {
-		e.Variant, err = hunt.FetchGHSA(context.Background(), *ghsa, "")
+	if cfg.VariantGHSA != "" {
+		e.Variant, err = hunt.FetchGHSA(context.Background(), cfg.VariantGHSA, "")
 		die(err)
 	}
-	if *huntPacks != "" {
-		keys, err := packs.ReadKeys(*trust)
+	if len(cfg.HuntPacks) > 0 && cfg.HuntPacks[0] != "" {
+		keys, err := packs.ReadKeys(cfg.Trust)
 		die(err)
-		files, _ := filepath.Glob(filepath.Join(*huntPacks, "*.json"))
-		for _, f := range files {
-			b, err := os.ReadFile(f)
-			die(err)
-			p, err := hunt.LoadPack(b, keys)
-			if err != nil {
-				die(fmt.Errorf("%s: %w", f, err))
+		for _, dir := range cfg.HuntPacks {
+			files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+			for _, f := range files {
+				b, err := os.ReadFile(f)
+				die(err)
+				p, err := hunt.LoadPack(b, keys)
+				if err != nil {
+					die(fmt.Errorf("%s: %w", f, err))
+				}
+				e.Packs = append(e.Packs, p)
 			}
-			e.Packs = append(e.Packs, p)
 		}
 	}
-	if *pocCmd != "" {
-		if *sbImage == "" {
+	if cfg.PoC.Enabled && len(cfg.PoC.Command) > 0 {
+		if cfg.PoC.SandboxImage == "" {
 			die(fmt.Errorf("-poc-cmd runs model-written code: -sandbox-image is required"))
 		}
-		e.Run, e.PoCCmd = sandbox.Docker{Image: *sbImage}.Run, strings.Fields(*pocCmd)
+		e.Run, e.PoCCmd = sandbox.Docker{Image: cfg.PoC.SandboxImage}.Run, cfg.PoC.Command
 	}
 	fs, err := e.Scan(context.Background(), root)
 	die(err)
@@ -691,7 +788,7 @@ func huntCmd(args []string) {
 	}
 	fmt.Printf("%d finding(s). Engines run: llm-audit (advisory).", len(fs))
 	if e.Truncated {
-		fmt.Printf(" Not covered: stopped at -max-calls %d.", *maxCalls)
+		fmt.Printf(" Not covered: stopped at -max-calls %d.", cfg.MaxCalls)
 	}
 	fmt.Println()
 }

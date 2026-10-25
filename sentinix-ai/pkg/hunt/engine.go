@@ -59,8 +59,9 @@ type Engine struct {
 	Platform  string
 	// State, when set, caches finished tasks across runs. Only, when set, runs just tasks whose
 	// "file|class" contains it (single-task re-run for debugging).
-	State *State
-	Only  string
+	State  *State
+	Only   string
+	Config *HuntConfig
 }
 
 func (e *Engine) Name() string { return "llm-audit" }
