@@ -25,6 +25,7 @@ import (
 	"sentinix/pkg/diffmap"
 	"sentinix/pkg/engines"
 	"sentinix/pkg/hunt"
+	"sentinix/pkg/mcp"
 	"sentinix/pkg/packs"
 	"sentinix/pkg/policy"
 	"sentinix/pkg/report"
@@ -35,7 +36,7 @@ import (
 
 var version = "1.0.0"
 
-const usage = "usage: sentinix scan [flags] [path] | sign [flags] [file] | surface [base-ref] | packs keygen|sign|verify|new|test | rules new|test|sign | policy init|show | hook install|run|uninstall | bench <dir> | audit verify [-db <dsn>] | hunt -ai models.json [path] | version"
+const usage = "usage: sentinix scan [flags] [path] | sign [flags] [file] | surface [base-ref] | packs keygen|sign|verify|new|test | rules new|test|sign | policy init|show | hook install|run|uninstall | bench <dir> | audit verify [-db <dsn>] | hunt -ai models.json [path] | mcp serve [dir] | version"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -64,6 +65,16 @@ func main() {
 		auditCmd(args)
 	case "hunt":
 		huntCmd(args)
+	case "mcp":
+		if len(args) < 1 || args[0] != "serve" {
+			fmt.Fprintln(os.Stderr, "usage: sentinix mcp serve [dir]")
+			os.Exit(2)
+		}
+		root := "."
+		if len(args) > 1 {
+			root = args[1]
+		}
+		die(mcp.Serve(os.Stdin, os.Stdout, root))
 	default:
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
