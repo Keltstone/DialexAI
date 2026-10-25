@@ -193,28 +193,7 @@ func loadHosts(path string) (map[string]githost.Host, error) {
 	return hosts, nil
 }
 
-func loadModels(path string) ([]ai.Model, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var cs []struct {
-		Name, URL, Key, Model string
-		Local                 bool
-	}
-	if err := json.Unmarshal(data, &cs); err != nil {
-		return nil, err
-	}
-	var ms []ai.Model
-	for _, c := range cs {
-		key := c.Key
-		if strings.HasPrefix(key, "$") {
-			key = os.Getenv(key[1:])
-		}
-		ms = append(ms, ai.Chat{Label: c.Name, URL: c.URL, Key: key, ModelID: c.Model, IsLocal: c.Local})
-	}
-	return ms, nil
-}
+func loadModels(path string) ([]ai.Model, error) { return ai.LoadModels(path) }
 
 func check(err error) {
 	if err != nil {

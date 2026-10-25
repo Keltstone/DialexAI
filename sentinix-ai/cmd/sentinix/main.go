@@ -20,9 +20,11 @@ import (
 	"time"
 
 	"sentinix/pkg/advisories"
+	"sentinix/pkg/ai"
 	"sentinix/pkg/bench"
 	"sentinix/pkg/diffmap"
 	"sentinix/pkg/engines"
+	"sentinix/pkg/hunt"
 	"sentinix/pkg/packs"
 	"sentinix/pkg/policy"
 	"sentinix/pkg/report"
@@ -32,7 +34,7 @@ import (
 
 var version = "1.0.0"
 
-const usage = "usage: sentinix scan [flags] [path] | sign [flags] [file] | surface [base-ref] | packs keygen|sign|verify|new|test | rules new|test|sign | policy init|show | hook install|run|uninstall | bench <dir> | audit verify [-db <dsn>] | version"
+const usage = "usage: sentinix scan [flags] [path] | sign [flags] [file] | surface [base-ref] | packs keygen|sign|verify|new|test | rules new|test|sign | policy init|show | hook install|run|uninstall | bench <dir> | audit verify [-db <dsn>] | hunt -ai models.json [path] | version"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -59,6 +61,8 @@ func main() {
 		benchCmd(args)
 	case "audit":
 		auditCmd(args)
+	case "hunt":
+		huntCmd(args)
 	default:
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
@@ -606,3 +610,31 @@ func auditCmd(args []string) {
 	fmt.Println("AUDIT CHAIN VERIFIED: all rows valid, hash chain intact.")
 }
 
+
+func huntCmd(args []string) {
+	fl := flag.NewFlagSet("hunt", flag.ExitOnError)
+	models := fl.String("ai", "", "models JSON (required)")
+	policy := fl.String("policy", "local-only", "model policy: local-only|cloud-redacted|cloud")
+	maxCalls := fl.Int("max-calls", 200, "hard cap on model calls")
+	fl.Parse(args)
+	root := "."
+	if fl.NArg() > 0 {
+		root = fl.Arg(0)
+	}
+	if *models == "" {
+		die(fmt.Errorf("usage: hunt -ai models.json [-policy p] [-max-calls n] [path]"))
+	}
+	ms, err := ai.LoadModels(*models)
+	die(err)
+	e := &hunt.Engine{Models: ms, Policy: *policy, MaxCalls: *maxCalls}
+	fs, err := e.Scan(context.Background(), root)
+	die(err)
+	for _, f := range fs {
+		fmt.Printf("[%s] %s %s (AI-suggested, unverified) %s\n", f.Severity, f.Rule, f.File, f.Message)
+	}
+	fmt.Printf("%d finding(s). Engines run: llm-audit (advisory).", len(fs))
+	if e.Truncated {
+		fmt.Printf(" Not covered: stopped at -max-calls %d.", *maxCalls)
+	}
+	fmt.Println()
+}

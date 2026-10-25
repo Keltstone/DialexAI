@@ -1,0 +1,143 @@
+package hunt
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"sentinix/pkg/ai"
+	"sentinix/pkg/engines"
+)
+
+// classes per entry-point kind: the fixed vulnerability vocabulary (rule id is hunt/<class>).
+var classes = map[string][]string{
+	"component": {"confused-deputy", "intent-redirect", "path-traversal"},
+	"deeplink":  {"deeplink-host", "webview-bridge"},
+	"route":     {"authz", "injection", "path-traversal"},
+}
+
+var cwe = map[string]string{
+	"confused-deputy": "CWE-441", "intent-redirect": "CWE-601", "path-traversal": "CWE-22",
+	"deeplink-host": "CWE-939", "webview-bridge": "CWE-749", "authz": "CWE-862", "injection": "CWE-89",
+}
+
+// prompt styles: strict avoids missing obvious bugs; broad invites creative findings. Broad runs only
+// when strict found nothing.
+var passes = []struct{ name, ask string }{
+	{"strict", "Report only a bug that is clearly exploitable by an unprivileged attacker in a realistic state. "},
+	{"broad", "Think creatively about unusual attacker-controlled inputs and chained weaknesses. "},
+}
+
+const maxSlice = 6000
+
+// Engine audits entry points with the first model the policy allows. Truncated is set when MaxCalls
+// stopped the run early, so callers can report a coverage gap instead of a clean result.
+type Engine struct {
+	Models    []ai.Model
+	Policy    string
+	MaxCalls  int
+	Truncated bool
+}
+
+func (e *Engine) Name() string { return "llm-audit" }
+
+type answer struct {
+	Vulnerable bool    `json:"vulnerable"`
+	Severity   string  `json:"severity"`
+	Confidence float64 `json:"confidence"`
+	Reason     string  `json:"reason"`
+}
+
+func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, error) {
+	var m ai.Model
+	for _, c := range e.Models {
+		if ai.Allowed(e.Policy, c) {
+			m = c
+			break
+		}
+	}
+	if m == nil {
+		return nil, fmt.Errorf("%w: no model allowed by policy %q", engines.ErrEngineUnavailable, e.Policy)
+	}
+	eps, err := Entrypoints(root)
+	if err != nil {
+		return nil, err
+	}
+	var out []engines.Finding
+	calls := 0
+	for _, ep := range eps {
+		b, err := os.ReadFile(filepath.Join(root, ep.File))
+		if err != nil {
+			continue
+		}
+		code := string(b)
+		if len(code) > maxSlice {
+			code = code[:maxSlice]
+		}
+		if e.Policy == "cloud-redacted" {
+			if code, err = engines.RedactSafe(code); err != nil {
+				return out, fmt.Errorf("REDACTION_UNAVAILABLE: %w", err)
+			}
+		}
+		for _, class := range classesFor(ep) {
+			for _, p := range passes {
+				if calls >= e.MaxCalls {
+					e.Truncated = true
+					return out, nil
+				}
+				calls++
+				user := fmt.Sprintf("Entry point (%s): %s\nVulnerability class: %s\n%s\n%s\n"+
+					`Reply {"vulnerable":bool,"severity":"low|medium|high|critical","confidence":0..1,"reason":"short"}.`,
+					strings.Join(ep.Kinds, "+"), ep.Name, class, p.ask, ai.Untrusted(code))
+				reply, err := m.Complete(ctx, ai.SysRules, user)
+				if err != nil {
+					continue
+				}
+				js, ok := ai.ExtractJSON(reply)
+				var a answer
+				if !ok || json.Unmarshal([]byte(js), &a) != nil {
+					continue
+				}
+				sev, err := engines.ParseSeverity(a.Severity)
+				if err != nil || a.Confidence < 0 || a.Confidence > 1 || sev < engines.Low {
+					continue
+				}
+				if !a.Vulnerable {
+					continue
+				}
+				out = append(out, engines.Finding{
+					Rule: "hunt/" + class, Engine: e.Name(), Category: engines.CategorySecurity,
+					File: ep.File, Line: 1, Severity: sev, Message: truncate(a.Reason, 300),
+					CWE: cwe[class], Match: ep.Name + ":" + class, Source: "llm", Level: "notice",
+				})
+				break // strict hit: skip broad pass
+			}
+		}
+	}
+	return out, nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
+// classesFor is the union of the classes of every kind the entry point has, without repeats.
+func classesFor(ep Entry) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, k := range ep.Kinds {
+		for _, c := range classes[k] {
+			if !seen[c] {
+				seen[c] = true
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
