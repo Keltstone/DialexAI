@@ -1,0 +1,1 @@
+- docs/specs/sentinix-llm-audit.md — `sentinix hunt`: opt-in LLM entry-point audit engine, stages, contracts, bench
