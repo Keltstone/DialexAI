@@ -23,7 +23,11 @@ Contracts:
 - Server: `sentinixd -hunt-max-calls N`, only AI-enabled projects.
 - MCP: `sentinix mcp serve [dir]`, read-only tools sentinix_scan, sentinix_entrypoints.
 - Hunt packs: `-hunt-packs dir -trust keys`, signed JSON {name,version,classes:{kind:[{id,cwe,hint}]}}; reuse packs.Sign/Verify.
-- Variant: `-variant advisory.txt` adds class hunt/variant (advisory text wrapped as untrusted).
+- Tools: `-tools` read-only read_file/grep/entrypoints via JSON reply loop, root-confined (os.OpenRoot), output wrapped untrusted + redacted under cloud-redacted; no write/shell/net so no confirm step needed; each step counts as a call.
+- State: `-resume file` caches tasks by sha(code)|file|class|pass; `-only` reruns one task. Platform: `-platform mobile|backend` (component/deeplink=mobile, route=backend).
+- Taint: engines.CodeQL (opt-in SENTINIX_CODEQL=1), per-language db (build-mode none), security-extended suite, SARIF; missing binary = coverage gap.
+- PoC retry: one revision if test passes on vulnerable code (extra call not budgeted; runner gives pass/fail only).
+- Variant: `-variant advisory.txt` or `-variant-ghsa GHSA-id` (public API, id only leaves machine) adds class hunt/variant (advisory text wrapped as untrusted).
 
 Edge:
 - Code is untrusted: wrapped via ai untrusted(); answers parsed as data only; no tools/shell/network for models.

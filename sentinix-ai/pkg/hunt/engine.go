@@ -283,14 +283,22 @@ func (e *Engine) cweOf(id string) string {
 	return cwe[id]
 }
 
-// proof returns the short evidence line: whether a model-written test reproduced the issue.
+// proof returns the short evidence line: whether a model-written test reproduced the issue. A test that passes
+// on the current code gets one revision with that feedback (the model's "debugger"). ponytail: the runner reports
+// only pass/fail, so a test that fails to compile counts as "reproduced"; richer feedback needs runner output.
 func (e *Engine) proof(ctx context.Context, m ai.Model, f engines.Finding, code, root string) string {
-	t, err := ai.ProposeTest(ctx, m, e.Policy, f, code, "unit")
-	if err != nil {
-		return "PoC unconfirmed: no usable test"
+	note := ""
+	last := ""
+	for attempt := 0; attempt < 2; attempt++ {
+		t, err := ai.ProposeTest(ctx, m, e.Policy, f, code+note, "unit")
+		if err != nil {
+			return "PoC unconfirmed: no usable test"
+		}
+		if err = ai.Reproduce(ctx, e.Run, root, *t, e.PoCCmd); err == nil {
+			return "PoC reproduced: " + t.Path
+		}
+		last = err.Error()
+		note = "\n// previous test passed on the vulnerable code, so the exploit did not trigger. Revise the test."
 	}
-	if err := ai.Reproduce(ctx, e.Run, root, *t, e.PoCCmd); err != nil {
-		return "PoC unconfirmed: " + truncate(err.Error(), 120)
-	}
-	return "PoC reproduced: " + t.Path
+	return "PoC unconfirmed: " + truncate(last, 120)
 }

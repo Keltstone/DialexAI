@@ -638,6 +638,7 @@ func huntCmd(args []string) {
 	platform := fl.String("platform", "", "audit only mobile or backend entry points (default: both)")
 	resume := fl.String("resume", "", "state file; finished tasks are skipped on re-run")
 	only := fl.String("only", "", "run only tasks whose file|class contains this text")
+	ghsa := fl.String("variant-ghsa", "", "public GitHub advisory id (GHSA-...); fetched and used like -variant")
 	fl.Parse(args)
 	root := "."
 	if fl.NArg() > 0 {
@@ -658,6 +659,10 @@ func huntCmd(args []string) {
 		b, err := os.ReadFile(*variant)
 		die(err)
 		e.Variant = string(b)
+	}
+	if *ghsa != "" {
+		e.Variant, err = hunt.FetchGHSA(context.Background(), *ghsa, "")
+		die(err)
 	}
 	if *huntPacks != "" {
 		keys, err := packs.ReadKeys(*trust)

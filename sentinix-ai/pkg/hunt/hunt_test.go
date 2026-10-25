@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -197,5 +199,23 @@ func TestStateSkipsFinishedTasksAndPlatformFilters(t *testing.T) {
 	e := &Engine{Platform: "backend"}
 	if cs := e.classesFor(Entry{Kinds: []string{"component", "deeplink"}}); len(cs) != 0 {
 		t.Fatalf("mobile entry audited as backend: %v", cs)
+	}
+}
+
+func TestFetchGHSA(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/advisories/GHSA-c944-cv5f-hpvr" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(`{"summary":"tile url overwrite","description":"exported intent","cwes":[{"cwe_id":"CWE-441"}]}`))
+	}))
+	defer srv.Close()
+	got, err := FetchGHSA(context.Background(), "GHSA-c944-cv5f-hpvr", srv.URL)
+	if err != nil || !strings.Contains(got, "tile url overwrite") || !strings.Contains(got, "CWE-441") {
+		t.Fatal(got, err)
+	}
+	if _, err := FetchGHSA(context.Background(), "../etc/passwd", srv.URL); err == nil {
+		t.Fatal("bad id accepted")
 	}
 }

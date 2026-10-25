@@ -259,6 +259,9 @@ func Bundled(extra ...Engine) []Engine {
 			es = append(es, e)
 		}
 	}
+	if os.Getenv("SENTINIX_CODEQL") != "" { // opt-in: slow; a missing binary then shows as a coverage gap
+		es = append(es, CodeQL{})
+	}
 	return es
 }
 

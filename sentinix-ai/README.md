@@ -786,6 +786,25 @@ These actions appear as buttons on a finding.
 - **Draft patch:** a unified diff for the finding's file only, size-limited. It is shown to you and never applied or committed automatically.
 - **Test generation** (`POST /api/findings/{id}/ai/test`, Owner only, needs the sandbox): proposes a patch and a regression test, runs the command you give it in the sandbox against the vulnerable code and the patched code, and keeps both only if the test **fails before and passes after**. A test that passes on the vulnerable code proves nothing, so it is discarded.
 
+### Hunt: LLM entry-point audit (optional)
+
+`sentinix hunt` goes after what rule packs cannot see: logic bugs such as an exported intent that overwrites settings, or a deeplink host check that accepts `evil-example.org`. It lists entry points (exported components, deeplink handlers, HTTP routes) without a model, then asks one small question per entry point and vulnerability class, in a strict pass and a broad pass. Findings are **advisory**: tagged "AI-suggested, unverified", shown at notice level, and they never fail a gate.
+
+```bash
+sentinix hunt -ai models.json [-policy local-only] [-max-calls 200] [path]
+```
+
+| Flag | Effect |
+| --- | --- |
+| `-tools` | Model may read files and grep inside the path (read-only, `-tool-steps` per task) |
+| `-resume state.json`, `-only text` | Skip finished tasks on re-run; re-run one task |
+| `-platform mobile\|backend` | Audit one side of a mixed repo |
+| `-sandbox-image img -poc-cmd "cmd"` | Model writes a proof-of-concept test; it must fail on today's code, in the no-network sandbox |
+| `-variant file`, `-variant-ghsa GHSA-...` | Also hunt for variants of a known vulnerability |
+| `-hunt-packs dir -trust keys` | Extra vulnerability classes from signed hunt packs |
+
+Models can be OpenAI-compatible or `"provider": "anthropic"`. `sentinixd -hunt-max-calls N` runs it on AI-enabled projects; a scan that hits the cap lists that as not covered. `sentinix mcp serve` exposes read-only scan and entry-point tools to coding agents. Set `SENTINIX_CODEQL=1` (with the CodeQL CLI and query packs installed) to add CodeQL data-flow findings as a normal engine.
+
 ### Why prompt injection does not get far
 
 Only a short snippet around the finding is sent. It is wrapped and labelled as untrusted data, models have no tools, no shell and no network access of their own, and everything they return is parsed as data and checked before use. A malicious comment in a repository can at worst produce a bad suggestion that a human has to accept.
@@ -969,7 +988,7 @@ Being clear about the edges is part of being trustworthy.
 - **Isolation:** engines run on the host unless `-sandbox-image` is set.
 - **Comments and caching:** a new comment is posted on every push, and results are not cached by file hash.
 - **Scaling:** one server replica only, because scheduled scans run in the process.
-- **Depth of analysis:** rule packs are pattern based. They find known risky constructs, not data flows or business-logic flaws.
+- **Depth of analysis:** rule packs are pattern based. They find known risky constructs; data flows need CodeQL (`SENTINIX_CODEQL=1`) and logic flaws need the advisory `hunt` audit.
 - **Dashboard:** it is a plain-JavaScript page served by the server, not a separate TypeScript application. SCIM provisioning, logo branding and a native PDF renderer are not included.
 - **Platforms:** iOS binary analysis, Flutter and Dart AOT analysis, and runtime mobile instrumentation are not covered.
 - **Not a substitute:** Sentinix does not replace a human security review for regulated products.
