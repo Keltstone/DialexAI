@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "name": "android-audit",
+  "description": "Standard Android entry-point security audit matching v1 behavior",
+  "globals": {
+    "system_rules": "You are a specialized defensive application security reviewer."
+  },
+  "tasks": [
+    {
+      "name": "classify",
+      "model": "classify",
+      "for_each": "entrypoints",
+      "passes": ["strict", "broad"],
+      "tools": ["read_file", "grep", "entrypoints"],
+      "budget": 200,
+      "fresh_context": true,
+      "prompt": "Entry point ({{ entry.kinds }}): {{ entry.name }}\nVulnerability class: {{ class.id }}\n{{ pass.ask }}{{ class.hint }}{{ tools.help }}\n{{ entry.code }}\nReply {\"vulnerable\":bool,\"severity\":\"low|medium|high|critical\",\"confidence\":0..1,\"reason\":\"short\"}."
+    }
+  ]
+}
