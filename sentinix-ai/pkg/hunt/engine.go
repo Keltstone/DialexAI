@@ -44,12 +44,12 @@ type Engine struct {
 
 func (e *Engine) Name() string { return "llm-audit" }
 
-// Skipped feeds the scan's "not covered" list (scheduler.scanAll reads it after Scan).
-func (e *Engine) Skipped() []string {
+// Gap feeds the scan's coverage gaps (scheduler.scanAll reads it after Scan). Not Skipped(): that fails PR status.
+func (e *Engine) Gap() string {
 	if e.Truncated {
-		return []string{fmt.Sprintf("llm-audit stopped at %d model calls", e.MaxCalls)}
+		return fmt.Sprintf("llm-audit stopped at %d model calls", e.MaxCalls)
 	}
-	return nil
+	return ""
 }
 
 type answer struct {

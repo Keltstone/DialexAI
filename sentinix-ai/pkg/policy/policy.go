@@ -54,7 +54,7 @@ func (b Baseline) New(fs []engines.Finding) []engines.Finding {
 // Unattested CI findings are excluded from the gate.
 func Fails(fs []engines.Finding, min engines.Severity) bool {
 	for _, f := range fs {
-		if f.Source == "ci-unattested" {
+		if f.Source == "ci-unattested" || f.Source == "llm" { // llm findings are advisory, never gate
 			continue
 		}
 		if f.Severity >= min {
@@ -81,6 +81,9 @@ func CategoryFails(fs []engines.Finding, cat string, pol CategoryPolicy) bool {
 		return false
 	}
 	for _, f := range fs {
+		if f.Source == "llm" {
+			continue
+		}
 		if f.Source == "ci-unattested" {
 			if cat != engines.CategoryArchitecture || (f.Engine != "" && strings.ToLower(f.Engine) != "konsist") {
 				continue
@@ -195,6 +198,9 @@ func (p *ProjectPolicy) EffectiveLevel(ruleID string, defaultSeverity engines.Se
 				return norm
 			}
 		}
+	}
+	if strings.HasPrefix(ruleID, "hunt/") {
+		return LevelNotice
 	}
 	if p != nil && p.DefaultLevel != "" {
 		if norm, valid := ParseEnforcementLevel(string(p.DefaultLevel)); valid {

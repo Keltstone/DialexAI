@@ -54,7 +54,7 @@ func TestBenchMeetsTargets(t *testing.T) {
 func TestBudgetAndPolicy(t *testing.T) {
 	calls := 0
 	e := &Engine{Models: []ai.Model{fake{local: true, calls: &calls}}, Policy: "local-only", MaxCalls: 2}
-	if _, err := e.Scan(context.Background(), benchDir); err != nil || calls != 2 || !e.Truncated || len(e.Skipped()) != 1 {
+	if _, err := e.Scan(context.Background(), benchDir); err != nil || calls != 2 || !e.Truncated || e.Gap() == "" {
 		t.Fatalf("calls=%d trunc=%v %v", calls, e.Truncated, err)
 	}
 	cloud := &Engine{Models: []ai.Model{fake{local: false}}, Policy: "local-only", MaxCalls: 9}

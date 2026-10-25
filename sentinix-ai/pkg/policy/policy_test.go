@@ -161,3 +161,13 @@ func TestRuleEnforcementLevelsAndPolicy(t *testing.T) {
 	}
 }
 
+
+func TestLLMFindingsNeverGate(t *testing.T) {
+	f := engines.Finding{Rule: "hunt/authz", Severity: engines.Critical, Source: "llm"}
+	if Fails([]engines.Finding{f}, engines.Low) || CategoryFails([]engines.Finding{f}, engines.CategorySecurity, CategoryPolicy{Mode: "block", Threshold: engines.Low}) {
+		t.Fatal("llm finding gated")
+	}
+	if (&ProjectPolicy{DefaultLevel: LevelBlock}).EffectiveLevel("hunt/authz", engines.Critical) != LevelNotice {
+		t.Fatal("hunt rule not notice")
+	}
+}
