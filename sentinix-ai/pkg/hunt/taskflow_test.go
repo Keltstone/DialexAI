@@ -127,13 +127,13 @@ func TestGoldenAndroidAuditEquivalence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load android-audit taskflow failed: %v", err)
 	}
+	cfg := DefaultHuntConfig()
+	cfg.Taskflow = tf.Name
 	e2 := &Engine{
 		Models:   []ai.Model{fake{local: true}},
 		Policy:   "local-only",
 		MaxCalls: 100,
-		Config: &HuntConfig{
-			Taskflow: tf.Name,
-		},
+		Config:   &cfg,
 	}
 	fs2, err := e2.Scan(context.Background(), benchDir)
 	if err != nil {

@@ -69,6 +69,7 @@ type Engine struct {
 	ProjectID string
 	RunID     string
 	Tracker   *BudgetTracker
+	ClassLib  *ClassLibrary
 }
 
 func (e *Engine) Name() string { return "llm-audit" }
@@ -92,30 +93,37 @@ type answer struct {
 }
 
 func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, error) {
+	// Active passes from config or default strict+broad
+	activePasses := passes
+	if e.Config != nil && len(e.Config.Passes) > 0 {
+		activePasses = nil
+		for _, p := range e.Config.Passes {
+			activePasses = append(activePasses, struct{ name, ask string }{name: p.Name, ask: p.Prompt})
+		}
+	}
+
 	// Dry run mode: planning preview only without calling any models
 	if e.Config != nil && e.Config.DryRun {
-		eps, err := Entrypoints(root)
+		eps, err := EntrypointsWithConfig(root, e.Config)
 		if err != nil {
 			return nil, err
 		}
 		totalPlanned := 0
 		for _, ep := range eps {
-			totalPlanned += len(e.classesFor(ep)) * len(passes)
+			totalPlanned += len(e.classesFor(ep)) * len(activePasses)
 		}
 		fmt.Printf("[DRY-RUN] Planned hunt audit: %d entry points, %d planned task passes.\n", len(eps), totalPlanned)
 		fmt.Printf("[DRY-RUN] Budget limits: max_calls=%d, max_tokens=%d, max_cost_usd=$%.2f, policy=%s\n", e.MaxCalls, e.Config.MaxTokens, e.Config.MaxCostUSD, e.Policy)
 		return nil, nil
 	}
 
-	var m ai.Model
-	for _, c := range e.Models {
-		if ai.Allowed(e.Policy, c) {
-			m = c
-			break
-		}
+	var roles map[string]string
+	if e.Config != nil {
+		roles = e.Config.Roles
 	}
-	if m == nil {
-		return nil, fmt.Errorf("%w: no model allowed by policy %q", engines.ErrEngineUnavailable, e.Policy)
+	m, err := SelectModelForRole(e.Models, e.Policy, roles, "classify")
+	if err != nil {
+		return nil, err
 	}
 
 	// Budget tracker
@@ -130,7 +138,7 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 	// Wrap model with concurrency throttling, retries, and token accounting
 	relModel := NewReliableModel(m, e.Tracker, 5, 2*time.Minute)
 
-	eps, err := Entrypoints(root)
+	eps, err := EntrypointsWithConfig(root, e.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +204,7 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 			if e.Only != "" && !strings.Contains(ep.File+"|"+class, e.Only) {
 				continue
 			}
-			for _, p := range passes {
+			for _, p := range activePasses {
 				key := taskKey(code, ep.File, class, p.name)
 				res, cached := Result{}, false
 
@@ -263,7 +271,13 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 					File: ep.File, Line: 1, Severity: sev, Message: truncate(res.Reason, 300), Evidence: res.Evidence,
 					CWE: e.cweOf(class), Match: ep.Name + ":" + class, Source: "llm", Level: "notice",
 				})
-				break // strict hit: skip broad pass
+				stopOnHit := true
+				if e.Config != nil && len(e.Config.Passes) > 0 {
+					stopOnHit = e.Config.StopOnHit
+				}
+				if stopOnHit {
+					break // strict hit: skip broad pass
+				}
 			}
 		}
 	}
@@ -329,33 +343,26 @@ func truncate(s string, n int) string {
 	return s
 }
 
-// classesFor is the union of the built-in and pack classes of every kind the entry point has, without repeats.
+// classesFor returns applicable vulnerability class IDs for the entry point.
 func (e *Engine) classesFor(ep Entry) []string {
-	var out []string
-	seen := map[string]bool{}
-	add := func(c string) {
-		if !seen[c] {
-			seen[c] = true
-			out = append(out, c)
+	if e.ClassLib == nil {
+		var custom []ClassConfig
+		if e.Config != nil {
+			custom = e.Config.Classes
 		}
+		e.ClassLib, _ = NewClassLibrary(custom, e.Packs)
 	}
+	out := e.ClassLib.ClassesFor(ep, e.Platform, e.Packs)
 	matched := false
 	for _, k := range ep.Kinds {
-		if e.Platform != "" && kindPlatform[k] != e.Platform {
+		if e.Platform != "" && kindPlatform[k] != "" && kindPlatform[k] != e.Platform {
 			continue
 		}
 		matched = true
-		for _, c := range classes[k] {
-			add(c)
-		}
-		for _, p := range e.Packs {
-			for _, c := range p.Classes[k] {
-				add(c.ID)
-			}
-		}
+		break
 	}
 	if e.Variant != "" && matched {
-		add("variant")
+		out = append(out, "variant")
 	}
 	return out
 }
@@ -377,6 +384,11 @@ func (e *Engine) hint(id string) string {
 	if id == "variant" {
 		return "Look for a variant of this known vulnerability (same root cause, different code path):\n" + ai.Untrusted(truncate(e.Variant, 3000)) + "\n"
 	}
+	if e.ClassLib != nil {
+		if c, ok := e.ClassLib.GetClass(id); ok && c.Hint != "" {
+			return "Check specifically: " + c.Hint + "\n"
+		}
+	}
 	if c, ok := e.class(id); ok && c.Hint != "" {
 		return "Check specifically: " + c.Hint + "\n"
 	}
@@ -384,6 +396,11 @@ func (e *Engine) hint(id string) string {
 }
 
 func (e *Engine) cweOf(id string) string {
+	if e.ClassLib != nil {
+		if c, ok := e.ClassLib.GetClass(id); ok && c.CWE != "" {
+			return c.CWE
+		}
+	}
 	if c, ok := e.class(id); ok && c.CWE != "" {
 		return c.CWE
 	}
