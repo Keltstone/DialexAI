@@ -50,7 +50,7 @@ const views = {
       h('h2', {}, 'New vs fixed per week'),
       table(['Week', 'New', 'Fixed'], (p.weekly || []).map((w) => h('tr', {}, h('td', {}, day(w.Week || w.week)), h('td', {}, w.New), h('td', {}, w.Fixed)))),
       h('h2', {}, 'Oldest open criticals'),
-      table(['Rule', 'Where', 'Since'], (p.oldest_criticals || []).map((f) => h('tr', {}, h('td', {}, h('a', { href: '#/finding/' + f.ID }, f.rule)), h('td', {}, f.file), h('td', {}, day(f.FirstSeen))))));
+      table(['Rule', 'Where', 'Since'], (p.oldest_criticals || []).map((f) => h('tr', {}, h('td', {}, h('a', { href: '#/finding/' + f.ID }, f.rule), f.source === 'llm' ? h('span', { class: 'tag' }, 'AI-suggested, unverified') : null), h('td', {}, f.file), h('td', {}, day(f.FirstSeen))))));
   },
   async findings() {
     const status = new URLSearchParams(location.hash.split('?')[1] || '').get('status') || 'open';
@@ -72,7 +72,7 @@ const views = {
       const r = await api(`/findings/${f.ID}/triage`, { method: 'POST', body: { status, owner: owner.value, ...extra } });
       if (r && r.approval) toast('Sent for approval by a second reviewer.');
     });
-    return h('div', {}, h('h1', {}, f.rule), h('p', {}, h('span', { class: 'tag' }, f.category || 'security'), ' ', sev(f.severity), ' ', f.message),
+    return h('div', {}, h('h1', {}, f.rule), h('p', {}, h('span', { class: 'tag' }, f.category || 'security'), ' ', f.source === 'llm' ? h('span', { class: 'tag' }, 'AI-suggested, unverified') : null, ' ', sev(f.severity), ' ', f.message),
       h('div', { class: 'card' }, h('div', {}, `${f.file}:${f.line}`), h('pre', {}, f.evidence || ''),
         f.cwe ? h('div', { class: 'mute' }, f.cwe) : null, f.fix ? h('p', {}, 'Fix: ', f.fix) : null),
       vd ? h('div', { class: 'card' }, h('strong', {}, 'AI verdict (advisory): '), (vd.real ? 'real' : 'likely false positive') + `, ${vd.severity}, confidence ${Number(vd.confidence).toFixed(2)}. `, vd.reasoning,
