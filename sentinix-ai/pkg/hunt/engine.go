@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"sentinix/pkg/ai"
 	"sentinix/pkg/engines"
+	"sentinix/pkg/store"
 )
 
 // classes per entry-point kind: the fixed vulnerability vocabulary (rule id is hunt/<class>).
@@ -39,10 +41,11 @@ const maxSlice = 6000
 // Engine audits entry points with the first model the policy allows. Truncated is set when MaxCalls
 // stopped the run early, so callers can report a coverage gap instead of a clean result.
 type Engine struct {
-	Models    []ai.Model
-	Policy    string
-	MaxCalls  int
-	Truncated bool
+	Models     []ai.Model
+	Policy     string
+	MaxCalls   int
+	Truncated  bool
+	GapMessage string
 	// Optional proof of concept: with Run and PoCCmd set, the model writes a test for each finding and it
 	// runs on the current tree. Reproduced -> evidence says so; otherwise the finding stays, marked unconfirmed.
 	Run    ai.Runner
@@ -59,9 +62,13 @@ type Engine struct {
 	Platform  string
 	// State, when set, caches finished tasks across runs. Only, when set, runs just tasks whose
 	// "file|class" contains it (single-task re-run for debugging).
-	State  *State
-	Only   string
-	Config *HuntConfig
+	State     *State
+	Only      string
+	Config    *HuntConfig
+	Store     *store.Store
+	ProjectID string
+	RunID     string
+	Tracker   *BudgetTracker
 }
 
 func (e *Engine) Name() string { return "llm-audit" }
@@ -69,6 +76,9 @@ func (e *Engine) Name() string { return "llm-audit" }
 // Gap feeds the scan's coverage gaps (scheduler.scanAll reads it after Scan). Not Skipped(): that fails PR status.
 func (e *Engine) Gap() string {
 	if e.Truncated {
+		if e.GapMessage != "" {
+			return "llm-audit stopped: " + e.GapMessage
+		}
 		return fmt.Sprintf("llm-audit stopped at %d model calls", e.MaxCalls)
 	}
 	return ""
@@ -82,6 +92,21 @@ type answer struct {
 }
 
 func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, error) {
+	// Dry run mode: planning preview only without calling any models
+	if e.Config != nil && e.Config.DryRun {
+		eps, err := Entrypoints(root)
+		if err != nil {
+			return nil, err
+		}
+		totalPlanned := 0
+		for _, ep := range eps {
+			totalPlanned += len(e.classesFor(ep)) * len(passes)
+		}
+		fmt.Printf("[DRY-RUN] Planned hunt audit: %d entry points, %d planned task passes.\n", len(eps), totalPlanned)
+		fmt.Printf("[DRY-RUN] Budget limits: max_calls=%d, max_tokens=%d, max_cost_usd=$%.2f, policy=%s\n", e.MaxCalls, e.Config.MaxTokens, e.Config.MaxCostUSD, e.Policy)
+		return nil, nil
+	}
+
 	var m ai.Model
 	for _, c := range e.Models {
 		if ai.Allowed(e.Policy, c) {
@@ -92,10 +117,24 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 	if m == nil {
 		return nil, fmt.Errorf("%w: no model allowed by policy %q", engines.ErrEngineUnavailable, e.Policy)
 	}
+
+	// Budget tracker
+	if e.Tracker == nil {
+		if e.Config != nil {
+			e.Tracker = NewBudgetTracker(*e.Config)
+		} else {
+			e.Tracker = NewBudgetTracker(HuntConfig{MaxCalls: e.MaxCalls, Policy: e.Policy})
+		}
+	}
+
+	// Wrap model with concurrency throttling, retries, and token accounting
+	relModel := NewReliableModel(m, e.Tracker, 5, 2*time.Minute)
+
 	eps, err := Entrypoints(root)
 	if err != nil {
 		return nil, err
 	}
+
 	var out []engines.Finding
 	calls := 0
 	var tl *tools
@@ -105,6 +144,40 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 	if e.State != nil {
 		defer e.State.Save()
 	}
+
+	// Database Run registration if store is configured
+	if e.Store != nil && e.RunID == "" {
+		e.RunID = fmt.Sprintf("run-%d", time.Now().UnixNano())
+		_ = e.Store.CreateHuntRun(ctx, store.HuntRun{
+			ID:        e.RunID,
+			ProjectID: e.ProjectID,
+			Mode:      "hunt",
+			Status:    "running",
+		})
+	}
+
+	start := time.Now()
+	defer func() {
+		if e.Store != nil && e.RunID != "" {
+			callsCount, tokensCount, cost, _ := e.Tracker.Stats()
+			status := "completed"
+			if e.Truncated {
+				status = "truncated"
+			}
+			_ = e.Store.UpdateHuntRun(ctx, store.HuntRun{
+				ID:            e.RunID,
+				ProjectID:     e.ProjectID,
+				Status:        status,
+				DurationMs:    time.Since(start).Milliseconds(),
+				Calls:         callsCount,
+				Tokens:        tokensCount,
+				CostUSD:       cost,
+				FindingsCount: len(out),
+				Gaps:          e.Gap(),
+			})
+		}
+	}()
+
 	for _, ep := range eps {
 		b, err := os.ReadFile(filepath.Join(root, ep.File))
 		if err != nil {
@@ -126,13 +199,33 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 			for _, p := range passes {
 				key := taskKey(code, ep.File, class, p.name)
 				res, cached := Result{}, false
-				if e.State != nil {
+
+				// Check DB store cache first if available
+				if e.Store != nil {
+					if taskRec, ok, _ := e.Store.GetCachedHuntTask(ctx, key); ok && taskRec.Status == "success" {
+						_ = json.Unmarshal([]byte(taskRec.ResultJSON), &res)
+						cached = true
+					}
+				}
+				// Offline fallback cache
+				if !cached && e.State != nil {
 					res, cached = e.State.get(key)
 				}
+
 				if !cached {
-					a, ok, stop := e.task(ctx, m, tl, ep, class, p.ask, code, &calls)
+					// Check budget before task execution
+					if ex, reason := e.Tracker.Exhausted(); ex {
+						e.Truncated = true
+						e.GapMessage = reason
+						return out, nil
+					}
+
+					a, ok, stop := e.task(ctx, relModel, tl, ep, class, p.ask, code, &calls)
 					if stop {
 						e.Truncated = true
+						if ex, reason := e.Tracker.Exhausted(); ex {
+							e.GapMessage = reason
+						}
 						return out, nil
 					}
 					if !ok {
@@ -142,10 +235,23 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 					if res.Vulnerable && e.Run != nil && len(e.PoCCmd) > 0 && calls < e.MaxCalls {
 						calls++
 						sev, _ := engines.ParseSeverity(res.Severity)
-						res.Evidence = e.proof(ctx, m, engines.Finding{Rule: "hunt/" + class, File: ep.File, Message: res.Reason, Severity: sev}, code, root)
+						res.Evidence = e.proof(ctx, relModel, engines.Finding{Rule: "hunt/" + class, File: ep.File, Message: res.Reason, Severity: sev}, code, root)
 					}
 					if e.State != nil {
 						e.State.put(key, res)
+					}
+					if e.Store != nil {
+						resJSON, _ := json.Marshal(res)
+						_ = e.Store.SaveHuntTask(ctx, store.HuntTaskRecord{
+							RunID:      e.RunID,
+							TaskKey:    key,
+							Status:     "success",
+							File:       ep.File,
+							Class:      class,
+							Pass:       p.name,
+							Model:      relModel.Name(),
+							ResultJSON: string(resJSON),
+						})
 					}
 				}
 				sev, _ := engines.ParseSeverity(res.Severity)
