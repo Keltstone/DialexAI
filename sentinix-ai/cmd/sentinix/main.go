@@ -674,9 +674,24 @@ func huntConfigCmd(args []string) {
 }
 
 func huntCmd(args []string) {
-	if len(args) > 0 && args[0] == "config" {
-		huntConfigCmd(args[1:])
-		return
+	if len(args) > 0 {
+		switch args[0] {
+		case "config":
+			huntConfigCmd(args[1:])
+			return
+		case "runs":
+			huntRunsCmd(args[1:])
+			return
+		case "show":
+			huntShowCmd(args[1:])
+			return
+		case "resume":
+			huntResumeCmd(args[1:])
+			return
+		case "rerun":
+			huntRerunCmd(args[1:])
+			return
+		}
 	}
 	fl := flag.NewFlagSet("hunt", flag.ExitOnError)
 	models := fl.String("ai", "", "models JSON (required unless in config)")
@@ -696,6 +711,7 @@ func huntCmd(args []string) {
 	gate := fl.String("gate", "", "gating policy: advisory|confirmed-only")
 	taskflow := fl.String("taskflow", "", "taskflow file or name")
 	dryRun := fl.Bool("dry-run", false, "plan tasks and display budget estimates without invoking models")
+	diffMode := fl.Bool("diff", false, "only audit entry points touched in git diff against HEAD/base")
 	fl.Parse(args)
 
 	root := "."
@@ -728,6 +744,7 @@ func huntCmd(args []string) {
 		Gate:         *gate,
 		Taskflow:     *taskflow,
 		DryRun:       *dryRun,
+		Diff:         *diffMode,
 	}
 
 	cfg, err := hunt.ResolveConfig(root, nil, cliFlags)
@@ -791,4 +808,104 @@ func huntCmd(args []string) {
 		fmt.Printf(" Not covered: stopped at -max-calls %d.", cfg.MaxCalls)
 	}
 	fmt.Println()
+}
+
+func huntRunsCmd(args []string) {
+	fl := flag.NewFlagSet("hunt runs", flag.ExitOnError)
+	project := fl.String("project", "", "project ID filter")
+	limit := fl.Int("limit", 20, "maximum runs to list")
+	db := fl.String("db", "sentinix.db", "database DSN")
+	fl.Parse(args)
+
+	st, err := store.Open(*db)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening store: %v\n", err)
+		os.Exit(1)
+	}
+	defer st.Close()
+
+	runs, err := st.ListHuntRuns(context.Background(), *project, *limit)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error listing runs: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(runs) == 0 {
+		fmt.Println("No hunt runs found.")
+		return
+	}
+
+	fmt.Printf("%-24s %-16s %-10s %-8s %-6s %-8s %-8s\n", "RUN ID", "PROJECT", "STATUS", "CALLS", "TOKENS", "COST", "FINDINGS")
+	for _, r := range runs {
+		costStr := fmt.Sprintf("$%.2f", r.CostUSD)
+		fmt.Printf("%-24s %-16s %-10s %-8d %-6d %-8s %-8d\n", r.ID, r.ProjectID, r.Status, r.Calls, r.Tokens, costStr, r.FindingsCount)
+	}
+}
+
+func huntShowCmd(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: sentinix hunt show <run-id> [--db dsn]")
+		os.Exit(1)
+	}
+	runID := args[0]
+	fl := flag.NewFlagSet("hunt show", flag.ExitOnError)
+	db := fl.String("db", "sentinix.db", "database DSN")
+	fl.Parse(args[1:])
+
+	st, err := store.Open(*db)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening store: %v\n", err)
+		os.Exit(1)
+	}
+	defer st.Close()
+
+	run, err := st.GetHuntRun(context.Background(), runID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error fetching run: %v\n", err)
+		os.Exit(1)
+	}
+	if run == nil {
+		fmt.Fprintf(os.Stderr, "run %q not found\n", runID)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Hunt Run: %s\n", run.ID)
+	fmt.Printf("Project:  %s\n", run.ProjectID)
+	fmt.Printf("Status:   %s\n", run.Status)
+	fmt.Printf("Started:  %d\n", run.Started)
+	fmt.Printf("Calls:    %d\n", run.Calls)
+	fmt.Printf("Tokens:   %d\n", run.Tokens)
+	fmt.Printf("Cost:     $%.2f USD\n", run.CostUSD)
+	fmt.Printf("Findings: %d\n", run.FindingsCount)
+	if run.Gaps != "" {
+		fmt.Printf("Gaps:     %s\n", run.Gaps)
+	}
+
+	calls, _ := st.GetHuntRunToolCalls(context.Background(), runID)
+	if len(calls) > 0 {
+		fmt.Printf("\nAudited Tool Calls (%d):\n", len(calls))
+		for _, c := range calls {
+			fmt.Printf("- [%s] tool=%s args_hash=%s bytes=%d\n", c.TaskID, c.Tool, c.ArgsHash, c.BytesReturned)
+		}
+	}
+}
+
+func huntResumeCmd(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: sentinix hunt resume <run-id> [options]")
+		os.Exit(1)
+	}
+	// For resume, forward to huntCmd with resume flag
+	huntCmd(append([]string{"-resume", args[0]}, args[1:]...))
+}
+
+func huntRerunCmd(args []string) {
+	fl := flag.NewFlagSet("hunt rerun", flag.ExitOnError)
+	task := fl.String("task", "", "task id/key to rerun")
+	fl.Parse(args)
+	if *task == "" {
+		fmt.Fprintln(os.Stderr, "usage: sentinix hunt rerun --task <task-key>")
+		os.Exit(1)
+	}
+	huntCmd(append([]string{"-only", *task}, fl.Args()...))
 }

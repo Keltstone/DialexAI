@@ -413,6 +413,7 @@ type CLIFlags struct {
 	Taskflow     string
 	DryRun       bool
 	CodeQL       *bool
+	Diff         bool
 }
 
 // ResolveConfig computes the effective HuntConfig by layering all sources according to strict precedence:

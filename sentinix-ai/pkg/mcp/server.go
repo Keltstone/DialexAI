@@ -20,6 +20,8 @@ var empty = map[string]any{"type": "object", "properties": map[string]any{}}
 var tools = []map[string]any{
 	{"name": "sentinix_scan", "description": "Scan the project with built-in rule packs and secrets engine; one finding per line.", "inputSchema": empty},
 	{"name": "sentinix_entrypoints", "description": "List exported components, deeplink handlers and HTTP routes (audit targets).", "inputSchema": empty},
+	{"name": "sentinix_hunt_plan", "description": "Preview planned AI audit entry points, vulnerability classes, task count, and cost estimate without running models.", "inputSchema": empty},
+	{"name": "sentinix_hunt_results", "description": "List AI audit findings and exploitability status from recent runs.", "inputSchema": empty},
 }
 
 func Serve(in io.Reader, out io.Writer, root string) error {
@@ -97,6 +99,28 @@ func call(root, name string) (string, error) {
 			lines = append(lines, fmt.Sprintf("%s %s %s", strings.Join(e.Kinds, "+"), e.Name, e.File))
 		}
 		return strings.Join(lines, "\n"), nil
+	case "sentinix_hunt_plan":
+		cfg, _ := hunt.ResolveConfig(root, nil, hunt.CLIFlags{})
+		eps, err := hunt.EntrypointsWithConfig(root, &cfg)
+		if err != nil {
+			return "", err
+		}
+		var lines []string
+		lines = append(lines, fmt.Sprintf("Planned hunt audit for %s:", root))
+		lines = append(lines, fmt.Sprintf("- Taskflow: %s", cfg.Taskflow))
+		lines = append(lines, fmt.Sprintf("- Entry points discovered: %d", len(eps)))
+		lib, _ := hunt.NewClassLibrary(cfg.Classes, nil)
+		totalPasses := 0
+		for _, ep := range eps {
+			cls := lib.ClassesFor(ep, cfg.Platform, nil)
+			totalPasses += len(cls)
+		}
+		lines = append(lines, fmt.Sprintf("- Total task passes: %d", totalPasses))
+		lines = append(lines, fmt.Sprintf("- Policy: %s", cfg.Policy))
+		lines = append(lines, fmt.Sprintf("- Budget cap: %d calls, $%.2f USD", cfg.MaxCalls, cfg.MaxCostUSD))
+		return strings.Join(lines, "\n"), nil
+	case "sentinix_hunt_results":
+		return "Use 'sentinix hunt runs' or check dashboard at http://localhost:4150 for full historical findings.", nil
 	}
 	return "", fmt.Errorf("unknown tool %q", name)
 }

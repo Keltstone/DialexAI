@@ -289,6 +289,25 @@ func FormatReviewComment(blocking bool, threshold engines.Severity, allNew, reso
 		}
 	}
 
+	// 3. Hunt AI Security Audit Advisories section
+	var huntFindings []engines.Finding
+	for _, f := range allNew {
+		if f.Source == "llm" || strings.HasPrefix(f.Rule, "hunt/") {
+			huntFindings = append(huntFindings, f)
+		}
+	}
+	if len(huntFindings) > 0 {
+		fmt.Fprintf(&buf, "<details><summary>AI Security Audit (Hunt) Advisories (%d)</summary>\n\n```\n", len(huntFindings))
+		shownHunt := huntFindings
+		if len(shownHunt) > 20 {
+			shownHunt = shownHunt[:20]
+		}
+		for _, f := range shownHunt {
+			fmt.Fprintf(&buf, "[%s] %s %s:%d %s %s\n", f.Severity, report.SanitizeField(f.Rule), report.SanitizeField(f.File), f.Line, report.SanitizeField(f.Message), report.SanitizeField(f.Evidence))
+		}
+		buf.WriteString("```\nAdvisories are suggestions and do not block merge unless confirmed-only gating is enabled.\n</details>\n\n")
+	}
+
 	if len(allNew) == 0 {
 		buf.WriteString("No new findings introduced by this change.\n\n")
 	}

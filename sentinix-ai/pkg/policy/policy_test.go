@@ -171,3 +171,62 @@ func TestLLMFindingsNeverGate(t *testing.T) {
 		t.Fatal("hunt rule not notice")
 	}
 }
+
+func TestHuntConfirmedOnlyGating(t *testing.T) {
+	unconfirmed := engines.Finding{
+		Rule:     "hunt/sql-injection",
+		Severity: engines.Critical,
+		Source:   "llm",
+		Evidence: "[exploitability:unconfirmed]",
+	}
+	likely := engines.Finding{
+		Rule:     "hunt/sql-injection",
+		Severity: engines.Critical,
+		Source:   "llm",
+		Evidence: "[exploitability:likely]",
+	}
+	confirmedHigh := engines.Finding{
+		Rule:     "hunt/sql-injection",
+		Severity: engines.High,
+		Source:   "llm",
+		Evidence: "[exploitability:confirmed] PoC reproduced: test/Exploit.java",
+	}
+
+	// 1. Under default advisory mode, even confirmed findings do not gate
+	if FailsWithHuntGate([]engines.Finding{confirmedHigh}, engines.Medium, "advisory") {
+		t.Error("advisory mode must never gate llm findings")
+	}
+
+	// 2. Under confirmed-only mode:
+	// Unconfirmed & likely findings never gate
+	if FailsWithHuntGate([]engines.Finding{unconfirmed}, engines.Low, "confirmed-only") {
+		t.Error("unconfirmed finding gated in confirmed-only mode")
+	}
+	if FailsWithHuntGate([]engines.Finding{likely}, engines.Low, "confirmed-only") {
+		t.Error("likely finding gated in confirmed-only mode")
+	}
+
+	// Confirmed finding gates if severity >= threshold
+	if !FailsWithHuntGate([]engines.Finding{confirmedHigh}, engines.Medium, "confirmed-only") {
+		t.Error("confirmed high finding failed to gate in confirmed-only mode")
+	}
+	// But not if threshold is Critical
+	if FailsWithHuntGate([]engines.Finding{confirmedHigh}, engines.Critical, "confirmed-only") {
+		t.Error("confirmed high finding gated when threshold was Critical")
+	}
+
+	// 3. EffectiveFindingLevel
+	polAdvisory := &ProjectPolicy{HuntGate: "advisory"}
+	if polAdvisory.EffectiveFindingLevel(confirmedHigh) != LevelNotice {
+		t.Error("expected notice level under advisory policy")
+	}
+
+	polConfirmed := &ProjectPolicy{HuntGate: "confirmed-only"}
+	if polConfirmed.EffectiveFindingLevel(confirmedHigh) != LevelBlock {
+		t.Error("expected block level for confirmed finding under confirmed-only policy")
+	}
+	if polConfirmed.EffectiveFindingLevel(unconfirmed) != LevelNotice {
+		t.Error("expected notice level for unconfirmed finding under confirmed-only policy")
+	}
+}
+

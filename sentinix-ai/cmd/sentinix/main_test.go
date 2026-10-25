@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -241,6 +242,44 @@ func TestHuntConfigCommands(t *testing.T) {
 	// 3. validate
 	huntCmd([]string{"config", "validate", confPath})
 }
+
+func TestHuntRunsAndShowCommands(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	st, err := store.Open("sqlite:" + dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	runID := "run-test-123"
+	if err := st.CreateHuntRun(ctx, store.HuntRun{
+		ID:            runID,
+		ProjectID:     "proj-demo",
+		Status:        "completed",
+		Calls:         15,
+		Tokens:        4200,
+		CostUSD:       0.12,
+		FindingsCount: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.RecordHuntToolCall(ctx, store.HuntToolCallRecord{
+		RunID:         runID,
+		TaskID:        "task-1",
+		Tool:          "read_file",
+		ArgsHash:      "abcd1234",
+		BytesReturned: 500,
+	})
+	st.Close()
+
+	// 1. hunt runs
+	huntCmd([]string{"runs", "--db", "sqlite:" + dbPath, "--project", "proj-demo"})
+
+	// 2. hunt show
+	huntCmd([]string{"show", runID, "--db", "sqlite:" + dbPath})
+}
+
 
 
 

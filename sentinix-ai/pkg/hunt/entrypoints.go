@@ -345,3 +345,25 @@ func containsKind(list []string, item string) bool {
 	}
 	return false
 }
+
+// EntrypointsWithDiff filters discovered entry points to those located in touched files.
+func EntrypointsWithDiff(root string, cfg *HuntConfig, changedFiles []string) ([]Entry, error) {
+	all, err := EntrypointsWithConfig(root, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if len(changedFiles) == 0 {
+		return all, nil
+	}
+	changedMap := make(map[string]bool)
+	for _, f := range changedFiles {
+		changedMap[filepath.ToSlash(f)] = true
+	}
+	var filtered []Entry
+	for _, ep := range all {
+		if changedMap[filepath.ToSlash(ep.File)] {
+			filtered = append(filtered, ep)
+		}
+	}
+	return filtered, nil
+}

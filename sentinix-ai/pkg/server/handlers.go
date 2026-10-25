@@ -1443,3 +1443,67 @@ func (a *App) revokeUser(w http.ResponseWriter, r *http.Request) {
 	a.audit_(r, "session:revoke", in.Email)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (a *App) listHuntRuns(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !a.canReadProject(r, id) {
+		http.NotFound(w, r)
+		return
+	}
+	runs, err := a.Store.ListHuntRuns(r.Context(), id, 50)
+	if err != nil {
+		fail(w, err, 500)
+		return
+	}
+	writeJSON(w, runs)
+}
+
+func (a *App) getHuntRun(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	runID := r.PathValue("runID")
+	if !a.canReadProject(r, id) {
+		http.NotFound(w, r)
+		return
+	}
+	run, err := a.Store.GetHuntRun(r.Context(), runID)
+	if err != nil {
+		fail(w, err, 500)
+		return
+	}
+	if run == nil || run.ProjectID != id {
+		http.NotFound(w, r)
+		return
+	}
+	calls, _ := a.Store.GetHuntRunToolCalls(r.Context(), runID)
+	writeJSON(w, map[string]any{
+		"run":        run,
+		"tool_calls": calls,
+	})
+}
+
+func (a *App) triggerHuntRun(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !a.canReadProject(r, id) {
+		http.NotFound(w, r)
+		return
+	}
+	p, err := a.Store.Project(id)
+	if err != nil || p.ID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	runID := fmt.Sprintf("run-%d", time.Now().UnixNano())
+	run := store.HuntRun{
+		ID:        runID,
+		ProjectID: id,
+		Mode:      "hunt",
+		Status:    "running",
+		Started:   time.Now().Unix(),
+	}
+	if err := a.Store.CreateHuntRun(r.Context(), run); err != nil {
+		fail(w, err, 500)
+		return
+	}
+	writeJSON(w, run)
+}
+
