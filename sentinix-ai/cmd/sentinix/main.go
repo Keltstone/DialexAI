@@ -28,6 +28,7 @@ import (
 	"sentinix/pkg/packs"
 	"sentinix/pkg/policy"
 	"sentinix/pkg/report"
+	"sentinix/pkg/sandbox"
 	"sentinix/pkg/scheduler"
 	"sentinix/pkg/store"
 )
@@ -616,6 +617,8 @@ func huntCmd(args []string) {
 	models := fl.String("ai", "", "models JSON (required)")
 	policy := fl.String("policy", "local-only", "model policy: local-only|cloud-redacted|cloud")
 	maxCalls := fl.Int("max-calls", 200, "hard cap on model calls")
+	sbImage := fl.String("sandbox-image", "", "container image; with -poc-cmd, model-written PoC tests run in it (no network)")
+	pocCmd := fl.String("poc-cmd", "", "test command for PoC tests, e.g. \"./gradlew test\" (needs -sandbox-image)")
 	fl.Parse(args)
 	root := "."
 	if fl.NArg() > 0 {
@@ -627,10 +630,16 @@ func huntCmd(args []string) {
 	ms, err := ai.LoadModels(*models)
 	die(err)
 	e := &hunt.Engine{Models: ms, Policy: *policy, MaxCalls: *maxCalls}
+	if *pocCmd != "" {
+		if *sbImage == "" {
+			die(fmt.Errorf("-poc-cmd runs model-written code: -sandbox-image is required"))
+		}
+		e.Run, e.PoCCmd = sandbox.Docker{Image: *sbImage}.Run, strings.Fields(*pocCmd)
+	}
 	fs, err := e.Scan(context.Background(), root)
 	die(err)
 	for _, f := range fs {
-		fmt.Printf("[%s] %s %s (AI-suggested, unverified) %s\n", f.Severity, f.Rule, f.File, f.Message)
+		fmt.Printf("[%s] %s %s (AI-suggested, unverified) %s %s\n", f.Severity, f.Rule, f.File, f.Message, f.Evidence)
 	}
 	fmt.Printf("%d finding(s). Engines run: llm-audit (advisory).", len(fs))
 	if e.Truncated {

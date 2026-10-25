@@ -75,55 +75,7 @@ func Verify(ctx context.Context, run Runner, tree string, t Test, patch string, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	work := func(patched bool) (string, error) {
-		d, err := os.MkdirTemp("", "sentinix-verify-*")
-		if err != nil {
-			return "", err
-		}
-		if out, err := exec.Command("cp", "-R", tree+"/.", d).CombinedOutput(); err != nil {
-			return d, fmt.Errorf("copy: %v: %s", err, out)
-		}
-		if patched {
-			c := exec.Command("git", "apply", "--whitespace=nowarn", "-")
-			c.Dir, c.Stdin = d, strings.NewReader(patch)
-			if out, err := c.CombinedOutput(); err != nil {
-				return d, fmt.Errorf("patch does not apply: %s", out)
-			}
-		}
-
-		root, err := os.OpenRoot(d)
-		if err != nil {
-			return d, err
-		}
-		defer root.Close()
-
-		// Refuse to write through symlinks
-		cleanPath := filepath.Clean(filepath.ToSlash(t.Path))
-		parts := strings.Split(cleanPath, "/")
-		current := ""
-		for i, part := range parts {
-			if current == "" {
-				current = part
-			} else {
-				current = current + "/" + part
-			}
-			if fi, err := root.Lstat(current); err == nil {
-				if fi.Mode()&os.ModeSymlink != 0 {
-					return d, fmt.Errorf("refusing to write through symlink %q", current)
-				}
-			}
-			if i < len(parts)-1 {
-				if err := root.MkdirAll(current, 0o755); err != nil {
-					return d, err
-				}
-			}
-		}
-		if err := root.WriteFile(cleanPath, []byte(t.Content), 0o644); err != nil {
-			return d, err
-		}
-		return d, nil
-	}
-	bad, err := work(false)
+	bad, err := stage(tree, t, patch, false)
 	defer os.RemoveAll(bad)
 	if err != nil {
 		return err
@@ -131,13 +83,82 @@ func Verify(ctx context.Context, run Runner, tree string, t Test, patch string, 
 	if run(ctx, bad, cmd) == nil {
 		return fmt.Errorf("rejected: test passes on the vulnerable code, so it proves nothing")
 	}
-	fixed, err := work(true)
+	fixed, err := stage(tree, t, patch, true)
 	defer os.RemoveAll(fixed)
 	if err != nil {
 		return err
 	}
 	if err := run(ctx, fixed, cmd); err != nil {
 		return fmt.Errorf("rejected: test still fails after the patch: %v", err)
+	}
+	return nil
+}
+
+// stage copies tree into a temp dir, optionally applies patch, and writes the test file (never through symlinks).
+func stage(tree string, t Test, patch string, patched bool) (string, error) {
+	d, err := os.MkdirTemp("", "sentinix-verify-*")
+	if err != nil {
+		return "", err
+	}
+	if out, err := exec.Command("cp", "-R", tree+"/.", d).CombinedOutput(); err != nil {
+		return d, fmt.Errorf("copy: %v: %s", err, out)
+	}
+	if patched {
+		c := exec.Command("git", "apply", "--whitespace=nowarn", "-")
+		c.Dir, c.Stdin = d, strings.NewReader(patch)
+		if out, err := c.CombinedOutput(); err != nil {
+			return d, fmt.Errorf("patch does not apply: %s", out)
+		}
+	}
+
+	root, err := os.OpenRoot(d)
+	if err != nil {
+		return d, err
+	}
+	defer root.Close()
+
+	// Refuse to write through symlinks
+	cleanPath := filepath.Clean(filepath.ToSlash(t.Path))
+	parts := strings.Split(cleanPath, "/")
+	current := ""
+	for i, part := range parts {
+		if current == "" {
+			current = part
+		} else {
+			current = current + "/" + part
+		}
+		if fi, err := root.Lstat(current); err == nil {
+			if fi.Mode()&os.ModeSymlink != 0 {
+				return d, fmt.Errorf("refusing to write through symlink %q", current)
+			}
+		}
+		if i < len(parts)-1 {
+			if err := root.MkdirAll(current, 0o755); err != nil {
+				return d, err
+			}
+		}
+	}
+	if err := root.WriteFile(cleanPath, []byte(t.Content), 0o644); err != nil {
+		return d, err
+	}
+	return d, nil
+}
+
+// Reproduce is the proof-of-concept gate for an unfixed finding: the test must FAIL on the code as it is,
+// meaning the exploit works. A test that passes proves nothing and is rejected. The tree is not modified.
+func Reproduce(ctx context.Context, run Runner, tree string, t Test, cmd []string) error {
+	if err := safePath(t.Path); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	d, err := stage(tree, t, "", false)
+	defer os.RemoveAll(d)
+	if err != nil {
+		return err
+	}
+	if run(ctx, d, cmd) == nil {
+		return fmt.Errorf("not reproduced: test passes on the current code")
 	}
 	return nil
 }

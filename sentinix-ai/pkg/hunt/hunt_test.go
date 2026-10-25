@@ -2,6 +2,7 @@ package hunt
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -71,3 +72,29 @@ func TestCodeFramedAsData(t *testing.T) {
 		t.Fatal(seen)
 	}
 }
+
+// pocModel flags MapActivity, then answers the PoC request with a test file.
+type pocModel struct{ fake }
+
+func (p pocModel) Complete(ctx context.Context, sys, user string) (string, error) {
+	if strings.Contains(user, "Write one") {
+		return `{"path":"poc_test.sh","content":"exit 1"}`, nil
+	}
+	return p.fake.Complete(ctx, sys, user)
+}
+
+func TestPoCReproducedAndUnconfirmed(t *testing.T) {
+	run := func(code error) ai.Runner { return func(context.Context, string, []string) error { return code } }
+	for _, c := range []struct {
+		err  error
+		want string
+	}{{errTest, "PoC reproduced"}, {nil, "PoC unconfirmed"}} {
+		e := &Engine{Models: []ai.Model{pocModel{fake{local: true}}}, Policy: "local-only", MaxCalls: 100, Run: run(c.err), PoCCmd: []string{"sh"}}
+		fs, err := e.Scan(context.Background(), benchDir)
+		if err != nil || len(fs) != 2 || !strings.HasPrefix(fs[0].Evidence, c.want) {
+			t.Fatalf("%+v %v", fs, err)
+		}
+	}
+}
+
+var errTest = errors.New("test failed: exploit works")

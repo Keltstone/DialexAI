@@ -40,6 +40,10 @@ type Engine struct {
 	Policy    string
 	MaxCalls  int
 	Truncated bool
+	// Optional proof of concept: with Run and PoCCmd set, the model writes a test for each finding and it
+	// runs on the current tree. Reproduced -> evidence says so; otherwise the finding stays, marked unconfirmed.
+	Run    ai.Runner
+	PoCCmd []string
 }
 
 func (e *Engine) Name() string { return "llm-audit" }
@@ -116,11 +120,16 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 				if !a.Vulnerable {
 					continue
 				}
-				out = append(out, engines.Finding{
+				f := engines.Finding{
 					Rule: "hunt/" + class, Engine: e.Name(), Category: engines.CategorySecurity,
 					File: ep.File, Line: 1, Severity: sev, Message: truncate(a.Reason, 300),
 					CWE: cwe[class], Match: ep.Name + ":" + class, Source: "llm", Level: "notice",
-				})
+				}
+				if e.Run != nil && len(e.PoCCmd) > 0 && calls < e.MaxCalls {
+					calls++
+					f.Evidence = e.proof(ctx, m, f, code, root)
+				}
+				out = append(out, f)
 				break // strict hit: skip broad pass
 			}
 		}
@@ -148,4 +157,16 @@ func classesFor(ep Entry) []string {
 		}
 	}
 	return out
+}
+
+// proof returns the short evidence line: whether a model-written test reproduced the issue.
+func (e *Engine) proof(ctx context.Context, m ai.Model, f engines.Finding, code, root string) string {
+	t, err := ai.ProposeTest(ctx, m, e.Policy, f, code, "unit")
+	if err != nil {
+		return "PoC unconfirmed: no usable test"
+	}
+	if err := ai.Reproduce(ctx, e.Run, root, *t, e.PoCCmd); err != nil {
+		return "PoC unconfirmed: " + truncate(err.Error(), 120)
+	}
+	return "PoC reproduced: " + t.Path
 }
