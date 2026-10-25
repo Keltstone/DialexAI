@@ -691,6 +691,9 @@ func huntCmd(args []string) {
 		case "rerun":
 			huntRerunCmd(args[1:])
 			return
+		case "bundle":
+			huntBundleCmd(args[1:])
+			return
 		}
 	}
 	fl := flag.NewFlagSet("hunt", flag.ExitOnError)
@@ -909,3 +912,139 @@ func huntRerunCmd(args []string) {
 	}
 	huntCmd(append([]string{"-only", *task}, fl.Args()...))
 }
+
+func huntBundleCmd(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: sentinix hunt bundle <new|test|sign|verify> [args...]")
+		os.Exit(1)
+	}
+
+	b64 := base64.StdEncoding
+
+	switch args[0] {
+	case "new":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: sentinix hunt bundle new <name>")
+			os.Exit(1)
+		}
+		name := args[1]
+		filename := name
+		if !strings.HasSuffix(filename, ".json") {
+			filename += ".json"
+		}
+		packName := strings.TrimSuffix(filepath.Base(name), ".json")
+		p := hunt.Pack{
+			Name:    packName,
+			Version: "1.0.0",
+			Classes: map[string][]hunt.Class{
+				"component": {
+					{
+						ID:   "custom-audit-check",
+						CWE:  "CWE-200",
+						Hint: "Check specifically for information disclosure to unprivileged caller components.",
+					},
+				},
+			},
+		}
+		b, err := json.MarshalIndent(p, "", "  ")
+		die(err)
+		die(os.WriteFile(filename, append(b, '\n'), 0o644))
+		fmt.Printf("✓ Created hunt bundle template in %s\n", filename)
+
+	case "test":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: sentinix hunt bundle test <bundle.json>")
+			os.Exit(1)
+		}
+		body, err := os.ReadFile(args[1])
+		die(err)
+		var signed packs.Signed
+		if json.Unmarshal(body, &signed) == nil && len(signed.Body) > 0 {
+			body = signed.Body
+		}
+		p, err := hunt.ParsePack(body)
+		die(err)
+		totalClasses := 0
+		for _, cs := range p.Classes {
+			totalClasses += len(cs)
+		}
+		fmt.Printf("✓ Hunt bundle %q v%s: %d class(es) verified across %d kind(s).\n", p.Name, p.Version, totalClasses, len(p.Classes))
+
+	case "sign":
+		var bundleFile, privFile string
+		for i := 1; i < len(args); i++ {
+			switch {
+			case args[i] == "--key" && i+1 < len(args):
+				privFile = args[i+1]
+				i++
+			case strings.HasPrefix(args[i], "--key="):
+				privFile = strings.TrimPrefix(args[i], "--key=")
+			case !strings.HasPrefix(args[i], "-"):
+				if bundleFile == "" {
+					bundleFile = args[i]
+				} else if privFile == "" {
+					privFile = args[i]
+				}
+			}
+		}
+		if bundleFile == "" || privFile == "" {
+			fmt.Fprintln(os.Stderr, "usage: sentinix hunt bundle sign <bundle.json> [--key <keyfile>]")
+			os.Exit(1)
+		}
+		body, err := os.ReadFile(bundleFile)
+		die(err)
+		_, err = hunt.ParsePack(body)
+		die(err)
+		kb, err := os.ReadFile(privFile)
+		die(err)
+		privStr := strings.TrimSpace(string(kb))
+		priv, err := b64.DecodeString(privStr)
+		if err != nil || len(priv) != ed25519.PrivateKeySize {
+			if len(kb) == ed25519.PrivateKeySize {
+				priv = kb
+			} else {
+				die(fmt.Errorf("invalid ed25519 private key in %s", privFile))
+			}
+		}
+		signed, err := packs.Sign(body, ed25519.PrivateKey(priv))
+		die(err)
+		os.Stdout.Write(signed)
+
+	case "verify":
+		var bundleFile, trustFile string
+		for i := 1; i < len(args); i++ {
+			switch {
+			case args[i] == "--trust" && i+1 < len(args):
+				trustFile = args[i+1]
+				i++
+			case strings.HasPrefix(args[i], "--trust="):
+				trustFile = strings.TrimPrefix(args[i], "--trust=")
+			case !strings.HasPrefix(args[i], "-"):
+				if bundleFile == "" {
+					bundleFile = args[i]
+				} else if trustFile == "" {
+					trustFile = args[i]
+				}
+			}
+		}
+		if bundleFile == "" || trustFile == "" {
+			fmt.Fprintln(os.Stderr, "usage: sentinix hunt bundle verify <bundle.json> [--trust <pubkeyfile>]")
+			os.Exit(1)
+		}
+		data, err := os.ReadFile(bundleFile)
+		die(err)
+		keys, err := packs.ReadKeys(trustFile)
+		die(err)
+		p, err := hunt.LoadPack(data, keys)
+		die(err)
+		totalClasses := 0
+		for _, cs := range p.Classes {
+			totalClasses += len(cs)
+		}
+		fmt.Printf("✓ Hunt bundle %q v%s verified with trusted signature (%d class(es)).\n", p.Name, p.Version, totalClasses)
+
+	default:
+		die(fmt.Errorf("unknown hunt bundle subcommand: %s", args[0]))
+	}
+}
+

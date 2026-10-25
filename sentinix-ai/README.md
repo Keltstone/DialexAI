@@ -786,28 +786,101 @@ These actions appear as buttons on a finding.
 - **Draft patch:** a unified diff for the finding's file only, size-limited. It is shown to you and never applied or committed automatically.
 - **Test generation** (`POST /api/findings/{id}/ai/test`, Owner only, needs the sandbox): proposes a patch and a regression test, runs the command you give it in the sandbox against the vulnerable code and the patched code, and keeps both only if the test **fails before and passes after**. A test that passes on the vulnerable code proves nothing, so it is discarded.
 
-### Hunt: LLM entry-point audit (optional)
+### Hunt v2: Configurable AI Security Audit Engine
 
-`sentinix hunt` goes after what rule packs cannot see: logic bugs such as an exported intent that overwrites settings, or a deeplink host check that accepts `evil-example.org`. It lists entry points (exported components, deeplink handlers, HTTP routes) without a model, then asks one small question per entry point and vulnerability class, in a strict pass and a broad pass. Findings are **advisory**: tagged "AI-suggested, unverified", shown at notice level, and they never fail a gate.
+`sentinix hunt` audits application entry points for complex logic bugs that deterministic rules cannot detect — such as confused deputy vulnerabilities, intent redirection, path traversal, tapjacking overlays, broken object level authorization (IDOR), command injection, and SSRF.
+
+Hunt v2 brings benchmark-grade, declarative security audits with state persistence, multi-model consensus, multi-stage validation, CodeQL data-flow hints, and live dashboard tracking.
 
 ```bash
-sentinix hunt -ai models.json [-policy local-only] [-max-calls 200] [path]
+# Basic run with config file or CLI flags
+sentinix hunt -ai models.json [path]
+
+# Declarative run using a taskflow and dry-run preview
+sentinix hunt --taskflow android-audit --dry-run [path]
+
+# Fast incremental audit on changed code only
+sentinix hunt --diff [path]
 ```
 
-| Flag | Effect |
+#### Key Capabilities in Hunt v2
+
+- **Declarative Taskflows:** Built-in flows (`android-audit`, `backend-audit`, `ios-audit`, `variant-analysis`, `triage-codeql`) define tasks, passes, and tools. Taskflows can be customized, cryptographically signed with ed25519, and verified before execution.
+- **Config Precedence:** Layered hierarchy: CLI Flags > Organization Ceilings > Project Config (`.sentinix/hunt.json`) > Taskflow Defaults > Engine Defaults. Safeguard-loosening changes require two-person reviewer approval.
+- **Multi-Model Consensus & Roles:** Assign specialized models to roles (`classify`, `reason`, `verify`). Run multi-model consensus voting with majority rule and dissenting evidence capture.
+- **Bounded Tool Registry:** Up to 10 read-only inspection tools (`read_file`, `grep`, `entrypoints`, `list_dir`, `read_symbol`, `find_references`, `callers`, `manifest_query`, `semgrep_file`, `codeql_query`, `mcp_call`) with step caps, byte caps, path traversal confinement via `os.OpenRoot`, and full audit logging.
+- **Multi-Stage Validation Pipeline:**
+  1. *Schema & Confidence Filter:* Enforces `min_confidence` (default 0.60) and structural reasons.
+  2. *Mitigation Check:* Discards findings mitigated by design (e.g. `android:exported="false"`, signature permissions, auth annotations).
+  3. *Dynamic PoC Reproduction:* Synthesizes and executes tests in the no-network sandbox with compiler feedback loops.
+  4. *Severity & CVSS Calibration:* Caps unconfirmed findings at High and calculates calibrated CVSS scores.
+  5. *Deduplication & False-Positive Memory:* Deduplicates findings across passes and auto-demotes noisy rules using historical dismissal telemetry.
+- **CodeQL & Semgrep Hints:** Integrates SARIF data-flow traces (`[source] -> [step] -> [sink]`) as rich prompt context, and auto-generates deterministic Semgrep regression rules.
+- **Gating Modes:**
+  - `gate: advisory` (default): Findings are tagged "AI-suggested, unverified" at notice level, never failing CI.
+  - `gate: confirmed-only`: Opt-in mode that blocks CI only when a finding is reproduced with a confirmed PoC and severity meets or exceeds the threshold.
+- **Diff Mode (`--diff`):** Only audits entry points touched in the current PR or git diff against the base branch.
+
+#### Configuration Schema (`.sentinix/hunt.json`)
+
+```json
+{
+  "version": 1,
+  "taskflow": "android-audit",
+  "gate": "advisory",
+  "policy": "local-only",
+  "max_calls": 200,
+  "max_tokens": 500000,
+  "max_cost_usd": 5.00,
+  "max_wall_time": "30m",
+  "passes": [
+    {"name": "strict", "prompt": "Report only a bug that is clearly exploitable by an unprivileged attacker."},
+    {"name": "broad", "prompt": "Think creatively about unusual attacker-controlled inputs and chained weaknesses."}
+  ],
+  "stop_on_hit": true,
+  "roles": {
+    "classify": "fast-local",
+    "reason": "smart-cloud",
+    "verify": "fast-local"
+  },
+  "tools": {
+    "enabled": true,
+    "step_cap": 3,
+    "size_cap_bytes": 6000,
+    "allowlist": ["read_file", "grep", "entrypoints", "manifest_query"]
+  },
+  "poc": {
+    "enabled": false,
+    "max_attempts": 2
+  },
+  "validation": {
+    "mitigation_check": true,
+    "severity_calibration": true,
+    "dedupe": true,
+    "min_confidence": 0.60
+  }
+}
+```
+
+#### CLI Command Reference
+
+| Command | Description |
 | --- | --- |
-| `-tools` | Model may read files and grep inside the path (read-only, `-tool-steps` per task) |
-| `-resume state.json`, `-only text` | Skip finished tasks on re-run; re-run one task |
-| `-platform mobile\|backend` | Audit one side of a mixed repo |
-| `-sandbox-image img -poc-cmd "cmd"` | Model writes a proof-of-concept test; it must fail on today's code, in the no-network sandbox |
-| `-variant file`, `-variant-ghsa GHSA-...` | Also hunt for variants of a known vulnerability |
-| `-hunt-packs dir -trust keys` | Extra vulnerability classes from signed hunt packs |
+| `sentinix hunt config init [path]` | Generate starter `.sentinix/hunt.json` configuration |
+| `sentinix hunt config show [--explain] [path]` | Inspect resolved configuration with layer source annotations |
+| `sentinix hunt config validate <path>` | Validate configuration schema and budget constraints |
+| `sentinix hunt runs [--project id]` | List historical hunt audit runs and token/cost metrics |
+| `sentinix hunt show <run-id>` | View detailed run metrics and audited tool calls |
+| `sentinix hunt resume <run-id>` | Resume an interrupted audit run skipping finished tasks |
+| `sentinix hunt rerun --task <key>` | Re-run a specific entrypoint task for fast debugging |
+| `sentinix hunt bundle new <name>` | Scaffold a new community vulnerability pack bundle template |
+| `sentinix hunt bundle test <bundle.json>` | Test and validate a community pack bundle |
+| `sentinix hunt bundle sign <bundle.json> --key <privkey>` | Cryptographically sign a bundle using ed25519 |
+| `sentinix hunt bundle verify <bundle.json> --trust <pubkey>` | Verify bundle signature against trusted public keys |
 
-Models can be OpenAI-compatible or `"provider": "anthropic"`. `sentinixd -hunt-max-calls N` runs it on AI-enabled projects; a scan that hits the cap lists that as not covered. `sentinix mcp serve` exposes read-only scan and entry-point tools to coding agents. Set `SENTINIX_CODEQL=1` (with the CodeQL CLI and query packs installed) to add CodeQL data-flow findings as a normal engine.
+#### Why Prompt Injection Does Not Get Far
 
-### Why prompt injection does not get far
-
-Only a short snippet around the finding is sent. It is wrapped and labelled as untrusted data, models have no tools, no shell and no network access of their own, and everything they return is parsed as data and checked before use. A malicious comment in a repository can at worst produce a bad suggestion that a human has to accept.
+Source code and advisories are always framed with `ai.Untrusted()`, models operate with strict tool caps, output schemas are strictly validated, and shell execution is strictly confined to unprivileged sandbox containers. A malicious comment or prompt payload in audited code cannot escape containment or compromise the host.
 
 ---
 

@@ -168,6 +168,10 @@ func EntrypointsWithConfig(root string, cfg *HuntConfig) ([]Entry, error) {
 			kinds["pending-intent"] = true
 			platform = "mobile"
 		}
+		if strings.Contains(strings.ToLower(p), "tapjack") || strings.Contains(contentStr, "filterTouchesWhenObscured") {
+			kinds["tapjacking"] = true
+			platform = "mobile"
+		}
 
 		// 3. Backend route heuristics
 		if springRouteRe.Match(b) || ktorRouteRe.Match(b) || expressRouteRe.Match(b) || pythonRouteRe.Match(b) || goRouteRe.Match(b) {

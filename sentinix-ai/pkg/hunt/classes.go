@@ -24,10 +24,11 @@ var classIDRegex = regexp.MustCompile(`^[a-z][a-z0-9-]{1,40}$`)
 var baseKindClasses = map[string][]string{
 	"component":      {"confused-deputy", "intent-redirect", "path-traversal"},
 	"deeplink":       {"deeplink-host", "webview-bridge"},
-	"route":          {"authz", "injection", "path-traversal"},
+	"route":          {"authz", "injection", "path-traversal", "sql-injection", "command-injection", "authz-bypass", "ssrf", "insecure-deserialization"},
 	"fileprovider":   {"path-traversal"},
 	"webview":        {"webview-bridge"},
 	"pending-intent": {"pending-intent-hijack"},
+	"tapjacking":     {"tapjacking"},
 	"graphql":        {"graphql-depth", "authz-bypass", "sql-injection"},
 	"grpc":           {"authz-bypass"},
 	"ios-deeplink":   {"deeplink-host"},

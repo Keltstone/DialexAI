@@ -27,19 +27,17 @@ type Pack struct {
 var idRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,40}$`)
 
 // LoadPack verifies the signature, then validates ids and kinds. A pack can only add prompt text and class ids:
-// it cannot change how findings gate (hunt findings never do).
-func LoadPack(data []byte, trusted []ed25519.PublicKey) (*Pack, error) {
-	body, err := packs.Verify(data, trusted)
-	if err != nil {
-		return nil, err
-	}
+// ParsePack parses and validates an unsigned pack body.
+func ParsePack(body []byte) (*Pack, error) {
 	var p Pack
 	if err := json.Unmarshal(body, &p); err != nil || p.Name == "" || p.Version == "" {
 		return nil, fmt.Errorf("invalid hunt pack")
 	}
 	for kind, cs := range p.Classes {
 		if _, ok := classes[kind]; !ok {
-			return nil, fmt.Errorf("unknown entry-point kind %q", kind)
+			if _, ok2 := baseKindClasses[kind]; !ok2 {
+				return nil, fmt.Errorf("unknown entry-point kind %q", kind)
+			}
 		}
 		for _, c := range cs {
 			if !idRe.MatchString(c.ID) || len(c.Hint) > 300 {
@@ -49,3 +47,14 @@ func LoadPack(data []byte, trusted []ed25519.PublicKey) (*Pack, error) {
 	}
 	return &p, nil
 }
+
+// LoadPack verifies the signature, then validates ids and kinds. A pack can only add prompt text and class ids:
+// it cannot change how findings gate (hunt findings never do).
+func LoadPack(data []byte, trusted []ed25519.PublicKey) (*Pack, error) {
+	body, err := packs.Verify(data, trusted)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePack(body)
+}
+

@@ -280,6 +280,65 @@ func TestHuntRunsAndShowCommands(t *testing.T) {
 	huntCmd([]string{"show", runID, "--db", "sqlite:" + dbPath})
 }
 
+func TestHuntBundleSubcommands(t *testing.T) {
+	tmpDir := t.TempDir()
+	bundleFile := filepath.Join(tmpDir, "community-pack.json")
 
+	// 1. bundle new
+	huntCmd([]string{"bundle", "new", bundleFile})
+	if _, err := os.Stat(bundleFile); err != nil {
+		t.Fatalf("bundle new did not create file: %v", err)
+	}
 
+	// 2. bundle test (unsigned)
+	huntCmd([]string{"bundle", "test", bundleFile})
 
+	// 3. keygen for signing
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyFile := filepath.Join(tmpDir, "author.key")
+	pubFile := filepath.Join(tmpDir, "trusted.pub")
+	if err := os.WriteFile(keyFile, []byte(base64.StdEncoding.EncodeToString(priv)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pubFile, []byte(base64.StdEncoding.EncodeToString(pub)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. bundle sign
+	// Capture signed output by redirecting stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	huntCmd([]string{"bundle", "sign", bundleFile, "--key", keyFile})
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var signedBuf strings.Builder
+	buf := make([]byte, 1024)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			signedBuf.Write(buf[:n])
+		}
+		if err != nil {
+			break
+		}
+	}
+	r.Close()
+
+	signedFile := filepath.Join(tmpDir, "community-pack.signed.json")
+	if err := os.WriteFile(signedFile, []byte(signedBuf.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5. bundle test (signed)
+	huntCmd([]string{"bundle", "test", signedFile})
+
+	// 6. bundle verify
+	huntCmd([]string{"bundle", "verify", signedFile, "--trust", pubFile})
+}
