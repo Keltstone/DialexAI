@@ -1,1 +1,4 @@
-- docs/specs/sentinix-llm-audit.md — `sentinix hunt`: opt-in LLM entry-point audit engine, stages, contracts, bench
+- docs/specs/sentinix-llm-audit.md — `sentinix hunt` v2: configurable AI security audit engine overview, lifecycle, OWASP threat model
+- docs/specs/sentinix-hunt-config.md — `sentinix hunt` v2 configuration schema, sources, precedence, secret checking, ceilings
+- docs/specs/sentinix-hunt-taskflows.md — `sentinix hunt` v2 declarative taskflows, safe templates, built-in flows, signing
+- docs/specs/sentinix-hunt-validation.md — `sentinix hunt` v2 multi-stage validation, PoC feedback, exploitability, gating policy

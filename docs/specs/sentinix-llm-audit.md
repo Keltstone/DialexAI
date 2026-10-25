@@ -1,40 +1,25 @@
-# sentinix-llm-audit (`sentinix hunt`)
+# sentinix-llm-audit (`sentinix hunt` v2)
 
-Goal: opt-in, advisory LLM audit of entry points; finds logic bugs rule packs can't.
+Goal: configurable AI security audit engine for defensive whole-repo entry point auditing.
 
-Behaviour:
-- Stage 1 entrypoints: deterministic whole-repo enumeration (exported components, deeplinks/intent filters, WebViews, HTTP routes). No model.
-- Stage 2 classify: per entry point x vuln class, fresh LLM call, small code slice. Strict + broad prompt pass.
-- Stage 3 validate: schema-check answers; drop low-severity/no-state-reachable claims; optional PoC via ai.Verify in sandbox.
-- Stage 4 report: engines.Finding, Source=llm, default level Notice (never blocks). Side table hunt_results.
-- State passes between stages via data, never via chat history.
-- Off unless model config given AND project AI opt-in AND model policy allows (reuse ai.Allowed / RedactSafe).
-- Budget: max_calls hard cap; stop and report gap when hit.
+Lifecycle:
+- Stage 1 Discovery: deterministic enumeration (Android, iOS/Swift, backend routes, custom regex/globs).
+- Stage 2 Taskflows: declarative tasks, role-based model routing, safe templating, fresh contexts.
+- Stage 3 Validation: multi-pass consensus, mitigation check, sandboxed PoC with feedback, CVSS calibration.
+- Stage 4 Accounting & Gating: token/cost accounting, audit trail, advisory by default (confirmed-only opt-in).
 
-Contracts:
-- CLI: `sentinix hunt [flags] [path]`; flags `-ai models.json (provider "anthropic" or OpenAI-compatible) -policy local-only|cloud-redacted|cloud -max-calls N -sarif f`.
-- Engine: `hunt.Engine{Models, Policy, MaxCalls}` implements engines.Engine, Name()="llm-audit".
-- Rule id `hunt/<class>`; class vocabulary: confused-deputy, deeplink-host, webview-bridge, path-traversal, authz, injection, intent-redirect.
-- Model JSON answer: `{"vulnerable":bool,"severity":"low|medium|high|critical","confidence":0..1,"reason":"short","poc":"optional"}`.
-- No hunt_results table: finding Source="llm", Match=entry:class, Evidence="PoC reproduced|unconfirmed: ...". Dashboard shows "AI-suggested, unverified".
-- Never gates: policy.Fails/CategoryFails skip Source=llm; EffectiveLevel(hunt/*)=notice unless a rule policy says otherwise.
-- Call cap -> Engine.Gap() -> scan gaps (not Skipped(): that fails PR status).
-- PoC (opt-in): `-sandbox-image img -poc-cmd "cmd"`; model writes test, ai.Reproduce runs it on current tree in sandbox; must FAIL (exploit works).
-- Server: `sentinixd -hunt-max-calls N`, only AI-enabled projects.
-- MCP: `sentinix mcp serve [dir]`, read-only tools sentinix_scan, sentinix_entrypoints.
-- Hunt packs: `-hunt-packs dir -trust keys`, signed JSON {name,version,classes:{kind:[{id,cwe,hint}]}}; reuse packs.Sign/Verify.
-- Tools: `-tools` read-only read_file/grep/entrypoints via JSON reply loop, root-confined (os.OpenRoot), output wrapped untrusted + redacted under cloud-redacted; no write/shell/net so no confirm step needed; each step counts as a call.
-- State: `-resume file` caches tasks by sha(code)|file|class|pass; `-only` reruns one task. Platform: `-platform mobile|backend` (component/deeplink=mobile, route=backend).
-- Taint: engines.CodeQL (opt-in SENTINIX_CODEQL=1), per-language db (build-mode none), security-extended suite, SARIF; missing binary = coverage gap.
-- PoC retry: one revision if test passes on vulnerable code (extra call not budgeted; runner gives pass/fail only).
-- Variant: `-variant advisory.txt` or `-variant-ghsa GHSA-id` (public API, id only leaves machine) adds class hunt/variant (advisory text wrapped as untrusted).
+Threat Model (OWASP Top 10 for LLM Applications):
+- LLM01 Prompt Injection: repo code, tools, PoC output, and advisories are wrapped in ai.Untrusted; strict JSON schemas only.
+- LLM02 Insecure Output Handling: model text is never eval'd or executed; PoC tests run strictly in networkless sandboxes.
+- LLM06 Excessive Agency: read-only tool registry confined by os.OpenRoot; non-read-only MCP tools require confirmation.
+- LLM07 Sensitive Info Disclosure: strict policy check (local-only default, cloud-redacted redaction fail-closed).
+- LLM10 Unbounded Consumption: hard ceilings on calls, tokens, cost ($), wall-time; stops cleanly with Gap().
 
-Edge:
-- Code is untrusted: wrapped via ai untrusted(); answers parsed as data only; no tools/shell/network for models.
-- Engine must be listed in `ran` or RecordScan marks its findings fixed.
-- Budget hit / no model -> gap "llm-audit not run", never a clean result.
-- Non-deterministic: baselines suppress repeats by fingerprint; not a CI gate.
+Contracts & Invariants:
+- CLI: `sentinix hunt [flags] [path]`; backwards compatible with v1 flags; `hunt config init|show|validate`.
+- Engine: `hunt.Engine` implements `engines.Engine`, Name()="llm-audit".
+- Findings: `Source="llm"`, `Rule="hunt/<class>"`, default `Level="notice"` (never blocks unless confirmed-only gate).
+- State: DB tables `hunt_runs`, `hunt_tasks`, `hunt_tool_calls` with offline JSON fallback.
 
-Where: sentinix-ai/pkg/hunt, cmd/sentinix/main.go, bench/hunt-android (own expected.json, keyed hunt/<class>).
-
-Status: done. Pending: live-model benchmark (opt-in), PR-comment rendering of gaps.
+Where: sentinix-ai/pkg/hunt, cmd/sentinix, cmd/sentinixd, bench/hunt-android.
+Status: in-progress v2 upgrade. Companion specs: sentinix-hunt-config.md, sentinix-hunt-taskflows.md, sentinix-hunt-validation.md.
