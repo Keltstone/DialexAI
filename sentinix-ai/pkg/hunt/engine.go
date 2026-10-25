@@ -19,6 +19,9 @@ var classes = map[string][]string{
 	"route":     {"authz", "injection", "path-traversal"},
 }
 
+// kindPlatform splits mixed repos: -platform mobile|backend audits only that side.
+var kindPlatform = map[string]string{"component": "mobile", "deeplink": "mobile", "route": "backend"}
+
 var cwe = map[string]string{
 	"confused-deputy": "CWE-441", "intent-redirect": "CWE-601", "path-traversal": "CWE-22",
 	"deeplink-host": "CWE-939", "webview-bridge": "CWE-749", "authz": "CWE-862", "injection": "CWE-89",
@@ -49,6 +52,15 @@ type Engine struct {
 	// Variant is a known vulnerability description (advisory text). When set, every entry point is also
 	// checked for variants of that bug (rule hunt/variant). Treated as untrusted data.
 	Variant string
+	// Tools lets the model read files and grep inside the scan root before answering (at most ToolSteps calls,
+	// default 3, each counted against MaxCalls). Platform limits the run to "mobile" or "backend" entry points.
+	Tools     bool
+	ToolSteps int
+	Platform  string
+	// State, when set, caches finished tasks across runs. Only, when set, runs just tasks whose
+	// "file|class" contains it (single-task re-run for debugging).
+	State *State
+	Only  string
 }
 
 func (e *Engine) Name() string { return "llm-audit" }
@@ -85,6 +97,13 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 	}
 	var out []engines.Finding
 	calls := 0
+	var tl *tools
+	if e.Tools {
+		tl = &tools{root: root, policy: e.Policy, eps: eps}
+	}
+	if e.State != nil {
+		defer e.State.Save()
+	}
 	for _, ep := range eps {
 		b, err := os.ReadFile(filepath.Join(root, ep.File))
 		if err != nil {
@@ -100,46 +119,100 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 			}
 		}
 		for _, class := range e.classesFor(ep) {
+			if e.Only != "" && !strings.Contains(ep.File+"|"+class, e.Only) {
+				continue
+			}
 			for _, p := range passes {
-				if calls >= e.MaxCalls {
-					e.Truncated = true
-					return out, nil
+				key := taskKey(code, ep.File, class, p.name)
+				res, cached := Result{}, false
+				if e.State != nil {
+					res, cached = e.State.get(key)
 				}
-				calls++
-				user := fmt.Sprintf("Entry point (%s): %s\nVulnerability class: %s\n%s%s\n%s\n"+
-					`Reply {"vulnerable":bool,"severity":"low|medium|high|critical","confidence":0..1,"reason":"short"}.`,
-					strings.Join(ep.Kinds, "+"), ep.Name, class, p.ask, e.hint(class), ai.Untrusted(code))
-				reply, err := m.Complete(ctx, ai.SysRules, user)
-				if err != nil {
+				if !cached {
+					a, ok, stop := e.task(ctx, m, tl, ep, class, p.ask, code, &calls)
+					if stop {
+						e.Truncated = true
+						return out, nil
+					}
+					if !ok {
+						continue
+					}
+					res = Result{Vulnerable: a.Vulnerable, Severity: a.Severity, Reason: a.Reason}
+					if res.Vulnerable && e.Run != nil && len(e.PoCCmd) > 0 && calls < e.MaxCalls {
+						calls++
+						sev, _ := engines.ParseSeverity(res.Severity)
+						res.Evidence = e.proof(ctx, m, engines.Finding{Rule: "hunt/" + class, File: ep.File, Message: res.Reason, Severity: sev}, code, root)
+					}
+					if e.State != nil {
+						e.State.put(key, res)
+					}
+				}
+				sev, _ := engines.ParseSeverity(res.Severity)
+				if !res.Vulnerable {
 					continue
 				}
-				js, ok := ai.ExtractJSON(reply)
-				var a answer
-				if !ok || json.Unmarshal([]byte(js), &a) != nil {
-					continue
-				}
-				sev, err := engines.ParseSeverity(a.Severity)
-				if err != nil || a.Confidence < 0 || a.Confidence > 1 || sev < engines.Low {
-					continue
-				}
-				if !a.Vulnerable {
-					continue
-				}
-				f := engines.Finding{
+				out = append(out, engines.Finding{
 					Rule: "hunt/" + class, Engine: e.Name(), Category: engines.CategorySecurity,
-					File: ep.File, Line: 1, Severity: sev, Message: truncate(a.Reason, 300),
+					File: ep.File, Line: 1, Severity: sev, Message: truncate(res.Reason, 300), Evidence: res.Evidence,
 					CWE: e.cweOf(class), Match: ep.Name + ":" + class, Source: "llm", Level: "notice",
-				}
-				if e.Run != nil && len(e.PoCCmd) > 0 && calls < e.MaxCalls {
-					calls++
-					f.Evidence = e.proof(ctx, m, f, code, root)
-				}
-				out = append(out, f)
+				})
 				break // strict hit: skip broad pass
 			}
 		}
 	}
 	return out, nil
+}
+
+// reply is a final answer or, when Tool is set, a tool request.
+type reply struct {
+	answer
+	toolCall
+}
+
+// task runs one fresh-context check. It returns the validated answer, whether one was usable, and stop when
+// the call budget ran out.
+func (e *Engine) task(ctx context.Context, m ai.Model, tl *tools, ep Entry, class, ask, code string, calls *int) (a answer, ok, stop bool) {
+	tools := ""
+	if tl != nil {
+		tools = toolHelp
+	}
+	user := fmt.Sprintf("Entry point (%s): %s\nVulnerability class: %s\n%s%s%s\n%s\n"+
+		`Reply {"vulnerable":bool,"severity":"low|medium|high|critical","confidence":0..1,"reason":"short"}.`,
+		strings.Join(ep.Kinds, "+"), ep.Name, class, ask, e.hint(class), tools, ai.Untrusted(code))
+	steps := e.ToolSteps
+	if steps == 0 {
+		steps = 3
+	}
+	for step := 0; ; step++ {
+		if *calls >= e.MaxCalls {
+			return a, false, true
+		}
+		*calls++
+		out, err := m.Complete(ctx, ai.SysRules, user)
+		if err != nil {
+			return a, false, false
+		}
+		js, found := ai.ExtractJSON(out)
+		var r reply
+		if !found || json.Unmarshal([]byte(js), &r) != nil {
+			return a, false, false
+		}
+		if r.Tool != "" {
+			if tl == nil || step >= steps {
+				return a, false, false
+			}
+			user += "\nTool result (" + r.Tool + "):\n" + ai.Untrusted(tl.run(r.toolCall)) + "\nContinue; reply with the final JSON when ready."
+			continue
+		}
+		if !r.Vulnerable { // severity only matters for a claimed bug
+			return r.answer, true, false
+		}
+		sev, err := engines.ParseSeverity(r.Severity)
+		if err != nil || r.Confidence < 0 || r.Confidence > 1 || sev < engines.Low {
+			return a, false, false
+		}
+		return r.answer, true, false
+	}
 }
 
 func truncate(s string, n int) string {
@@ -159,7 +232,12 @@ func (e *Engine) classesFor(ep Entry) []string {
 			out = append(out, c)
 		}
 	}
+	matched := false
 	for _, k := range ep.Kinds {
+		if e.Platform != "" && kindPlatform[k] != e.Platform {
+			continue
+		}
+		matched = true
 		for _, c := range classes[k] {
 			add(c)
 		}
@@ -169,7 +247,7 @@ func (e *Engine) classesFor(ep Entry) []string {
 			}
 		}
 	}
-	if e.Variant != "" {
+	if e.Variant != "" && matched {
 		add("variant")
 	}
 	return out

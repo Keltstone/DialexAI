@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -137,5 +138,64 @@ func TestVariantClassCarriesAdvisoryAsData(t *testing.T) {
 	h := e.hint("variant")
 	if !strings.Contains(h, "UNTRUSTED CODE") || !strings.Contains(h, "tile url") {
 		t.Fatal(h)
+	}
+}
+
+// toolModel asks to read MapActivity.kt first, then answers from what it saw.
+type toolModel struct{ users *[]string }
+
+func (m toolModel) Name() string { return "tool" }
+func (m toolModel) Local() bool  { return true }
+func (m toolModel) Complete(_ context.Context, _, user string) (string, error) {
+	*m.users = append(*m.users, user)
+	if !strings.Contains(user, "Tool result (read_file)") {
+		return `{"tool":"read_file","path":"app/src/main/kotlin/MapActivity.kt","start":1,"end":5}`, nil
+	}
+	if strings.Contains(user, `getStringExtra("tile_url")`) {
+		return `{"vulnerable":true,"severity":"high","confidence":0.9,"reason":"extra written to prefs"}`, nil
+	}
+	return `{"vulnerable":false}`, nil
+}
+
+func TestToolLoopReadsInsideRootOnly(t *testing.T) {
+	var users []string
+	e := &Engine{Models: []ai.Model{toolModel{&users}}, Policy: "local-only", MaxCalls: 500, Tools: true, Only: "MapActivity.kt|confused-deputy"}
+	fs, err := e.Scan(context.Background(), benchDir)
+	if err != nil || len(fs) != 1 || fs[0].Rule != "hunt/confused-deputy" {
+		t.Fatalf("%+v %v", fs, err)
+	}
+	tl := tools{root: benchDir}
+	for _, p := range []string{"../../go.mod", "/etc/passwd"} {
+		if out := tl.readFile(p, 1, 5); !strings.HasPrefix(out, "error") {
+			t.Fatalf("escaped root via %q: %s", p, out)
+		}
+	}
+	if g := tl.grep("endsWith"); !strings.Contains(g, "DeepLinkActivity.kt:4") {
+		t.Fatal(g)
+	}
+	if tl.grep("(") != "error: bad pattern" {
+		t.Fatal("bad regex accepted")
+	}
+}
+
+func TestStateSkipsFinishedTasksAndPlatformFilters(t *testing.T) {
+	st, _ := LoadState(filepath.Join(t.TempDir(), "s.json"))
+	calls := 0
+	mk := func() *Engine {
+		return &Engine{Models: []ai.Model{fake{local: true, calls: &calls}}, Policy: "local-only", MaxCalls: 500, State: st}
+	}
+	first, _ := mk().Scan(context.Background(), benchDir)
+	n := calls
+	second, _ := mk().Scan(context.Background(), benchDir)
+	if calls != n || len(first) != len(second) || n == 0 {
+		t.Fatalf("resume re-called the model: %d -> %d", n, calls)
+	}
+	again, err := LoadState(st.path)
+	if err != nil || len(again.M) == 0 {
+		t.Fatal("state not persisted")
+	}
+	e := &Engine{Platform: "backend"}
+	if cs := e.classesFor(Entry{Kinds: []string{"component", "deeplink"}}); len(cs) != 0 {
+		t.Fatalf("mobile entry audited as backend: %v", cs)
 	}
 }

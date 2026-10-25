@@ -633,6 +633,11 @@ func huntCmd(args []string) {
 	huntPacks := fl.String("hunt-packs", "", "directory of signed hunt packs (extra vulnerability classes)")
 	trust := fl.String("trust", "", "file of trusted pack public keys (needed with -hunt-packs)")
 	variant := fl.String("variant", "", "file with a known vulnerability description; also hunt for variants of it")
+	useTools := fl.Bool("tools", false, "let the model read files and grep inside the path before answering (read-only)")
+	toolSteps := fl.Int("tool-steps", 3, "max tool calls per task")
+	platform := fl.String("platform", "", "audit only mobile or backend entry points (default: both)")
+	resume := fl.String("resume", "", "state file; finished tasks are skipped on re-run")
+	only := fl.String("only", "", "run only tasks whose file|class contains this text")
 	fl.Parse(args)
 	root := "."
 	if fl.NArg() > 0 {
@@ -644,6 +649,11 @@ func huntCmd(args []string) {
 	ms, err := ai.LoadModels(*models)
 	die(err)
 	e := &hunt.Engine{Models: ms, Policy: *policy, MaxCalls: *maxCalls}
+	e.Tools, e.ToolSteps, e.Platform, e.Only = *useTools, *toolSteps, *platform, *only
+	if *resume != "" {
+		e.State, err = hunt.LoadState(*resume)
+		die(err)
+	}
 	if *variant != "" {
 		b, err := os.ReadFile(*variant)
 		die(err)
