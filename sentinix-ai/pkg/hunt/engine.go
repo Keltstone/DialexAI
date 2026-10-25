@@ -146,8 +146,15 @@ func (e *Engine) Scan(ctx context.Context, root string) ([]engines.Finding, erro
 	var out []engines.Finding
 	calls := 0
 	var tl *tools
-	if e.Tools {
-		tl = &tools{root: root, policy: e.Policy, eps: eps}
+	if e.Tools || (e.Config != nil && e.Config.Tools.Enabled) {
+		tl = &tools{
+			root:   root,
+			policy: e.Policy,
+			eps:    eps,
+			cfg:    e.Config,
+			store:  e.Store,
+			runID:  e.RunID,
+		}
 	}
 	if e.State != nil {
 		defer e.State.Save()
@@ -301,6 +308,9 @@ func (e *Engine) task(ctx context.Context, m ai.Model, tl *tools, ep Entry, clas
 		`Reply {"vulnerable":bool,"severity":"low|medium|high|critical","confidence":0..1,"reason":"short"}.`,
 		strings.Join(ep.Kinds, "+"), ep.Name, class, ask, e.hint(class), tools, ai.Untrusted(code))
 	steps := e.ToolSteps
+	if steps == 0 && e.Config != nil && e.Config.Tools.StepCap > 0 {
+		steps = e.Config.Tools.StepCap
+	}
 	if steps == 0 {
 		steps = 3
 	}
@@ -322,7 +332,7 @@ func (e *Engine) task(ctx context.Context, m ai.Model, tl *tools, ep Entry, clas
 			if tl == nil || step >= steps {
 				return a, false, false
 			}
-			user += "\nTool result (" + r.Tool + "):\n" + ai.Untrusted(tl.run(r.toolCall)) + "\nContinue; reply with the final JSON when ready."
+			user += "\nTool result (" + r.Tool + "):\n" + ai.Untrusted(tl.run(ctx, r.toolCall)) + "\nContinue; reply with the final JSON when ready."
 			continue
 		}
 		if !r.Vulnerable { // severity only matters for a claimed bug
