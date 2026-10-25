@@ -12,7 +12,7 @@ Behaviour:
 - Budget: max_calls hard cap; stop and report gap when hit.
 
 Contracts:
-- CLI: `sentinix hunt [flags] [path]`; flags `-ai models.json -policy local-only|cloud-redacted|cloud -max-calls N -sarif f`.
+- CLI: `sentinix hunt [flags] [path]`; flags `-ai models.json (provider "anthropic" or OpenAI-compatible) -policy local-only|cloud-redacted|cloud -max-calls N -sarif f`.
 - Engine: `hunt.Engine{Models, Policy, MaxCalls}` implements engines.Engine, Name()="llm-audit".
 - Rule id `hunt/<class>`; class vocabulary: confused-deputy, deeplink-host, webview-bridge, path-traversal, authz, injection, intent-redirect.
 - Model JSON answer: `{"vulnerable":bool,"severity":"low|medium|high|critical","confidence":0..1,"reason":"short","poc":"optional"}`.
