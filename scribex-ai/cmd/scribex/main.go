@@ -3,19 +3,24 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"scribex/pkg/anchors"
@@ -44,9 +49,8 @@ const usage = `usage: scribex <cmd> [flags]
   init | check [-base ref] [-report f.md] | sync [-commit] | diagram | scavenge
   comment -repo o/r -pr N [-base ref] [-body-file path] [-author LOGIN] (env GITHUB_TOKEN, GITHUB_API_URL)
   confluence push|pull [page]              (env ATLASSIAN_URL, ATLASSIAN_USER, ATLASSIAN_TOKEN)
-  jira -base ref [-key K] [-post]          (same env)
   trace -base ref [-key K] [-pr N] [-out f.csv] [-verify-jira] [-require-jira] [-allow-no-key]
-  serve -repos file -rbac file [-addr :8080]
+  serve -repos file -rbac file -allowed-root dir [-addr 127.0.0.1:8080] [-cache-ttl 30s] [-tls-cert c -tls-key k] [-behind-proxy] [-trusted-proxy cidr]
   sync -ai                                 (LLM prose update for changed signatures; see config)
   config init|show|set <k> <v>|validate|test
   secrets set <NAME> (value on stdin) | list | check
@@ -76,9 +80,15 @@ func main() {
 	verifyJira := fs.Bool("verify-jira", false, "trace: reality-check ticket against Jira API")
 	requireJira := fs.Bool("require-jira", false, "trace: fail if Jira credentials or key are missing")
 	allowNoKey := fs.Bool("allow-no-key", false, "trace: allow empty Jira key in trace evidence")
-	addr := fs.String("addr", ":8080", "serve address")
+	addr := fs.String("addr", "127.0.0.1:8080", "serve address")
 	repos := fs.String("repos", "", "serve: repos file")
 	rbac := fs.String("rbac", "", "serve: rbac file")
+	allowedRoot := fs.String("allowed-root", "", "serve: root directory containing all repos")
+	cacheTTL := fs.Duration("cache-ttl", 30*time.Second, "serve: cache TTL for doc measurements")
+	tlsCert := fs.String("tls-cert", "", "serve: TLS certificate file")
+	tlsKey := fs.String("tls-key", "", "serve: TLS private key file")
+	behindProxy := fs.Bool("behind-proxy", false, "serve: running behind TLS-terminating reverse proxy")
+	trustedProxy := fs.String("trusted-proxy", "", "serve: comma-separated trusted proxy CIDRs")
 	ai := fs.Bool("ai", false, "sync: let the configured LLM update prose for changed signatures")
 	force = fs.Bool("force", false, "overwrite generated files")
 	preset = fs.String("preset", "", "mcp add: "+strings.Join(mcp.PresetNames(), "|"))
@@ -162,7 +172,7 @@ func main() {
 	case "trace":
 		err = traceCmd(*root, *base, *key, *pr, *out, *verifyJira, *requireJira, *allowNoKey)
 	case "serve":
-		err = serve(*root, *repos, *rbac, *addr)
+		err = serve(*root, *repos, *rbac, *addr, *allowedRoot, *cacheTTL, *tlsCert, *tlsKey, *behindProxy, *trustedProxy)
 	case "config":
 		err = configCmd(*root, a)
 	case "secrets":
@@ -688,8 +698,12 @@ func traceCmd(root, base, key string, pr int, out string, verifyJira, requireJir
 	return nil
 }
 
-func serve(root, reposF, rbacF, addr string) error {
-	rs, err := dashboard.LoadRepos(reposF)
+func serve(root, reposF, rbacF, addr, allowedRoot string, cacheTTL time.Duration, tlsCert, tlsKey string, behindProxy bool, trustedProxy string) error {
+	if err := dashboard.ValidateServeConfig(addr, allowedRoot, tlsCert, tlsKey, behindProxy); err != nil {
+		return err
+	}
+
+	rs, err := dashboard.LoadRepos(reposF, allowedRoot)
 	if err != nil {
 		return err
 	}
@@ -697,8 +711,72 @@ func serve(root, reposF, rbacF, addr string) error {
 	if err != nil {
 		return err
 	}
+
+	var trustedPrefixes []netip.Prefix
+	if trustedProxy != "" {
+		for _, part := range strings.Split(trustedProxy, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			prefix, err := netip.ParsePrefix(part)
+			if err != nil {
+				addr, addrErr := netip.ParseAddr(part)
+				if addrErr != nil {
+					return fmt.Errorf("invalid trusted-proxy CIDR/IP %q: %w", part, err)
+				}
+				bits := 32
+				if addr.Is6() {
+					bits = 128
+				}
+				prefix = netip.PrefixFrom(addr, bits)
+			}
+			trustedPrefixes = append(trustedPrefixes, prefix)
+		}
+	}
+
+	dashServer, err := dashboard.NewServer(dashboard.Config{
+		AllowedRoot:    allowedRoot,
+		CacheTTL:       cacheTTL,
+		BehindProxy:    behindProxy,
+		TrustedProxies: trustedPrefixes,
+		Now:            time.Now,
+		AccessLog:      os.Stderr,
+	}, rs, ps, root)
+	if err != nil {
+		return err
+	}
+
+	httpSrv := &http.Server{
+		Addr:              addr,
+		Handler:           dashServer.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+	}
+
+	if tlsCert != "" && tlsKey != "" {
+		httpSrv.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		httpSrv.Shutdown(ctx)
+	}()
+
 	fmt.Println("scribex dashboard on", addr)
-	return http.ListenAndServe(addr, dashboard.Handler(rs, ps, root))
+	if tlsCert != "" && tlsKey != "" {
+		return httpSrv.ListenAndServeTLS(tlsCert, tlsKey)
+	}
+	return httpSrv.ListenAndServe()
 }
 
 func parsePreDirty(root string) (map[string]bool, error) {
