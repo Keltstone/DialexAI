@@ -41,7 +41,7 @@ func TestReportMarkdownLengthCap(t *testing.T) {
 		t.Errorf("header line should retain full count (5000 issues, 10000 anchors)")
 	}
 
-	if !strings.Contains(md, "not shown; run scribex check locally") {
+	if !strings.Contains(md, "not shown. Run `scribex check` locally for the full report.") {
 		t.Errorf("expected cut notice in truncated report")
 	}
 

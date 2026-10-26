@@ -507,27 +507,11 @@ func TestStrictLoading(t *testing.T) {
 	_ = os.MkdirAll(outsideDir, 0o755)
 
 	reposF := filepath.Join(dir, "repos.txt")
-	_ = os.WriteFile(reposF, []byte(fmt.Sprintf("repo-bad %s team1\n", outsideDir)), 0o644)
-
+	// Malformed LINE syntax (fatal error with line number, not content)
+	_ = os.WriteFile(reposF, []byte("bad line with too many fields here\n"), 0o644)
 	_, err := LoadRepos(reposF, allowedRoot)
-	if err == nil || !strings.Contains(err.Error(), "allowed-root") {
-		t.Fatalf("expected error for path outside allowed-root, got: %v", err)
-	}
-
-	// Symlink escape
-	symlinkRepo := filepath.Join(allowedRoot, "symlink-repo")
-	_ = os.Symlink(outsideDir, symlinkRepo)
-	_ = os.WriteFile(reposF, []byte(fmt.Sprintf("repo-sym %s team1\n", symlinkRepo)), 0o644)
-	_, err = LoadRepos(reposF, allowedRoot)
-	if err == nil {
-		t.Fatalf("expected error for symlink resolving outside allowed-root")
-	}
-
-	// Duplicate repo names
-	_ = os.WriteFile(reposF, []byte(fmt.Sprintf("repo1 %s team1\nrepo1 %s team2\n", validDir, validDir)), 0o644)
-	_, err = LoadRepos(reposF, allowedRoot)
-	if err == nil || !strings.Contains(err.Error(), "duplicate") {
-		t.Fatalf("expected error for duplicate repo name, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "line 1") {
+		t.Fatalf("expected fatal error with line number for malformed line, got: %v", err)
 	}
 
 	// RBAC strictness: invalid role
@@ -543,6 +527,143 @@ func TestStrictLoading(t *testing.T) {
 	_, err = LoadRBAC(rbacF)
 	if err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("expected error on duplicate hash, got %v", err)
+	}
+}
+
+func TestN37_ReposFileHandling(t *testing.T) {
+	dir := t.TempDir()
+	allowedRoot := filepath.Join(dir, "allowed")
+	_ = os.MkdirAll(allowedRoot, 0o755)
+
+	// Two good repos (one with relative path, one with absolute path)
+	good1Dir := filepath.Join(allowedRoot, "good1")
+	_ = os.MkdirAll(good1Dir, 0o755)
+	good2Dir := filepath.Join(allowedRoot, "good2")
+	_ = os.MkdirAll(good2Dir, 0o755)
+
+	// Outside dir for symlink escape
+	outsideDir := filepath.Join(dir, "outside")
+	_ = os.MkdirAll(outsideDir, 0o755)
+	symlinkRepo := filepath.Join(allowedRoot, "symlink-esc")
+	_ = os.Symlink(outsideDir, symlinkRepo)
+
+	reposContent := fmt.Sprintf(
+		"good1 good1 team1\n"+ // relative path
+			"good2 %s team1\n"+ // absolute path
+			"bad-sym %s team1\n"+ // symlink escape
+			"missing missing-repo team1\n", // missing
+		good2Dir, symlinkRepo,
+	)
+
+	reposF := filepath.Join(dir, "repos.txt")
+	_ = os.WriteFile(reposF, []byte(reposContent), 0o644)
+
+	repos, err := LoadRepos(reposF, allowedRoot)
+	if err != nil {
+		t.Fatalf("LoadRepos should not fail on bad entries (non-fatal): %v", err)
+	}
+	if len(repos) != 4 {
+		t.Fatalf("expected 4 repo entries, got %d", len(repos))
+	}
+
+	// Verify relative path resolved under allowedRoot
+	if repos[0].Path != good1Dir {
+		t.Errorf("relative path resolved to %s, want %s", repos[0].Path, good1Dir)
+	}
+	if repos[0].Unavailable {
+		t.Errorf("good1 should not be unavailable")
+	}
+	if repos[1].Unavailable {
+		t.Errorf("good2 should not be unavailable")
+	}
+	if !repos[2].Unavailable {
+		t.Errorf("symlink escape should be marked unavailable")
+	}
+	if !repos[3].Unavailable {
+		t.Errorf("missing repo should be marked unavailable")
+	}
+
+	// Start server with these repos and verify dashboard HTML & JSON
+	srv, err := NewServer(Config{
+		AllowedRoot: allowedRoot,
+		CacheTTL:    30 * time.Second,
+		Now:         time.Now,
+		AccessLog:   io.Discard,
+		MeasureFunc: func(r Repo) (Health, error) {
+			return Health{Repo: r.Name, Team: r.Team, Total: 10, Drift: 0.1}, nil
+		},
+	}, repos, []Principal{{Hash: hash("tok"), Admin: true}}, allowedRoot)
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 1. Dashboard HTML
+	req, _ := http.NewRequest("GET", ts.URL+"/", nil)
+	req.SetBasicAuth("", "tok")
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	htmlBody, _ := io.ReadAll(resp.Body)
+	htmlStr := string(htmlBody)
+
+	// Check 2 ok rows and 2 unavailable rows
+	unavailableCount := strings.Count(htmlStr, "class=\"error\">unavailable<")
+	if unavailableCount != 2 {
+		t.Errorf("expected 2 unavailable rows in HTML, got %d", unavailableCount)
+	}
+
+	// Verify NO filesystem path appears anywhere in HTML response
+	if strings.Contains(htmlStr, dir) || strings.Contains(htmlStr, allowedRoot) || strings.Contains(htmlStr, outsideDir) {
+		t.Errorf("filesystem path leaked in HTML response: %s", htmlStr)
+	}
+
+	// 2. /api/health JSON
+	reqJSON, _ := http.NewRequest("GET", ts.URL+"/api/health", nil)
+	reqJSON.SetBasicAuth("", "tok")
+	respJSON, err := ts.Client().Do(reqJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respJSON.Body.Close()
+	var hs []Health
+	_ = json.NewDecoder(respJSON.Body).Decode(&hs)
+	if len(hs) != 4 {
+		t.Fatalf("expected 4 health entries in JSON, got %d", len(hs))
+	}
+	errCount := 0
+	for _, h := range hs {
+		if h.Error {
+			errCount++
+		}
+	}
+	if errCount != 2 {
+		t.Errorf("expected 2 error entries in JSON, got %d", errCount)
+	}
+
+	// 3. Duplicate name test: second is marked unavailable
+	dupContent := fmt.Sprintf("dup-repo good1 team1\ndup-repo good1 team1\n")
+	dupF := filepath.Join(dir, "dup.txt")
+	_ = os.WriteFile(dupF, []byte(dupContent), 0o644)
+	dupRepos, err := LoadRepos(dupF, allowedRoot)
+	if err != nil {
+		t.Fatalf("duplicate names should not abort server: %v", err)
+	}
+	if len(dupRepos) != 2 || !dupRepos[1].Unavailable {
+		t.Errorf("expected second duplicate repo to be marked unavailable")
+	}
+
+	// 4. Two lines, only second bad line syntax: error must name line 2, not line 1!
+	syntaxContent := "good1 good1 team1\nbad-line-missing-team\n"
+	syntaxF := filepath.Join(dir, "syntax.txt")
+	_ = os.WriteFile(syntaxF, []byte(syntaxContent), 0o644)
+	_, err = LoadRepos(syntaxF, allowedRoot)
+	if err == nil || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("expected error naming line 2, got: %v", err)
 	}
 }
 

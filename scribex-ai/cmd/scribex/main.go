@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -22,6 +23,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"scribex/pkg/anchors"
 	"scribex/pkg/confluence"
@@ -230,30 +232,71 @@ func gate(root, base string) (bool, error) {
 	return true, nil
 }
 
+func writeReport(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	dfi, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("parent directory does not exist: %s", dir)
+		}
+		return err
+	}
+	if !dfi.IsDir() {
+		return fmt.Errorf("parent is not a directory: %s", dir)
+	}
+
+	if fi, err := os.Lstat(path); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write report: %s is a symlink", path)
+		}
+		if fi.IsDir() {
+			return fmt.Errorf("refusing to write report: %s is a directory", path)
+		}
+		if !fi.Mode().IsRegular() {
+			return fmt.Errorf("refusing to write report: %s is not a regular file", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	return fsx.WriteAtomic(path, data, 0o644)
+}
+
 func check(root, base, report string) error {
+	var gateRun bool = true
 	if base != "" {
-		if run, err := gate(root, base); err != nil || !run {
-			if !run && report != "" {
-				r, _ := docs.Check(root, false, nil)
-				_ = os.WriteFile(report, []byte(r.Markdown()), 0o644)
-			}
+		run, err := gate(root, base)
+		if err != nil {
 			return err
 		}
+		gateRun = run
 	}
-	r, err := docs.Check(root, false, nil)
-	if report != "" {
-		_ = os.WriteFile(report, []byte(r.Markdown()), 0o644)
-	}
+
+	r, checkErr := docs.Check(root, false, nil)
 	for _, s := range r.Skipped {
 		fmt.Fprintf(os.Stderr, "skipped symlink: %s\n", s)
 	}
 	for _, i := range r.Issues {
 		fmt.Println(i)
 	}
-	if err == nil && len(r.Issues) > 0 {
-		err = fmt.Errorf("%d doc issue(s)", len(r.Issues))
+
+	if report != "" {
+		if err := writeReport(report, []byte(r.Markdown())); err != nil {
+			fmt.Fprintf(os.Stderr, "error writing report: %v\n", err)
+			return err
+		}
 	}
-	return err
+
+	if !gateRun {
+		return nil
+	}
+	if checkErr != nil {
+		return checkErr
+	}
+	if len(r.Issues) > 0 {
+		return fmt.Errorf("%d doc issue(s)", len(r.Issues))
+	}
+	return nil
 }
 
 func scavenge(root string) error {
@@ -310,6 +353,43 @@ func pagesPath(root, id string) (string, error) {
 	return filepath.Join(pagesDir, id+".html"), nil
 }
 
+func readBodyFile(path string) (string, error) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("refusing to read symlinked body-file: %s", path)
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("refusing to read non-regular body-file: %s", path)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	lr := io.LimitReader(f, int64(github.MaxBodyLen+1))
+	b, err := io.ReadAll(lr)
+	if err != nil {
+		return "", err
+	}
+	if len(b) > github.MaxBodyLen {
+		return "", errors.New("body-file too large")
+	}
+
+	if !utf8.Valid(b) {
+		return "", errors.New("invalid UTF-8 in body-file")
+	}
+	if bytes.ContainsRune(b, '\x00') {
+		return "", errors.New("body-file contains NUL byte")
+	}
+
+	return docs.SanitizeReport(string(b))
+}
+
 func comment(root, base, repo string, pr int, bodyFile, author string) error {
 	if repo == "" || !github.ValidRepo(repo) {
 		return fmt.Errorf("invalid -repo: %s", repo)
@@ -320,11 +400,24 @@ func comment(root, base, repo string, pr int, bodyFile, author string) error {
 
 	var body string
 	if bodyFile != "" {
-		b, err := os.ReadFile(bodyFile)
+		sanitized, err := readBodyFile(bodyFile)
 		if err != nil {
-			return fmt.Errorf("read -body-file %s: %w", bodyFile, err)
+			msg := fmt.Sprintf("report failed validation: %v", err)
+			fmt.Fprintln(os.Stderr, msg)
+			if summaryFile := os.Getenv("GITHUB_STEP_SUMMARY"); summaryFile != "" {
+				if sfi, lerr := os.Lstat(summaryFile); lerr == nil {
+					if sfi.Mode()&os.ModeSymlink != 0 {
+						return errors.New(msg)
+					}
+				}
+				if sf, oerr := os.OpenFile(summaryFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644); oerr == nil {
+					_, _ = sf.WriteString(msg + "\n")
+					_ = sf.Close()
+				}
+			}
+			return errors.New(msg)
 		}
-		body = string(b)
+		body = sanitized
 	} else {
 		var unanalysed []docs.Unknown
 		if base != "" { // impact gate: stay silent when nothing public changed
@@ -373,12 +466,23 @@ func comment(root, base, repo string, pr int, bodyFile, author string) error {
 
 	tok := os.Getenv("GITHUB_TOKEN")
 	if tok == "" {
+		if gl := os.Getenv("GITLAB_TOKEN"); gl != "" {
+			tok = gl
+		}
+	}
+	if tok == "" {
 		return degradeOnFork()
 	}
 
 	api := os.Getenv("GITHUB_API_URL")
 	if api == "" {
-		api = "https://api.github.com"
+		if gl := os.Getenv("CI_API_V4_URL"); gl != "" {
+			api = gl
+		} else if gl := os.Getenv("CI_SERVER_URL"); gl != "" {
+			api = strings.TrimRight(gl, "/") + "/api/v4"
+		} else {
+			api = "https://api.github.com"
+		}
 	}
 	cleanAPI, err := cleanAPIURL(api, "GITHUB_API_URL")
 	if err != nil {

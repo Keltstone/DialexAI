@@ -84,17 +84,27 @@ Example `rbac.txt`:
 
 Lines contain exactly 3 whitespace-separated fields:
 ```
-<repo_name> <relative_or_absolute_path> <team_name>
+<repo_name> <path> <team_name>
 ```
 
-- **`repo_name`**: Identifier matching `^[A-Za-z0-9_.-]{1,64}$`.
-- **`path`**: Filesystem path. Must resolve (`filepath.EvalSymlinks`) within `-allowed-root`.
-- **`team_name`**: Team identifier matching `^[A-Za-z0-9_.-]{1,64}$`.
+| Field | Syntax / Constraints | Description |
+|---|---|---|
+| `<repo_name>` | `^[A-Za-z0-9_.-]{1,64}$` | Unique identifier for the repository displayed on dashboard |
+| `<path>` | Relative or absolute path | Path to the repository directory. Relative paths are resolved against `-allowed-root` (NOT the process working directory). Absolute paths must still resolve within `-allowed-root`. |
+| `<team_name>` | `^[A-Za-z0-9_.-]{1,64}$` | Team identifier for RBAC access control |
+
+#### Path Resolution and Confinement Rules:
+- **Relative Paths**: A relative path such as `auth` is resolved against `-allowed-root` (e.g. `-allowed-root /var/repos` resolves `auth` to `/var/repos/auth`).
+- **Absolute Paths**: Absolute paths must evaluate (`filepath.EvalSymlinks`) strictly within `-allowed-root`.
+- **Fault-Tolerant Startup**: Bad repo entries (non-existent paths, symlink escapes outside allowed-root, non-directory files, or duplicate repository names) do not abort the server. Each bad entry is logged once at startup (`repo "<name>": <reason>`) and rendered as an `unavailable` row on the dashboard. Malformed line syntax (wrong field count or regex mismatch) remains a fatal startup error naming the line number.
 
 Example `repos.txt`:
 ```
-auth-service /var/repos/auth core
-checkout-api /var/repos/checkout payments
+# Relative paths resolved against -allowed-root (/var/repos):
+auth-service auth core
+checkout-api checkout payments
+
+# Absolute paths within -allowed-root:
 frontend-web /var/repos/web frontend
 ```
 

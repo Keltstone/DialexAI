@@ -483,6 +483,9 @@ func (r Report) Markdown(extra ...Issue) string {
 	}
 
 	var b strings.Builder
+	b.WriteString(ReportHeader)
+	b.WriteString("\n\n")
+
 	if len(all) == 0 {
 		fmt.Fprintf(&b, "Scribex: docs in sync (%d anchors checked).", r.Total)
 		b.WriteString(unknownSection)
@@ -492,28 +495,33 @@ func (r Report) Markdown(extra ...Issue) string {
 	header := fmt.Sprintf("Scribex found %d doc issue(s) (%d anchors):\n\n", len(all), r.Total)
 	b.WriteString(header)
 
-	footer := "\nRun `scribex sync` to refresh stale anchors."
-	const maxBody = 59900 // Headroom for marker "<!-- scribex-report:v1 -->\n"
+	const syncFooter = "\nRun `scribex sync` to refresh stale anchors."
+	maxPayload := MaxBodyLen - len(MarkerV1) - 1 // 59973
 
 	shown := 0
-	for i, iss := range all {
+	for _, iss := range all {
 		codeFile := mdsafe.Code(iss.File)
 		codeRef := mdsafe.Code(iss.Ref)
 		textMsg := mdsafe.Text(iss.Msg)
-		line := fmt.Sprintf("- %s line %d %s: %s\n", codeFile, iss.Line, codeRef, textMsg)
+		var line string
+		if iss.Ref != "" {
+			line = fmt.Sprintf("- %s line %d %s: %s\n", codeFile, iss.Line, codeRef, textMsg)
+		} else {
+			line = fmt.Sprintf("- %s line %d: %s\n", codeFile, iss.Line, textMsg)
+		}
 
-		remaining := len(all) - shown
-		cutNotice := fmt.Sprintf("… and %d more issue(s) not shown; run scribex check locally\n", remaining)
+		remainingIfCut := len(all) - shown
+		footerIfCut := fmt.Sprintf("… %d more findings not shown. Run `scribex check` locally for the full report.\n", remainingIfCut)
 
-		if b.Len()+len(line)+len(cutNotice)+len(footer)+len(unknownSection) > maxBody {
-			b.WriteString(fmt.Sprintf("… and %d more issue(s) not shown; run scribex check locally\n", len(all)-i))
+		if b.Len()+len(line)+len(footerIfCut)+len(syncFooter)+len(unknownSection) > maxPayload {
+			b.WriteString(footerIfCut)
 			break
 		}
 		b.WriteString(line)
 		shown++
 	}
 
-	b.WriteString(footer)
+	b.WriteString(syncFooter)
 	b.WriteString(unknownSection)
 	return b.String()
 }

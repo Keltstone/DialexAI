@@ -43,9 +43,10 @@ var (
 const styleCSS = "body{font:14px system-ui;margin:2rem}td,th{padding:.3rem .8rem;text-align:left}.error{color:#b00}"
 
 type Repo struct {
-	Name string
-	Path string
-	Team string
+	Name        string
+	Path        string
+	Team        string
+	Unavailable bool
 }
 
 type Principal struct {
@@ -189,42 +190,59 @@ func (l *ipLimiter) recordFailure(ip string, now time.Time) (bool, int) {
 	return false, 0
 }
 
-func lines(path string) ([][]string, error) {
+type lineRecord struct {
+	num    int
+	fields []string
+}
+
+func parseFileLines(path string) ([]lineRecord, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var out [][]string
-	for _, l := range strings.Split(string(b), "\n") {
+	var out []lineRecord
+	for i, l := range strings.Split(string(b), "\n") {
 		l = strings.TrimSpace(l)
 		if l == "" || strings.HasPrefix(l, "#") {
 			continue
 		}
 		f := strings.Fields(l)
 		if len(f) > 0 {
-			out = append(out, f)
+			out = append(out, lineRecord{num: i + 1, fields: f})
 		}
 	}
 	return out, nil
 }
 
 func checkPathConfinement(allowedRoot, targetPath string) (string, error) {
+	if !filepath.IsAbs(targetPath) {
+		targetPath = filepath.Join(allowedRoot, targetPath)
+	}
 	cleanRoot, err := filepath.EvalSymlinks(allowedRoot)
 	if err != nil {
-		return "", fmt.Errorf("invalid allowed-root %s: %w", allowedRoot, err)
+		return "", errors.New("invalid allowed-root")
 	}
 	realTarget, err := filepath.EvalSymlinks(targetPath)
 	if err != nil {
-		return "", fmt.Errorf("invalid repo path %s: %w", targetPath, err)
+		if os.IsNotExist(err) {
+			return "", errors.New("not found")
+		}
+		return "", errors.New("outside allowed root")
 	}
 	fi, err := os.Stat(realTarget)
-	if err != nil || !fi.IsDir() {
-		return "", fmt.Errorf("repo path %s must be an existing directory", targetPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", errors.New("not found")
+		}
+		return "", errors.New("outside allowed root")
+	}
+	if !fi.IsDir() {
+		return "", errors.New("not a directory")
 	}
 
 	rel, err := filepath.Rel(cleanRoot, realTarget)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("repo path %s resolves outside allowed-root", targetPath)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+		return "", errors.New("outside allowed root")
 	}
 	return realTarget, nil
 }
@@ -234,60 +252,105 @@ func LoadRepos(path string, allowedRoot string) ([]Repo, error) {
 	if allowedRoot == "" {
 		return nil, errors.New("allowed-root is required")
 	}
-	ls, err := lines(path)
+	records, err := parseFileLines(path)
 	if err != nil {
 		return nil, err
 	}
 	var rs []Repo
 	seen := make(map[string]bool)
 
-	for lineNum, f := range ls {
+	cleanRoot, err := filepath.EvalSymlinks(allowedRoot)
+	if err != nil {
+		return nil, fmt.Errorf("invalid allowed-root: %w", err)
+	}
+
+	for _, rec := range records {
+		f := rec.fields
 		if len(f) != 3 {
-			return nil, fmt.Errorf("repos line %d: expected exactly 3 fields (name path team), got %d", lineNum+1, len(f))
+			return nil, fmt.Errorf("repos line %d: expected exactly 3 fields (name path team), got %d", rec.num, len(f))
 		}
 		name, repoPath, team := f[0], f[1], f[2]
 		if !nameRe.MatchString(name) {
-			return nil, fmt.Errorf("repos line %d: invalid name %q", lineNum+1, name)
+			return nil, fmt.Errorf("repos line %d: invalid name regex", rec.num)
 		}
 		if !nameRe.MatchString(team) {
-			return nil, fmt.Errorf("repos line %d: invalid team %q", lineNum+1, team)
+			return nil, fmt.Errorf("repos line %d: invalid team regex", rec.num)
 		}
+
 		if seen[name] {
-			return nil, fmt.Errorf("duplicate repo name %q", name)
+			fmt.Fprintf(os.Stderr, "repo %q: duplicate name\n", name)
+			rs = append(rs, Repo{Name: name, Path: repoPath, Team: team, Unavailable: true})
+			continue
 		}
 		seen[name] = true
 
-		if _, err := checkPathConfinement(allowedRoot, repoPath); err != nil {
-			return nil, err
+		targetPath := repoPath
+		if !filepath.IsAbs(targetPath) {
+			targetPath = filepath.Join(allowedRoot, targetPath)
 		}
 
-		rs = append(rs, Repo{Name: name, Path: repoPath, Team: team})
+		realTarget, err := filepath.EvalSymlinks(targetPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "repo %q: not found\n", name)
+			} else {
+				fmt.Fprintf(os.Stderr, "repo %q: outside allowed root\n", name)
+			}
+			rs = append(rs, Repo{Name: name, Path: targetPath, Team: team, Unavailable: true})
+			continue
+		}
+
+		fi, err := os.Stat(realTarget)
+		if err != nil {
+			if os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "repo %q: not found\n", name)
+			} else {
+				fmt.Fprintf(os.Stderr, "repo %q: outside allowed root\n", name)
+			}
+			rs = append(rs, Repo{Name: name, Path: targetPath, Team: team, Unavailable: true})
+			continue
+		}
+		if !fi.IsDir() {
+			fmt.Fprintf(os.Stderr, "repo %q: not a directory\n", name)
+			rs = append(rs, Repo{Name: name, Path: targetPath, Team: team, Unavailable: true})
+			continue
+		}
+
+		rel, err := filepath.Rel(cleanRoot, realTarget)
+		if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+			fmt.Fprintf(os.Stderr, "repo %q: outside allowed root\n", name)
+			rs = append(rs, Repo{Name: name, Path: targetPath, Team: team, Unavailable: true})
+			continue
+		}
+
+		rs = append(rs, Repo{Name: name, Path: targetPath, Team: team})
 	}
 	return rs, nil
 }
 
 // LoadRBAC parses and strictly validates the rbac file.
 func LoadRBAC(path string) ([]Principal, error) {
-	ls, err := lines(path)
+	records, err := parseFileLines(path)
 	if err != nil {
 		return nil, err
 	}
 	var ps []Principal
 	seen := make(map[string]bool)
 
-	for lineNum, f := range ls {
+	for _, rec := range records {
+		f := rec.fields
 		if len(f) < 2 || len(f) > 3 {
-			return nil, fmt.Errorf("rbac line %d: expected 2 or 3 fields (<hash> <admin|viewer> [teams]), got %d", lineNum+1, len(f))
+			return nil, fmt.Errorf("rbac line %d: expected 2 or 3 fields (<hash> <admin|viewer> [teams]), got %d", rec.num, len(f))
 		}
 		h, role := f[0], f[1]
 		if !hashRe.MatchString(h) {
-			return nil, fmt.Errorf("rbac line %d: invalid sha256 hash %q", lineNum+1, h)
+			return nil, fmt.Errorf("rbac line %d: invalid sha256 hash", rec.num)
 		}
 		if role != "admin" && role != "viewer" {
-			return nil, fmt.Errorf("rbac line %d: invalid role %q; must be admin or viewer", lineNum+1, role)
+			return nil, fmt.Errorf("rbac line %d: invalid role; must be admin or viewer", rec.num)
 		}
 		if seen[h] {
-			return nil, fmt.Errorf("duplicate token hash in rbac: %q", h)
+			return nil, fmt.Errorf("duplicate token hash in rbac")
 		}
 		seen[h] = true
 
@@ -300,7 +363,7 @@ func LoadRBAC(path string) ([]Principal, error) {
 			for _, t := range strings.Split(f[2], ",") {
 				t = strings.TrimSpace(t)
 				if !nameRe.MatchString(t) {
-					return nil, fmt.Errorf("rbac line %d: invalid team name %q", lineNum+1, t)
+					return nil, fmt.Errorf("rbac line %d: invalid team name", rec.num)
 				}
 				p.Teams[t] = true
 			}
@@ -457,6 +520,10 @@ func (s *Server) clientIP(r *http.Request) string {
 }
 
 func (s *Server) measureRepo(r Repo) (Health, error) {
+	if r.Unavailable {
+		return Health{Repo: r.Name, Team: r.Team, Error: true}, nil
+	}
+
 	now := s.config.Now()
 
 	s.cacheMu.RLock()
