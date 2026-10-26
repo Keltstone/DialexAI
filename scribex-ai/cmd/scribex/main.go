@@ -99,8 +99,16 @@ func main() {
 		}
 		var r docs.Report
 		if r, err = docs.Check(*root, true, prose); err == nil {
+			aiFailed := 0
 			for _, i := range r.Issues {
 				fmt.Println(i)
+				if i.Code == anchors.CodeAIRejected || i.Code == anchors.CodeAIFailed {
+					aiFailed++
+				}
+			}
+			if aiFailed > 0 {
+				err = fmt.Errorf("%d ai rewrite(s) not applied (anchors left stale)", aiFailed)
+				break
 			}
 			if *commit {
 				err = companion(*root)

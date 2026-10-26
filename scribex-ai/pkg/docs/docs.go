@@ -96,7 +96,7 @@ func Check(root string, sync bool, prose anchors.Prose) (Report, error) {
 		r.Total += anchors.Count(string(b))
 		issues, out := anchors.Process(string(b), look, sync, prose)
 		for _, i := range issues {
-			if !(sync && i.Stale) {
+			if !(sync && i.Stale && i.Code == "") {
 				r.Issues = append(r.Issues, Issue{f, i})
 			}
 		}
