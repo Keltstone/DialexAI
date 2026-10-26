@@ -194,6 +194,9 @@ func check(root, base string) error {
 		}
 	}
 	r, err := docs.Check(root, false, nil)
+	for _, s := range r.Skipped {
+		fmt.Fprintf(os.Stderr, "skipped symlink: %s\n", s)
+	}
 	for _, i := range r.Issues {
 		fmt.Println(i)
 	}
@@ -207,6 +210,9 @@ func scavenge(root string) error {
 	r, err := docs.Check(root, false, nil)
 	if err != nil {
 		return err
+	}
+	for _, s := range r.Skipped {
+		fmt.Fprintf(os.Stderr, "skipped symlink: %s\n", s)
 	}
 	all := append(r.Issues, docs.Links(root)...)
 	for _, i := range all {

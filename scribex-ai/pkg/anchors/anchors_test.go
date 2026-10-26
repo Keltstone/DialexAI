@@ -372,3 +372,103 @@ func TestProcessAllOrNothing(t *testing.T) {
 		}
 	})
 }
+
+func TestP07Additions(t *testing.T) {
+	// 1. Anchor with A.m(int) syncs
+	t.Run("overloaded_symbol_syncs", func(t *testing.T) {
+		look := func(file, sym string) (string, bool, error) {
+			if file == "pkg/a.go" && sym == "A.m(int)" {
+				return "func (a *A) m(x int)", true, nil
+			}
+			return "", false, nil
+		}
+		doc := "<!-- @scribex:anchor(pkg/a.go#A.m(int)) -->\n"
+		issues, out := Process(doc, look, true, nil)
+		if len(issues) != 1 || !issues[0].Stale {
+			t.Fatalf("expected 1 stale issue, got: %v", issues)
+		}
+		wantHash := Hash("func (a *A) m(x int)")
+		if !strings.Contains(out, "<!-- @scribex:anchor(pkg/a.go#A.m(int)) sig="+wantHash+" -->") {
+			t.Fatalf("anchor was not synced properly:\n%s", out)
+		}
+		if !strings.Contains(out, "```signature\nfunc (a *A) m(x int)\n```") {
+			t.Fatalf("signature fence missing:\n%s", out)
+		}
+	})
+
+	// 2. Anchor inside a fenced example is untouched by sync and not counted by Count
+	t.Run("fenced_example_untouched", func(t *testing.T) {
+		doc := "Here is an example:\n" +
+			"```markdown\n" +
+			"<!-- @scribex:anchor(example.go#Example) -->\n" +
+			"```\n" +
+			"Real anchor:\n" +
+			"<!-- @scribex:anchor(real.go#Real) -->\n"
+
+		if c := Count(doc); c != 1 {
+			t.Fatalf("Count(doc) = %d, want 1", c)
+		}
+
+		look := func(file, sym string) (string, bool, error) {
+			if file == "real.go" && sym == "Real" {
+				return "func Real()", true, nil
+			}
+			t.Fatalf("unexpected look call for %s#%s", file, sym)
+			return "", false, nil
+		}
+
+		_, out := Process(doc, look, true, nil)
+		if !strings.Contains(out, "```markdown\n<!-- @scribex:anchor(example.go#Example) -->\n```") {
+			t.Fatalf("fenced example was touched:\n%s", out)
+		}
+		if !strings.Contains(out, "<!-- @scribex:anchor(real.go#Real) sig=") {
+			t.Fatalf("real anchor was not synced:\n%s", out)
+		}
+	})
+
+	// 3. Duplicate anchors both refreshed
+	t.Run("duplicate_anchors_both_refreshed", func(t *testing.T) {
+		look := func(file, sym string) (string, bool, error) {
+			if file == "f.go" && sym == "Sym" {
+				return "func Sym()", true, nil
+			}
+			return "", false, nil
+		}
+		doc := "<!-- @scribex:anchor(f.go#Sym) -->\n<!-- @scribex:anchor(f.go#Sym) -->\n"
+		if c := Count(doc); c != 2 {
+			t.Fatalf("Count(doc) = %d, want 2", c)
+		}
+		issues, out := Process(doc, look, true, nil)
+		if len(issues) != 2 {
+			t.Fatalf("expected 2 issues, got %d", len(issues))
+		}
+		wantHash := Hash("func Sym()")
+		expectedLine := "<!-- @scribex:anchor(f.go#Sym) sig=" + wantHash + " -->"
+		if strings.Count(out, expectedLine) != 2 {
+			t.Fatalf("expected 2 synced anchors in:\n%s", out)
+		}
+	})
+
+	// 4. Test both orders of signature fence vs fenced code block
+	t.Run("fence_orders", func(t *testing.T) {
+		// Order 1: Anchor with signature fence, then fenced example
+		doc1 := "<!-- @scribex:anchor(f.go#Sym) sig=" + Hash("func Sym()") + " -->\n" +
+			"```signature\nfunc Sym()\n```\n" +
+			"```go\n" +
+			"<!-- @scribex:anchor(ex.go#Ex) -->\n" +
+			"```\n"
+		if c := Count(doc1); c != 1 {
+			t.Fatalf("Order 1: Count = %d, want 1", c)
+		}
+
+		// Order 2: Fenced example, then anchor with signature fence
+		doc2 := "```go\n" +
+			"<!-- @scribex:anchor(ex.go#Ex) -->\n" +
+			"```\n" +
+			"<!-- @scribex:anchor(f.go#Sym) sig=" + Hash("func Sym()") + " -->\n" +
+			"```signature\nfunc Sym()\n```\n"
+		if c := Count(doc2); c != 1 {
+			t.Fatalf("Order 2: Count = %d, want 1", c)
+		}
+	})
+}

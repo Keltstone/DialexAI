@@ -60,6 +60,16 @@ func resolve(p string) (string, error) {
 	if !os.IsNotExist(err) {
 		return "", err
 	}
+	fi, lerr := os.Lstat(p)
+	if lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		target, rerr := os.Readlink(p)
+		if rerr == nil {
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(p), target)
+			}
+			return resolve(target)
+		}
+	}
 	parent, err := resolve(filepath.Dir(p))
 	if err != nil {
 		return "", err

@@ -6,13 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"scribex/pkg/prose"
 )
-
-var open = regexp.MustCompile(`^\s*<!--\s*@scribex:anchor\(([^)#]+)#([^)\s]+)\)(?:\s+sig=([0-9a-f]+))?\s*-->\s*$`)
 
 // Lookup returns the current signature of file#sym, ok=false when missing.
 type Lookup func(file, sym string) (sig string, ok bool, err error)
@@ -47,16 +44,32 @@ const endMark = "<!-- @scribex:end -->"
 // Process walks md; returns issues and, when sync is true, the rewritten text.
 func Process(md string, look Lookup, sync bool, proseFn Prose) ([]Issue, string) {
 	in := strings.Split(md, "\n")
+	inFence := InFence(in)
 	var out []string
 	var issues []Issue
 	for i := 0; i < len(in); i++ {
+		if inFence[i] {
+			out = append(out, in[i])
+			continue
+		}
 		m := open.FindStringSubmatch(in[i])
 		if m == nil {
 			out = append(out, in[i])
 			continue
 		}
-		ref := m[1] + "#" + m[2]
-		sig, ok, err := look(m[1], m[2])
+		file, sym := m[1], m[2]
+		ref := file + "#" + sym
+		if err := validateAnchor(file, sym); err != nil {
+			issues = append(issues, Issue{
+				Line:  i + 1,
+				Ref:   ref,
+				Msg:   "cannot analyse " + file + ": " + err.Error(),
+				Stale: false,
+			})
+			out = append(out, in[i])
+			continue
+		}
+		sig, ok, err := look(file, sym)
 		if err != nil {
 			issues = append(issues, Issue{
 				Line:  i + 1,
@@ -226,13 +239,8 @@ func Process(md string, look Lookup, sync bool, proseFn Prose) ([]Issue, string)
 }
 
 // Count returns the number of anchors in md.
-func Count(md string) (n int) {
-	for _, l := range strings.Split(md, "\n") {
-		if open.MatchString(l) {
-			n++
-		}
-	}
-	return
+func Count(md string) int {
+	return len(Parse(md))
 }
 
 func endAt(lines []string, from int) int {

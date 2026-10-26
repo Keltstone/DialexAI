@@ -4,6 +4,7 @@ package docs
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +13,7 @@ import (
 
 	"scribex/pkg/anchors"
 	"scribex/pkg/gitx"
+	"scribex/pkg/safepath"
 	"scribex/pkg/symbols"
 )
 
@@ -28,6 +30,7 @@ type Report struct {
 	Total   int // anchors seen
 	Issues  []Issue
 	Unknown []Unknown
+	Skipped []string // symlinks skipped
 }
 
 // Delta is one public-symbol change between base and the working tree.
@@ -42,25 +45,69 @@ type DeltaResult struct {
 	Skipped []string  // submodules etc. (informational)
 }
 
-// Files lists markdown files under root.
-func Files(root string) (out []string) {
-	filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err == nil && d.IsDir() && p != root {
-			if n := d.Name(); strings.HasPrefix(n, ".") || n == "node_modules" || n == "vendor" {
+// FilesWithSkips lists markdown files under root and any skipped symlink paths.
+func FilesWithSkips(root string) (files, skipped []string) {
+	walkRoot := root
+	if fi, err := os.Lstat(root); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if real, err := filepath.EvalSymlinks(root); err == nil {
+			walkRoot = real
+		}
+	}
+
+	filepath.WalkDir(walkRoot, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		outPath := p
+		if walkRoot != root {
+			if rel, err := filepath.Rel(walkRoot, p); err == nil {
+				outPath = filepath.Join(root, rel)
+			}
+		}
+
+		if d.IsDir() && p != walkRoot {
+			n := d.Name()
+			if strings.HasPrefix(n, ".") || n == "node_modules" || n == "vendor" {
 				return filepath.SkipDir
 			}
 		}
-		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".md") {
-			out = append(out, p)
+		if p != walkRoot && d.Type()&os.ModeSymlink != 0 {
+			skipped = append(skipped, outPath)
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.IsDir() && strings.HasSuffix(p, ".md") {
+			rel, err := filepath.Rel(walkRoot, p)
+			if err != nil {
+				return nil
+			}
+			if _, err := safepath.Join(root, rel); err != nil {
+				return nil
+			}
+			files = append(files, outPath)
 		}
 		return nil
 	})
+	sort.Strings(files)
+	sort.Strings(skipped)
 	return
+}
+
+// Files lists markdown files under root.
+func Files(root string) []string {
+	files, _ := FilesWithSkips(root)
+	return files
 }
 
 // Symbols returns the public symbols of a repo-relative file.
 func Symbols(root, file string) (map[string]string, error) {
-	src, err := os.ReadFile(filepath.Join(root, file))
+	p, err := safepath.Join(root, file)
+	if err != nil {
+		return nil, fmt.Errorf("anchor path %q: %w", file, err)
+	}
+	src, err := os.ReadFile(p)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +135,9 @@ func Check(root string, sync bool, prose anchors.Prose) (Report, error) {
 		return v, ok, nil
 	}
 	var r Report
-	for _, f := range Files(root) {
+	files, skipped := FilesWithSkips(root)
+	r.Skipped = skipped
+	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			return r, err
@@ -101,6 +150,21 @@ func Check(root string, sync bool, prose anchors.Prose) (Report, error) {
 			}
 		}
 		if sync && out != string(b) {
+			rel, err := filepath.Rel(root, f)
+			if err != nil {
+				return r, err
+			}
+			safeP, err := safepath.Join(root, rel)
+			if err != nil {
+				return r, err
+			}
+			realF, err := filepath.EvalSymlinks(f)
+			if err != nil && !os.IsNotExist(err) {
+				return r, err
+			}
+			if realF != "" && safeP != realF {
+				return r, fmt.Errorf("refusing to write to %s: resolves to %s, expected %s", f, realF, safeP)
+			}
 			if err := os.WriteFile(f, []byte(out), 0o644); err != nil {
 				return r, err
 			}
@@ -109,16 +173,70 @@ func Check(root string, sync bool, prose anchors.Prose) (Report, error) {
 	return r, nil
 }
 
-var link = regexp.MustCompile(`\]\(([^)#:\s]+)(?:#[^)]*)?\)`)
+var linkRe = regexp.MustCompile(`\]\(([^)]+)\)`)
+var schemeRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
 
-// Links reports markdown links to repo-relative targets that do not exist.
+// Links reports markdown links to repo-relative targets that do not exist or escape root.
 func Links(root string) (out []Issue) {
 	for _, f := range Files(root) {
-		b, _ := os.ReadFile(f)
-		for n, l := range strings.Split(string(b), "\n") {
-			for _, m := range link.FindAllStringSubmatch(l, -1) {
-				if _, err := os.Stat(filepath.Join(filepath.Dir(f), m[1])); err != nil {
-					out = append(out, Issue{f, anchors.Issue{Line: n + 1, Ref: m[1], Msg: "broken link"}})
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(b), "\n")
+		inFence := anchors.InFence(lines)
+		for n, l := range lines {
+			if inFence[n] {
+				continue
+			}
+			for _, m := range linkRe.FindAllStringSubmatch(l, -1) {
+				raw := strings.TrimSpace(m[1])
+				t := raw
+				if fields := strings.Fields(raw); len(fields) > 0 {
+					t = fields[0]
+				}
+				ref := t
+
+				// 1. Strip ?query and #fragment
+				if idx := strings.IndexAny(t, "?#"); idx >= 0 {
+					t = t[:idx]
+				}
+				// 2. Percent-decode
+				decoded, err := url.PathUnescape(t)
+				if err != nil {
+					out = append(out, Issue{f, anchors.Issue{Line: n + 1, Ref: ref, Msg: "broken link"}})
+					continue
+				}
+				t = decoded
+				// 3. Empty after strip -> skip
+				if t == "" {
+					continue
+				}
+				// 4. Scheme or starting //
+				if schemeRe.MatchString(t) || strings.HasPrefix(t, "//") {
+					continue
+				}
+				// 5. Leading / means repo root
+				var rel string
+				if strings.HasPrefix(t, "/") {
+					rel = strings.TrimPrefix(t, "/")
+				} else {
+					dirRel, err := filepath.Rel(root, filepath.Dir(f))
+					if err != nil {
+						dirRel = ""
+					}
+					rel = filepath.Join(dirRel, t)
+				}
+				// 6. Resolve with safepath.Join(root, rel)
+				targetPath, err := safepath.Join(root, rel)
+				if err != nil {
+					out = append(out, Issue{f, anchors.Issue{Line: n + 1, Ref: ref, Msg: "link escapes repository"}})
+					continue
+				}
+				// 7. os.Lstat (do not follow final symlink to outside)
+				if _, err := os.Lstat(targetPath); err != nil {
+					out = append(out, Issue{f, anchors.Issue{Line: n + 1, Ref: ref, Msg: "broken link"}})
+					continue
 				}
 			}
 		}
@@ -128,12 +246,15 @@ func Links(root string) (out []Issue) {
 
 // Refs maps "file#Sym" to the doc files anchoring it.
 func Refs(root string) map[string][]string {
-	re := regexp.MustCompile(`@scribex:anchor\(([^)\s]+)\)`)
 	out := map[string][]string{}
 	for _, f := range Files(root) {
-		b, _ := os.ReadFile(f)
-		for _, m := range re.FindAllStringSubmatch(string(b), -1) {
-			out[m[1]] = append(out[m[1]], f)
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		for _, a := range anchors.Parse(string(b)) {
+			key := a.File + "#" + a.Sym
+			out[key] = append(out[key], f)
 		}
 	}
 	return out
@@ -266,11 +387,16 @@ func Deltas(root, base string) (DeltaResult, error) {
 		if change.status == "D" {
 			newSyms = make(map[string]string)
 		} else {
-			newSrc, err := os.ReadFile(filepath.Join(root, f))
+			p, err := safepath.Join(root, f)
 			if err != nil {
 				newErr = err
 			} else {
-				newSyms, newErr = symbols.Extract(f, newSrc)
+				newSrc, err := os.ReadFile(p)
+				if err != nil {
+					newErr = err
+				} else {
+					newSyms, newErr = symbols.Extract(f, newSrc)
+				}
 			}
 		}
 
