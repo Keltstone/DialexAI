@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"scribex/pkg/fsx"
 )
 
 const ghWorkflow = `name: Scribex
@@ -69,13 +71,32 @@ func ciCmd(root string, a []string) error {
 	default:
 		return fmt.Errorf("ci init github|gitlab")
 	}
-	p := filepath.Join(root, path)
-	if _, err := os.Stat(p); err == nil && !*force {
-		return fmt.Errorf("%s exists (use -force)", path)
+	// Check if any parent component (e.g. .github, .github/workflows) is a symlink
+	curr := filepath.Dir(path)
+	for curr != "." && curr != "/" && curr != "" {
+		parentP := filepath.Join(root, curr)
+		if fi, err := os.Lstat(parentP); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write through symlink %s", curr)
+		}
+		curr = filepath.Dir(curr)
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+
+	p := filepath.Join(root, path)
+	if fi, err := os.Lstat(p); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to overwrite symlink %s", path)
+		}
+		if !fi.Mode().IsRegular() {
+			return fmt.Errorf("refusing to overwrite non-regular file %s", path)
+		}
+		if !*force {
+			return fmt.Errorf("%s exists (use -force)", path)
+		}
+	}
+
+	if err := fsx.WriteFileIn(root, path, []byte(body), 0o644); err != nil {
 		return err
 	}
 	fmt.Println("wrote", path)
-	return os.WriteFile(p, []byte(body), 0o644)
+	return nil
 }

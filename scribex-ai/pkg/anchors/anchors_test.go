@@ -472,3 +472,163 @@ func TestP07Additions(t *testing.T) {
 		}
 	})
 }
+
+func TestPartC_AnchorHashAndLegacyHandling(t *testing.T) {
+	sig := "func Calculate(a, b int) int"
+	h := Hash(sig)
+	if len(h) != 16 {
+		t.Fatalf("Hash length = %d, want 16 (hex)", len(h))
+	}
+
+	legacy8 := h[:8]
+	if !SigMatches(legacy8, h) {
+		t.Fatalf("SigMatches(legacy8, h) should be true")
+	}
+	if !SigMatches(h, h) {
+		t.Fatalf("SigMatches(h, h) should be true")
+	}
+	if SigMatches(h[:7], h) {
+		t.Fatalf("SigMatches with 7 chars should be false")
+	}
+	if SigMatches(h[:9], h) {
+		t.Fatalf("SigMatches with 9 chars should be false")
+	}
+	if SigMatches(strings.ToUpper(legacy8), h) {
+		t.Fatalf("SigMatches with uppercase should be false")
+	}
+	if SigMatches("abc", h) {
+		t.Fatalf("SigMatches with garbage should be false")
+	}
+
+	look := func(file, sym string) (string, bool, error) {
+		return sig, true, nil
+	}
+
+	// (1) legacy anchor with unchanged signature: check reports nothing, sync rewrites to 16-char form with NO AI call
+	docLegacy := "<!-- @scribex:anchor(calc.go#Calculate) sig=" + legacy8 + " -->\n" +
+		"```signature\n" + sig + "\n```\n" +
+		"Old prose.\n<!-- @scribex:end -->\n"
+
+	aiCalled := false
+	proseFn := func(ref, s, old string) (string, error) {
+		aiCalled = true
+		return "AI rewrite", nil
+	}
+
+	// Check mode (sync = false)
+	issues, _ := Process(docLegacy, look, false, proseFn)
+	if len(issues) != 0 {
+		t.Fatalf("check reported issues on unchanged legacy anchor: %v", issues)
+	}
+	if aiCalled {
+		t.Fatalf("AI was called during check")
+	}
+
+	// Sync mode (sync = true)
+	issues, outSync := Process(docLegacy, look, true, proseFn)
+	if len(issues) != 0 {
+		t.Fatalf("sync reported issues on unchanged legacy anchor: %v", issues)
+	}
+	if aiCalled {
+		t.Fatalf("AI was called during sync of unchanged legacy anchor")
+	}
+	if !strings.Contains(outSync, "sig="+h) {
+		t.Fatalf("sync did not rewrite anchor to 16-char form:\n%s", outSync)
+	}
+
+	// (2) legacy anchor with changed signature: stale, AI path runs as usual
+	lookChanged := func(file, sym string) (string, bool, error) {
+		return "func Calculate(a, b int, flag bool) int", true, nil
+	}
+	aiCalled = false
+	issues, outChanged := Process(docLegacy, lookChanged, true, proseFn)
+	if !aiCalled {
+		t.Fatalf("AI was NOT called when signature changed")
+	}
+	newHash := Hash("func Calculate(a, b int, flag bool) int")
+	if !strings.Contains(outChanged, "sig="+newHash) {
+		t.Fatalf("expected new 16-char hash in rewritten doc:\n%s", outChanged)
+	}
+
+	// (3) 16-char round trip idempotent (sync twice → byte-identical)
+	_, outOnce := Process(docLegacy, look, true, proseFn)
+	_, outTwice := Process(outOnce, look, true, proseFn)
+	if outOnce != outTwice {
+		t.Fatalf("sync twice was not idempotent:\n1st:\n%s\n2nd:\n%s", outOnce, outTwice)
+	}
+
+	// (4) garbage sig=abc → stale
+	docGarbage := "<!-- @scribex:anchor(calc.go#Calculate) sig=abc -->\n" +
+		"```signature\n" + sig + "\n```\n"
+	issues, _ = Process(docGarbage, look, false, proseFn)
+	if len(issues) == 0 || !issues[0].Stale {
+		t.Fatalf("expected stale issue on garbage sig, got: %v", issues)
+	}
+
+	// (5) the @scribex:ai sig= marker uses the 16-char hash
+	if !strings.Contains(outChanged, "<!-- @scribex:ai sig="+newHash+" -->") {
+		t.Fatalf("expected @scribex:ai marker with 16-char hash in:\n%s", outChanged)
+	}
+}
+
+func TestPartD_LineEndingsAndBOM(t *testing.T) {
+	sig := "func Multi(\n\ta int,\n\tb string,\n) error"
+	look := func(file, sym string) (string, bool, error) {
+		return sig, true, nil
+	}
+
+	// 1. CRLF doc: all inserted lines get \r\n, untouched lines stay byte-identical
+	crlfDoc := "<!-- @scribex:anchor(m.go#Multi) -->\r\n" +
+		"Untouched line 1\r\n" +
+		"Untouched line 2\r\n"
+	_, outCRLF := Process(crlfDoc, look, true, nil)
+	linesCRLF := strings.Split(outCRLF, "\r\n")
+	for i, l := range linesCRLF[:len(linesCRLF)-1] {
+		if strings.Contains(l, "\r") {
+			t.Fatalf("line %d had extra carriage return: %q", i, l)
+		}
+	}
+	if !strings.Contains(outCRLF, "```signature\r\nfunc Multi(\r\n\ta int,\r\n\tb string,\r\n) error\r\n```\r\n") {
+		t.Fatalf("multi-line signature not consistently CRLF-terminated in:\n%q", outCRLF)
+	}
+	if !strings.Contains(outCRLF, "Untouched line 1\r\nUntouched line 2\r\n") {
+		t.Fatalf("untouched lines corrupted in CRLF doc:\n%q", outCRLF)
+	}
+
+	// 2. Mixed doc: 3 CRLF + 1 LF (dominant is CRLF). Untouched LF line stays LF!
+	mixedDoc := "Header\r\n" +
+		"<!-- @scribex:anchor(m.go#Multi) -->\r\n" +
+		"CRLF untouched\r\n" +
+		"LF untouched\n"
+	_, outMixed := Process(mixedDoc, look, true, nil)
+	if !strings.Contains(outMixed, "LF untouched\n") {
+		t.Fatalf("LF untouched line was converted:\n%q", outMixed)
+	}
+	if !strings.Contains(outMixed, "CRLF untouched\r\n") {
+		t.Fatalf("CRLF untouched line was converted:\n%q", outMixed)
+	}
+
+	// 3. No trailing newline: file without trailing newline stays without trailing newline
+	noNewlineDoc := "<!-- @scribex:anchor(m.go#Multi) -->\nBody"
+	_, outNoNL := Process(noNewlineDoc, look, true, nil)
+	if strings.HasSuffix(outNoNL, "\n") {
+		t.Fatalf("file without trailing newline gained one:\n%q", outNoNL)
+	}
+
+	// 4. BOM: leading \uFEFF is preserved; anchor matching on line 1 ignores it
+	bomDoc := "\uFEFF<!-- @scribex:anchor(m.go#Multi) -->\r\nProse\r\n"
+	issues, outBOM := Process(bomDoc, look, true, nil)
+	if len(issues) != 1 || !issues[0].Stale {
+		t.Fatalf("failed to match anchor on line 1 with BOM: issues=%v", issues)
+	}
+	if !strings.HasPrefix(outBOM, "\uFEFF<!-- @scribex:anchor(m.go#Multi) sig=") {
+		t.Fatalf("BOM not preserved at start of rewritten doc:\n%q", outBOM)
+	}
+
+	// 5. Run sync twice -> byte identical
+	_, outOnce := Process(crlfDoc, look, true, nil)
+	_, outTwice := Process(outOnce, look, true, nil)
+	if outOnce != outTwice {
+		t.Fatalf("CRLF doc sync not idempotent:\n1st:\n%q\n2nd:\n%q", outOnce, outTwice)
+	}
+}

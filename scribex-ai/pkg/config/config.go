@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"scribex/pkg/fsx"
+	"scribex/pkg/prose"
 	"scribex/pkg/safepath"
 )
 
@@ -43,7 +45,24 @@ func Path(root string) string {
 	return filepath.Join(dir, "config.yaml")
 }
 
-var EnvName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+var (
+	EnvName      = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+	twelveDigits = regexp.MustCompile(`\d{12,}`)
+)
+
+// ValidateAPIKeyEnv checks whether v is a valid environment variable name for an API key.
+// It rejects names not matching EnvName, matching prose.SecretShape, >64 chars, >=24 chars with no underscore,
+// or containing a run of >= 12 digits.
+func ValidateAPIKeyEnv(v string) error {
+	if !EnvName.MatchString(v) ||
+		prose.SecretShape(v) ||
+		len(v) > 64 ||
+		(len(v) >= 24 && !strings.Contains(v, "_")) ||
+		twelveDigits.MatchString(v) {
+		return errors.New("ai.api_key_env must be the NAME of an environment variable (e.g. ANTHROPIC_API_KEY), not a key")
+	}
+	return nil
+}
 
 // parse flattens indented `key:` sections into dotted keys.
 func parse(s string) map[string]string {
@@ -98,6 +117,9 @@ func apply(c *Config, k, v string) error {
 	case "ai.model":
 		c.AI.Model = v
 	case "ai.api_key_env":
+		if err := ValidateAPIKeyEnv(v); err != nil {
+			return err
+		}
 		c.AI.APIKeyEnv = v
 	case "ai.base_url":
 		c.AI.BaseURL = v
@@ -161,12 +183,10 @@ wiki:
 }
 
 func Save(root string, c Config) error {
-	dir, err := safepath.ScribexDir(root, true)
-	if err != nil {
+	if _, err := safepath.ScribexDir(root, true); err != nil {
 		return err
 	}
-	p := filepath.Join(dir, "config.yaml")
-	return fsx.WriteAtomic(p, []byte(c.YAML()), 0o644)
+	return fsx.WriteFileIn(root, filepath.Join(safepath.DirName, "config.yaml"), []byte(c.YAML()), 0o644)
 }
 
 func Set(root, k, v string) error {
@@ -191,8 +211,8 @@ func (c Config) Validate() (p []string) {
 	if c.AI.Model == "" {
 		p = append(p, "ai.model is empty")
 	}
-	if !EnvName.MatchString(c.AI.APIKeyEnv) {
-		p = append(p, "ai.api_key_env must be an ENV_VAR name, not a key (never paste secrets here)")
+	if err := ValidateAPIKeyEnv(c.AI.APIKeyEnv); err != nil {
+		p = append(p, err.Error())
 	}
 	if c.AI.MaxTokens == 0 || c.AI.MaxCalls == 0 {
 		p = append(p, "ai.max_tokens and ai.max_calls must be > 0")

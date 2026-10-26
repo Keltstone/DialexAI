@@ -15,9 +15,10 @@ import (
 type Lookup func(file, sym string) (sig string, ok bool, err error)
 
 const (
-	CodeAIRejected = "ai-rejected"
-	CodeAIFailed   = "ai-failed"
-	CodeAISkipped  = "ai-skipped"
+	CodeAIRejected   = "ai-rejected"
+	CodeAIFailed     = "ai-failed"
+	CodeAISkipped    = "ai-skipped"
+	CodeWriteRefused = "write-refused"
 )
 
 type Issue struct {
@@ -25,14 +26,28 @@ type Issue struct {
 	Ref   string
 	Msg   string
 	Stale bool   // fixable by sync; false = dead anchor
-	Code  string // ai-rejected | ai-failed | ai-skipped
+	Code  string // ai-rejected | ai-failed | ai-skipped | write-refused
 }
 
 func (i Issue) String() string { return fmt.Sprintf(":%d %s: %s", i.Line, i.Ref, i.Msg) }
 
 func Hash(sig string) string {
 	h := sha256.Sum256([]byte(sig))
-	return hex.EncodeToString(h[:4])
+	return hex.EncodeToString(h[:8])
+}
+
+// SigMatches reports whether stored matches want (16 hex chars).
+// It returns true if stored == want, OR if stored is the legacy 8-char hash
+// (len(stored) == 8 and strings.HasPrefix(want, stored)).
+// Any other length (1–7, 9–15, >16) returns false.
+func SigMatches(stored, want string) bool {
+	if len(stored) == 16 {
+		return stored == want
+	}
+	if len(stored) == 8 {
+		return strings.HasPrefix(want, stored)
+	}
+	return false
 }
 
 // Prose rewrites an anchor's prose for a changed signature. Only called for anchors that were
@@ -43,6 +58,15 @@ const endMark = "<!-- @scribex:end -->"
 
 // Process walks md; returns issues and, when sync is true, the rewritten text.
 func Process(md string, look Lookup, sync bool, proseFn Prose) ([]Issue, string) {
+	eol := "\n"
+	if strings.Count(md, "\r\n")*2 > strings.Count(md, "\n") {
+		eol = "\r\n"
+	}
+	rSuffix := ""
+	if eol == "\r\n" {
+		rSuffix = "\r"
+	}
+
 	in := strings.Split(md, "\n")
 	inFence := InFence(in)
 	var out []string
@@ -52,7 +76,13 @@ func Process(md string, look Lookup, sync bool, proseFn Prose) ([]Issue, string)
 			out = append(out, in[i])
 			continue
 		}
-		m := open.FindStringSubmatch(in[i])
+		lineForMatch := in[i]
+		hasBOM := false
+		if i == 0 && strings.HasPrefix(lineForMatch, "\uFEFF") {
+			hasBOM = true
+			lineForMatch = strings.TrimPrefix(lineForMatch, "\uFEFF")
+		}
+		m := open.FindStringSubmatch(lineForMatch)
 		if m == nil {
 			out = append(out, in[i])
 			continue
@@ -92,7 +122,7 @@ func Process(md string, look Lookup, sync bool, proseFn Prose) ([]Issue, string)
 		}
 		want := Hash(sig)
 		oldSig := m[3]
-		isStale := oldSig != want
+		isStale := !SigMatches(oldSig, want)
 
 		if !sync {
 			if isStale {
@@ -107,10 +137,27 @@ func Process(md string, look Lookup, sync bool, proseFn Prose) ([]Issue, string)
 			continue
 		}
 
+		formatAnchor := func() string {
+			line := fmt.Sprintf("<!-- @scribex:anchor(%s) sig=%s -->", ref, want)
+			if hasBOM {
+				line = "\uFEFF" + line
+			}
+			return line + rSuffix
+		}
+
+		appendSignatureFence := func() {
+			out = append(out, formatAnchor(), "```signature"+rSuffix)
+			sigClean := strings.ReplaceAll(sig, "\r\n", "\n")
+			for _, sl := range strings.Split(sigClean, "\n") {
+				out = append(out, sl+rSuffix)
+			}
+			out = append(out, "```"+rSuffix)
+		}
+
 		// When sync is true:
 		// If not stale: refresh signature fence if present to remain idempotent
 		if !isStale {
-			out = append(out, fmt.Sprintf("<!-- @scribex:anchor(%s) sig=%s -->", ref, want), "```signature", sig, "```")
+			appendSignatureFence()
 			if i+1 < len(in) && strings.TrimSpace(in[i+1]) == "```signature" {
 				i++
 				for i+1 < len(in) && strings.TrimSpace(in[i]) != "```" {
@@ -157,7 +204,7 @@ func Process(md string, look Lookup, sync bool, proseFn Prose) ([]Issue, string)
 					Code:  CodeAISkipped,
 				})
 			}
-			out = append(out, fmt.Sprintf("<!-- @scribex:anchor(%s) sig=%s -->", ref, want), "```signature", sig, "```")
+			appendSignatureFence()
 			if fenceEnd >= 0 {
 				i = fenceEnd
 			}
@@ -227,12 +274,14 @@ func Process(md string, look Lookup, sync bool, proseFn Prose) ([]Issue, string)
 		}
 
 		// SUCCESS: emit new anchor line, new fence, cleaned prose, ai marker
-		out = append(out, fmt.Sprintf("<!-- @scribex:anchor(%s) sig=%s -->", ref, want), "```signature", sig, "```")
+		appendSignatureFence()
 		cleaned := prose.Clean(nw)
 		if cleaned != "" {
-			out = append(out, strings.Split(cleaned, "\n")...)
+			for _, pl := range strings.Split(strings.ReplaceAll(cleaned, "\r\n", "\n"), "\n") {
+				out = append(out, pl+rSuffix)
+			}
 		}
-		out = append(out, fmt.Sprintf("<!-- @scribex:ai sig=%s -->", want))
+		out = append(out, fmt.Sprintf("<!-- @scribex:ai sig=%s -->", want)+rSuffix)
 		i = j - 1
 	}
 	return issues, strings.Join(out, "\n")

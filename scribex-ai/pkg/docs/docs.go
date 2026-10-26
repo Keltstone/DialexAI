@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"scribex/pkg/anchors"
+	"scribex/pkg/fsx"
 	"scribex/pkg/gitx"
 	"scribex/pkg/safepath"
 	"scribex/pkg/symbols"
@@ -31,6 +32,7 @@ type Report struct {
 	Issues  []Issue
 	Unknown []Unknown
 	Skipped []string // symlinks skipped
+	Changed []string // repo-relative, sorted files actually written
 }
 
 // Delta is one public-symbol change between base and the working tree.
@@ -165,11 +167,22 @@ func Check(root string, sync bool, prose anchors.Prose) (Report, error) {
 			if realF != "" && safeP != realF {
 				return r, fmt.Errorf("refusing to write to %s: resolves to %s, expected %s", f, realF, safeP)
 			}
-			if err := os.WriteFile(f, []byte(out), 0o644); err != nil {
-				return r, err
+			if err := fsx.WriteFileIn(root, rel, []byte(out), 0o644); err != nil {
+				r.Issues = append(r.Issues, Issue{
+					File: f,
+					Issue: anchors.Issue{
+						Ref:   rel,
+						Msg:   "write refused: " + err.Error(),
+						Stale: false,
+						Code:  anchors.CodeWriteRefused,
+					},
+				})
+				continue
 			}
+			r.Changed = append(r.Changed, rel)
 		}
 	}
+	sort.Strings(r.Changed)
 	return r, nil
 }
 

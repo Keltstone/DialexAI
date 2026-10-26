@@ -10,6 +10,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"scribex/pkg/fsx"
+	"scribex/pkg/safepath"
 )
 
 type Server struct {
@@ -23,11 +26,24 @@ type File struct {
 	Servers map[string]Server `json:"mcpServers"`
 }
 
-func Path(root string) string { return filepath.Join(root, ".scribex", "mcp.json") }
+func Path(root string) string {
+	dir, err := safepath.ScribexDir(root, false)
+	if err != nil {
+		dir = filepath.Join(root, safepath.DirName)
+	}
+	return filepath.Join(dir, "mcp.json")
+}
 
 func Load(root string) (File, error) {
 	f := File{Servers: map[string]Server{}}
-	b, err := os.ReadFile(Path(root))
+	dir, err := safepath.ScribexDir(root, false)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return f, nil
+		}
+		return f, err
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "mcp.json"))
 	if os.IsNotExist(err) {
 		return f, nil
 	}
@@ -42,10 +58,10 @@ func Load(root string) (File, error) {
 
 func Save(root string, f File) error {
 	b, _ := json.MarshalIndent(f, "", "  ")
-	if err := os.MkdirAll(filepath.Dir(Path(root)), 0o755); err != nil {
+	if _, err := safepath.ScribexDir(root, true); err != nil {
 		return err
 	}
-	return os.WriteFile(Path(root), append(b, '\n'), 0o644)
+	return fsx.WriteFileIn(root, filepath.Join(safepath.DirName, "mcp.json"), append(b, '\n'), 0o644)
 }
 
 // Presets for common documentation systems. Package names are upstream's; verify before relying on them.

@@ -2,12 +2,14 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,6 +24,7 @@ import (
 	"scribex/pkg/docs"
 	"scribex/pkg/fsx"
 	"scribex/pkg/github"
+	"scribex/pkg/gitx"
 	"scribex/pkg/httpx"
 	"scribex/pkg/jira"
 	"scribex/pkg/manifest"
@@ -97,6 +100,19 @@ func main() {
 	case "check":
 		err = check(*root, *base)
 	case "sync":
+		var preDirty map[string]bool
+		if *commit {
+			if _, lookErr := exec.LookPath("git"); lookErr != nil {
+				err = errors.New("git not found")
+				break
+			}
+			var errDirty error
+			preDirty, errDirty = parsePreDirty(*root)
+			if errDirty != nil {
+				err = errDirty
+				break
+			}
+		}
 		var prose anchors.Prose
 		if *ai {
 			if prose, err = proseFn(*root); err != nil {
@@ -104,21 +120,27 @@ func main() {
 			}
 		}
 		var r docs.Report
-		if r, err = docs.Check(*root, true, prose); err == nil {
-			aiFailed := 0
-			for _, i := range r.Issues {
-				fmt.Println(i)
-				if i.Code == anchors.CodeAIRejected || i.Code == anchors.CodeAIFailed {
-					aiFailed++
-				}
+		r, err = docs.Check(*root, true, prose)
+		if err != nil {
+			break
+		}
+		aiFailed := 0
+		for _, i := range r.Issues {
+			fmt.Println(i)
+			if i.Code == anchors.CodeAIRejected || i.Code == anchors.CodeAIFailed {
+				aiFailed++
 			}
-			if aiFailed > 0 {
-				err = fmt.Errorf("%d ai rewrite(s) not applied (anchors left stale)", aiFailed)
-				break
-			}
-			if *commit {
-				err = companion(*root)
-			}
+		}
+		if aiFailed > 0 {
+			err = fmt.Errorf("%d ai rewrite(s) not applied (anchors left stale)", aiFailed)
+			break
+		}
+		if len(r.Issues) > 0 {
+			err = fmt.Errorf("%d anchor issue(s) (see above)", len(r.Issues))
+			break
+		}
+		if *commit {
+			_, err = companion(*root, r.Changed, preDirty)
 		}
 	case "diagram":
 		err = diagramCmd(*root)
@@ -169,7 +191,7 @@ func initCmd(root string) error {
 	if _, err := os.Stat(m); err == nil {
 		return nil
 	}
-	return fsx.WriteAtomic(m, []byte("# Confluence page-to-symbol mappings\nmappings:\n#  - page: \"12345\"\n#    space: ENG\n#    title: Auth API\n#    symbols: [pkg/auth/jwt.go#VerifyToken]\n"), 0o644)
+	return fsx.WriteFileIn(root, filepath.Join(safepath.DirName, "manifest.yaml"), []byte("# Confluence page-to-symbol mappings\nmappings:\n#  - page: \"12345\"\n#    space: ENG\n#    title: Auth API\n#    symbols: [pkg/auth/jwt.go#VerifyToken]\n"), 0o644)
 }
 
 // gate prints the impact-gate verdict; returns false when no public contract changed (0 tokens).
@@ -357,11 +379,11 @@ func confluenceCmd(root string, a []string) error {
 			if err != nil {
 				return err
 			}
-			p, err := pagesPath(root, m.Page)
-			if err != nil {
+			if _, err := pagesPath(root, m.Page); err != nil {
 				return err
 			}
-			if err := fsx.WriteAtomic(p, []byte(body), 0o644); err != nil {
+			relPage := filepath.Join(safepath.DirName, "pages", m.Page+".html")
+			if err := fsx.WriteFileIn(root, relPage, []byte(body), 0o644); err != nil {
 				return err
 			}
 			fmt.Println("pulled", m.Page)
@@ -398,7 +420,7 @@ func confluenceCmd(root string, a []string) error {
 	}
 	if a[0] == "push" {
 		b, _ := json.MarshalIndent(state, "", "  ")
-		return fsx.WriteAtomic(statePath, append(b, '\n'), 0o644)
+		return fsx.WriteFileIn(root, filepath.Join(safepath.DirName, "state.json"), append(b, '\n'), 0o644)
 	}
 	return nil
 }
@@ -486,18 +508,32 @@ func traceCmd(root, base, key string, pr int, out string) error {
 	if dir, err := safepath.ScribexDir(root, false); err == nil {
 		ms, _ = manifest.Load(filepath.Join(dir, "manifest.yaml"))
 	}
-	w := os.Stdout
+	var buf bytes.Buffer
+	var w io.Writer = os.Stdout
 	if out != "" {
-		if w, err = os.Create(out); err != nil {
-			return err
-		}
-		defer w.Close()
+		w = &buf
 	}
 	prs := ""
 	if pr > 0 {
 		prs = fmt.Sprint(pr)
 	}
-	return trace.Write(w, key, prs, ds, docs.Refs(root), ms)
+	if err := trace.Write(w, key, prs, ds, docs.Refs(root), ms); err != nil {
+		return err
+	}
+	if out != "" {
+		if fi, err := os.Lstat(out); err == nil {
+			if fi.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("refusing to write to symlink %s", out)
+			}
+			if fi.IsDir() {
+				return fmt.Errorf("refusing to write to directory %s", out)
+			}
+		}
+		if err := fsx.WriteAtomic(out, buf.Bytes(), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func serve(root, reposF, rbacF, addr string) error {
@@ -513,15 +549,102 @@ func serve(root, reposF, rbacF, addr string) error {
 	return http.ListenAndServe(addr, dashboard.Handler(rs, ps, root))
 }
 
+func parsePreDirty(root string) (map[string]bool, error) {
+	out, err := gitx.Run(root, "status", "--porcelain", "-z", "--untracked-files=no")
+	if err != nil {
+		return nil, err
+	}
+	preDirty := map[string]bool{}
+	parts := bytes.Split(out, []byte{0})
+	for i := 0; i < len(parts); i++ {
+		p := parts[i]
+		if len(p) < 4 {
+			continue
+		}
+		code := string(p[:2])
+		path := string(p[3:])
+		preDirty[path] = true
+		if strings.HasPrefix(code, "R") || strings.HasPrefix(code, "C") {
+			if i+1 < len(parts) && len(parts[i+1]) > 0 {
+				i++
+				preDirty[string(parts[i])] = true
+			}
+		}
+	}
+	return preDirty, nil
+}
+
 // companion commits only .md files touched by sync; no-op when clean.
-func companion(root string) error {
-	if out, _ := exec.Command("git", "-C", root, "status", "--porcelain", "--", "*.md").Output(); len(out) == 0 {
-		return nil
+func companion(root string, changed []string, preDirty map[string]bool) (string, error) {
+	if len(changed) == 0 {
+		fmt.Println("nothing to commit")
+		return "", nil
 	}
-	if err := exec.Command("git", "-C", root, "add", "--", "*.md").Run(); err != nil {
-		return err
+
+	if _, err := exec.LookPath("git"); err != nil {
+		return "", errors.New("git not found")
 	}
-	return exec.Command("git", "-C", root, "commit", "-m", "docs: scribex sync", "--", "*.md").Run()
+
+	if _, err := gitx.Run(root, "symbolic-ref", "-q", "HEAD"); err != nil {
+		return "", errors.New("refusing to commit on detached HEAD")
+	}
+
+	for _, f := range changed {
+		if preDirty[f] {
+			return "", fmt.Errorf("refusing to commit: %s had uncommitted changes before sync", f)
+		}
+	}
+
+	nameEnv := os.Getenv("SCRIBEX_GIT_NAME")
+	emailEnv := os.Getenv("SCRIBEX_GIT_EMAIL")
+
+	var nameCfg, emailCfg string
+	if out, err := gitx.Run(root, "config", "user.name"); err == nil {
+		nameCfg = strings.TrimSpace(string(out))
+	}
+	if out, err := gitx.Run(root, "config", "user.email"); err == nil {
+		emailCfg = strings.TrimSpace(string(out))
+	}
+
+	effectiveName := nameCfg
+	if nameEnv != "" {
+		effectiveName = nameEnv
+	}
+	effectiveEmail := emailCfg
+	if emailEnv != "" {
+		effectiveEmail = emailEnv
+	}
+
+	if effectiveName == "" || effectiveEmail == "" {
+		return "", errors.New("git identity not configured (set user.name/user.email or SCRIBEX_GIT_NAME/SCRIBEX_GIT_EMAIL)")
+	}
+
+	addArgs := append([]string{"--literal-pathspecs", "add", "--"}, changed...)
+	if _, err := gitx.Run(root, addArgs...); err != nil {
+		return "", err
+	}
+
+	commitArgs := []string{}
+	if nameEnv != "" {
+		commitArgs = append(commitArgs, "-c", "user.name="+nameEnv)
+	}
+	if emailEnv != "" {
+		commitArgs = append(commitArgs, "-c", "user.email="+emailEnv)
+	}
+	commitArgs = append(commitArgs, "--literal-pathspecs", "commit", "-m", "docs: scribex sync", "-m", "Scribex-Docs: true", "--only", "--")
+	commitArgs = append(commitArgs, changed...)
+
+	if _, err := gitx.Run(root, commitArgs...); err != nil {
+		return "", err
+	}
+
+	revOut, err := gitx.Run(root, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	sha := strings.TrimSpace(string(revOut))
+	fmt.Println(sha)
+	return sha, nil
 }
 
 func diagramCmd(root string) error {
@@ -533,7 +656,11 @@ func diagramCmd(root string) error {
 	for _, f := range docs.Files(root) {
 		b, _ := os.ReadFile(f)
 		if o, ok := diagram.Replace(string(b), d); ok {
-			if err := os.WriteFile(f, []byte(o), 0o644); err != nil {
+			rel, err := filepath.Rel(root, f)
+			if err != nil {
+				return err
+			}
+			if err := fsx.WriteFileIn(root, rel, []byte(o), 0o644); err != nil {
 				return err
 			}
 			fmt.Println("updated", f)

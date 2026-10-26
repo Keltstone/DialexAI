@@ -18,6 +18,9 @@ type Client struct {
 }
 
 func New(a config.AI) (*Client, error) {
+	if err := config.ValidateAPIKeyEnv(a.APIKeyEnv); err != nil {
+		return nil, err
+	}
 	u := a.BaseURL
 	if u == "" {
 		u = map[string]string{"anthropic": "https://api.anthropic.com", "openai": "https://api.openai.com"}[a.Provider]

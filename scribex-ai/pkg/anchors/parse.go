@@ -121,7 +121,11 @@ func Parse(md string) []Anchor {
 		if inFence[i] {
 			continue
 		}
-		m := open.FindStringSubmatch(l)
+		lineForMatch := l
+		if i == 0 {
+			lineForMatch = strings.TrimPrefix(lineForMatch, "\uFEFF")
+		}
+		m := open.FindStringSubmatch(lineForMatch)
 		if m == nil {
 			continue
 		}

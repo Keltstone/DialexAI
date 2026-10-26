@@ -9,6 +9,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+
+	"scribex/pkg/fsx"
 )
 
 type Page struct {
@@ -35,6 +38,7 @@ func Key(s string) string {
 
 func Load(dir string) (*Wiki, error) {
 	w := &Wiki{Dir: dir, Pages: map[string]*Page{}}
+	count := 0
 	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -42,8 +46,25 @@ func Load(dir string) (*Wiki, error) {
 		if d.IsDir() && strings.HasPrefix(d.Name(), ".") && p != dir {
 			return filepath.SkipDir
 		}
+		fi, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if d.IsDir() || !strings.HasSuffix(p, ".md") {
 			return nil
+		}
+		if fi.Size() > 2<<20 {
+			return fmt.Errorf("wiki page %s exceeds 2 MiB limit (%d bytes)", p, fi.Size())
+		}
+		count++
+		if count > 100000 {
+			return fmt.Errorf("wiki page count exceeds 100,000 limit")
 		}
 		b, err := os.ReadFile(p)
 		if err != nil {
@@ -63,9 +84,13 @@ func Load(dir string) (*Wiki, error) {
 
 func parsePage(rel, src string) *Page {
 	p := &Page{Key: Key(rel), File: filepath.ToSlash(rel), Body: src}
-	if strings.HasPrefix(src, "---\n") {
-		if end := strings.Index(src[4:], "\n---"); end >= 0 {
-			for _, l := range strings.Split(src[4:4+end], "\n") {
+	if strings.HasPrefix(src, "---\n") || strings.HasPrefix(src, "---\r\n") {
+		start := 4
+		if strings.HasPrefix(src, "---\r\n") {
+			start = 5
+		}
+		if end := strings.Index(src[start:], "\n---"); end >= 0 && end <= 64<<10 {
+			for _, l := range strings.Split(src[start:start+end], "\n") {
 				k, v, _ := strings.Cut(l, ":")
 				v = strings.TrimSpace(v)
 				switch strings.TrimSpace(k) {
@@ -186,32 +211,83 @@ func (w *Wiki) Search(q string) (out []string) {
 	return
 }
 
-// New creates dir/<Title>.md with frontmatter; refuses to overwrite.
-func New(dir, title string) (string, error) {
-	path := filepath.Join(dir, strings.ReplaceAll(strings.TrimSpace(title), " ", "-")+".md")
-	if _, err := os.Stat(path); err == nil {
-		return "", fmt.Errorf("%s exists", path)
+// New creates relDir/<Title>.md with frontmatter under root; refuses to overwrite.
+func New(root, relDir, title string) (string, error) {
+	title = strings.TrimSpace(title)
+	runes := []rune(title)
+	if len(runes) < 1 || len(runes) > 120 {
+		return "", fmt.Errorf("title must be 1-120 runes, got %d", len(runes))
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	for _, r := range runes {
+		if unicode.IsControl(r) {
+			return "", fmt.Errorf("title contains control character")
+		}
+	}
+	if strings.ContainsAny(title, "/\\:") {
+		return "", fmt.Errorf("title cannot contain '/', '\\', or ':'")
+	}
+	if strings.Contains(title, "..") {
+		return "", fmt.Errorf("title cannot contain '..'")
+	}
+
+	filename := strings.ReplaceAll(title, " ", "-") + ".md"
+	relPath := filepath.Join(relDir, filename)
+	targetPath := filepath.Join(root, relPath)
+	if _, err := os.Stat(targetPath); err == nil {
+		return "", fmt.Errorf("%s exists", relPath)
+	}
+
+	fmTitle := fmt.Sprintf("%q", title)
+	body := fmt.Sprintf("---\ntitle: %s\ntags: []\n---\n# %s\n\n", fmTitle, title)
+
+	if err := fsx.WriteFileIn(root, relPath, []byte(body), 0o644); err != nil {
 		return "", err
 	}
-	return path, os.WriteFile(path, []byte("---\ntitle: "+title+"\ntags: []\n---\n# "+title+"\n\n"), 0o644)
+	return targetPath, nil
 }
 
 // Render writes a publishable copy into out: wikilinks become relative links, backlinks footers,
 // plus generated Home.md (if absent) and _Sidebar.md. Push out/ to <repo>.wiki.git for GitHub's wiki.
 func (w *Wiki) Render(out, home string) error {
+	cleanOut, err := filepath.Abs(out)
+	if err != nil {
+		return err
+	}
+	cleanSource, err := filepath.Abs(w.Dir)
+	if err != nil {
+		return err
+	}
+
+	// out must not be / or volume root
+	if cleanOut == "/" || cleanOut == `\` || (filepath.VolumeName(cleanOut) != "" && cleanOut == filepath.VolumeName(cleanOut)+string(filepath.Separator)) {
+		return fmt.Errorf("cannot render to root")
+	}
+
+	// out must not be inside wiki source dir
+	relToSource, err := filepath.Rel(cleanSource, cleanOut)
+	if err == nil && !strings.HasPrefix(relToSource, "..") {
+		return fmt.Errorf("out directory %q cannot be inside wiki source dir %q", out, w.Dir)
+	}
+
+	// out must not be the repo root itself
+	if fi, err := os.Stat(filepath.Join(cleanOut, ".git")); err == nil && fi.IsDir() {
+		return fmt.Errorf("cannot render to repository root")
+	}
+	if fi, err := os.Stat(filepath.Join(cleanOut, ".scribex")); err == nil && fi.IsDir() {
+		return fmt.Errorf("cannot render to repository root")
+	}
+
+	if err := os.MkdirAll(cleanOut, 0o755); err != nil {
+		return err
+	}
+
 	bl := w.Backlinks()
 	rel := func(from, to *Page) string {
 		r, _ := filepath.Rel(filepath.Dir(from.File), to.File)
 		return strings.ReplaceAll(filepath.ToSlash(r), " ", "%20")
 	}
 	write := func(file, body string) error {
-		p := filepath.Join(out, file)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(p, []byte(body), 0o644)
+		return fsx.WriteFileIn(cleanOut, file, []byte(body), 0o644)
 	}
 	for _, k := range w.sorted() {
 		p := w.Pages[k]

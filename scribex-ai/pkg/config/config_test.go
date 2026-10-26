@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +72,54 @@ func TestConfigNormalFlow(t *testing.T) {
 	loaded2, _ := Load(root)
 	if loaded2.AI.MaxTokens != 2048 {
 		t.Fatalf("expected 2048, got %d", loaded2.AI.MaxTokens)
+	}
+}
+
+func TestPartH_APIKeyEnvValidation(t *testing.T) {
+	accepted := []string{"ANTHROPIC_API_KEY", "MY_LLM_KEY_2", "OPENAI_API_KEY"}
+	for _, a := range accepted {
+		if err := ValidateAPIKeyEnv(a); err != nil {
+			t.Fatalf("expected %q to be accepted, got err: %v", a, err)
+		}
+	}
+
+	rejected := []string{
+		"AKIA" + strings.Repeat("A", 16),
+		"sk-" + strings.Repeat("a", 30),
+		"ghp_" + strings.Repeat("a", 36),
+		"toolong" + strings.Repeat("A", 60),
+		"TWENTYFOURCHARSNOUNDERSCORE",
+		"KEY_WITH_123456789012_DIGITS",
+		"lower_case_env",
+		"123_STARTS_WITH_NUMBER",
+	}
+	for _, r := range rejected {
+		err := ValidateAPIKeyEnv(r)
+		if err == nil {
+			t.Fatalf("expected %q to be rejected, but got nil", r)
+		}
+		expectedErr := "ai.api_key_env must be the NAME of an environment variable (e.g. ANTHROPIC_API_KEY), not a key"
+		if err.Error() != expectedErr {
+			t.Fatalf("expected exact error %q, got %q", expectedErr, err.Error())
+		}
+		if strings.Contains(err.Error(), r) {
+			t.Fatalf("error must NOT echo the rejected value: %v", err)
+		}
+	}
+
+	root := t.TempDir()
+	c := Default()
+	if err := Save(root, c); err != nil {
+		t.Fatal(err)
+	}
+
+	// config set ai.api_key_env <rejected> fails without writing file
+	badKey := "sk-" + strings.Repeat("a", 30)
+	if err := Set(root, "ai.api_key_env", badKey); err == nil {
+		t.Fatalf("Set should fail for key-shaped value")
+	}
+	reloaded, _ := Load(root)
+	if reloaded.AI.APIKeyEnv == badKey {
+		t.Fatalf("Set should NOT have written file on failure")
 	}
 }

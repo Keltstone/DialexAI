@@ -22,7 +22,7 @@ func wikiCmd(root string, a []string, out string) error {
 		if len(a) < 2 {
 			return fmt.Errorf("wiki new <title>")
 		}
-		p, err := wiki.New(dir, strings.Join(a[1:], " "))
+		p, err := wiki.New(root, c.Wiki.Dir, strings.Join(a[1:], " "))
 		if err == nil {
 			fmt.Println("created", p)
 		}
