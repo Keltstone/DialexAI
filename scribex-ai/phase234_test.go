@@ -41,6 +41,7 @@ func TestJiraAndTrace(t *testing.T) {
 
 func TestGithubUpsertUpdatesInPlace(t *testing.T) {
 	t.Setenv("SCRIBEX_ALLOW_INSECURE_LOCAL", "1")
+	t.Setenv("SCRIBEX_COMMENT_AUTHOR", "bot")
 	var methods []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		methods = append(methods, r.Method)
@@ -48,13 +49,13 @@ func TestGithubUpsertUpdatesInPlace(t *testing.T) {
 			w.WriteHeader(401)
 		}
 		if r.Method == "GET" {
-			json.NewEncoder(w).Encode([]map[string]any{{"id": 7, "body": "<!-- scribex-report -->\nold"}})
+			json.NewEncoder(w).Encode([]map[string]any{{"id": 7, "body": "<!-- scribex-report -->\nold", "user": map[string]any{"login": "bot", "type": "Bot"}}})
 		} else {
 			w.Write([]byte("{}"))
 		}
 	}))
 	defer srv.Close()
-	if err := github.Upsert(srv.URL, "tok", "o/r", 3, "hi"); err != nil {
+	if _, err := github.Upsert(srv.URL, "tok", "o/r", 3, "hi"); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(methods, ",") != "GET,PATCH" {
