@@ -34,7 +34,7 @@ func TestJiraAndTrace(t *testing.T) {
 	ms := manifest.Parse("mappings:\n  - page: \"9\"\n    space: ENG\n    symbols: [a.go#Login, b.go#X]\n")
 	var b strings.Builder
 	trace.Write(&b, "PROJ-1", "5", ds[:1], map[string][]string{"a.go#Login": {"README.md"}}, ms)
-	if !strings.Contains(b.String(), "PROJ-1,5,a.go,Login,changed,README.md,9") {
+	if !strings.Contains(b.String(), "PROJ-1,false,5,a.go,Login,modified,README.md,9") {
 		t.Fatal(b.String())
 	}
 }

@@ -9,13 +9,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"scribex/pkg/anchors"
 	"scribex/pkg/confluence"
@@ -44,7 +45,7 @@ const usage = `usage: scribex <cmd> [flags]
   comment -repo o/r -pr N [-base ref]      (env GITHUB_TOKEN, GITHUB_API_URL)
   confluence push|pull [page]              (env ATLASSIAN_URL, ATLASSIAN_USER, ATLASSIAN_TOKEN)
   jira -base ref [-key K] [-post]          (same env)
-  trace -base ref [-key K] [-pr N] [-out f.csv]
+  trace -base ref [-key K] [-pr N] [-out f.csv] [-verify-jira] [-require-jira] [-allow-no-key]
   serve -repos file -rbac file [-addr :8080]
   sync -ai                                 (LLM prose update for changed signatures; see config)
   config init|show|set <k> <v>|validate|test
@@ -69,6 +70,9 @@ func main() {
 	key := fs.String("key", "", "Jira key (default: from branch name)")
 	post := fs.Bool("post", false, "jira: also comment on the ticket")
 	out := fs.String("out", "", "output file (default stdout)")
+	verifyJira := fs.Bool("verify-jira", false, "trace: reality-check ticket against Jira API")
+	requireJira := fs.Bool("require-jira", false, "trace: fail if Jira credentials or key are missing")
+	allowNoKey := fs.Bool("allow-no-key", false, "trace: allow empty Jira key in trace evidence")
 	addr := fs.String("addr", ":8080", "serve address")
 	repos := fs.String("repos", "", "serve: repos file")
 	rbac := fs.String("rbac", "", "serve: rbac file")
@@ -153,7 +157,7 @@ func main() {
 	case "jira":
 		err = jiraCmd(*root, *base, *key, *post)
 	case "trace":
-		err = traceCmd(*root, *base, *key, *pr, *out)
+		err = traceCmd(*root, *base, *key, *pr, *out, *verifyJira, *requireJira, *allowNoKey)
 	case "serve":
 		err = serve(*root, *repos, *rbac, *addr)
 	case "config":
@@ -486,16 +490,77 @@ func jiraCmd(root, base, key string, post bool) error {
 	return fmt.Errorf("%d mismatch(es)", len(flags))
 }
 
-func traceCmd(root, base, key string, pr int, out string) error {
+func traceCmd(root, base, key string, pr int, out string, verifyJira, requireJira, allowNoKey bool) error {
 	if base == "" {
 		return fmt.Errorf("trace needs -base")
 	}
-	if key != "" && !jira.ValidKey(key) {
-		return fmt.Errorf("invalid Jira key")
+
+	if out != "" {
+		for _, p := range []string{out, out + ".json"} {
+			if fi, err := os.Lstat(p); err == nil {
+				if fi.Mode()&os.ModeSymlink != 0 {
+					return fmt.Errorf("refusing to write to symlink %s", p)
+				}
+				if fi.IsDir() {
+					return fmt.Errorf("refusing to write to directory %s", p)
+				}
+			}
+		}
 	}
+
+	baseSHA, err := gitx.ResolveCommit(root, base)
+	if err != nil {
+		return err
+	}
+	headSHA, err := gitx.ResolveCommit(root, "HEAD")
+	if err != nil {
+		return err
+	}
+
+	headTimeRaw, err := gitx.Run(root, "show", "-s", "--format=%ct", "HEAD")
+	if err != nil {
+		return err
+	}
+	sec, err := strconv.ParseInt(strings.TrimSpace(string(headTimeRaw)), 10, 64)
+	if err != nil {
+		return fmt.Errorf("failed to parse commit timestamp: %w", err)
+	}
+	headCommitTimeUTC := time.Unix(sec, 0).UTC().Format(time.RFC3339)
+
 	if key == "" {
 		key = jira.Key(branch(root))
 	}
+
+	if key == "" {
+		if !allowNoKey {
+			return fmt.Errorf("missing Jira key; pass -key or -allow-no-key")
+		}
+	} else {
+		if !jira.StrictKey(key) {
+			return fmt.Errorf("invalid Jira key format: %q (must match ^[A-Z][A-Z0-9_]{1,10}-[0-9]{1,9}$)", key)
+		}
+	}
+
+	jiraVerified := false
+	if key != "" {
+		u, user, tok, err := atlassian()
+		hasCreds := (err == nil && u != "" && tok != "")
+		if !hasCreds {
+			if requireJira {
+				fmt.Fprintln(os.Stderr, "error: -require-jira specified but Jira credentials not configured")
+				os.Exit(2)
+			}
+			fmt.Fprintln(os.Stderr, "warning: Jira credentials not configured; jira_verified=false")
+		} else {
+			cl := jira.Client{Base: u, User: user, Token: tok}
+			ok, err := cl.Issue(key)
+			if err != nil {
+				return fmt.Errorf("jira verification failed for %s: %w", key, err)
+			}
+			jiraVerified = ok
+		}
+	}
+
 	res, err := docs.Deltas(root, base)
 	if err != nil {
 		return err
@@ -508,31 +573,60 @@ func traceCmd(root, base, key string, pr int, out string) error {
 	if dir, err := safepath.ScribexDir(root, false); err == nil {
 		ms, _ = manifest.Load(filepath.Join(dir, "manifest.yaml"))
 	}
-	var buf bytes.Buffer
-	var w io.Writer = os.Stdout
-	if out != "" {
-		w = &buf
-	}
+
 	prs := ""
 	if pr > 0 {
 		prs = fmt.Sprint(pr)
 	}
-	if err := trace.Write(w, key, prs, ds, docs.Refs(root), ms); err != nil {
+
+	opts := trace.Options{
+		Version:           version,
+		BaseSHA:           baseSHA,
+		HeadSHA:           headSHA,
+		HeadCommitTimeUTC: headCommitTimeUTC,
+		Jira:              key,
+		JiraVerified:      jiraVerified,
+		PR:                prs,
+		Deltas:            ds,
+		Refs:              docs.Refs(root),
+		Mappings:          ms,
+	}
+
+	csvBytes, rows, err := trace.Generate(opts)
+	if err != nil {
 		return err
 	}
-	if out != "" {
-		if fi, err := os.Lstat(out); err == nil {
-			if fi.Mode()&os.ModeSymlink != 0 {
-				return fmt.Errorf("refusing to write to symlink %s", out)
-			}
-			if fi.IsDir() {
-				return fmt.Errorf("refusing to write to directory %s", out)
-			}
-		}
-		if err := fsx.WriteAtomic(out, buf.Bytes(), 0o644); err != nil {
-			return err
-		}
+
+	if out == "" {
+		_, err := os.Stdout.Write(csvBytes)
+		return err
 	}
+
+	h := sha256.Sum256(csvBytes)
+	csvSHA := hex.EncodeToString(h[:])
+
+	meta := trace.Meta{
+		Schema:         "scribex-trace-meta/1",
+		Status:         "complete",
+		Rows:           rows,
+		CSVSHA256:      csvSHA,
+		GeneratedAtUTC: time.Now().UTC().Format(time.RFC3339),
+		ScribexVersion: version,
+		BaseSHA:        baseSHA,
+		HeadSHA:        headSHA,
+		JiraVerified:   jiraVerified,
+		UnknownFiles:   []string{},
+	}
+	metaBytes, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	metaBytes = append(metaBytes, '\n')
+
+	if err := trace.WriteFiles(out, csvBytes, metaBytes); err != nil {
+		return err
+	}
+	fmt.Println(csvSHA)
 	return nil
 }
 
