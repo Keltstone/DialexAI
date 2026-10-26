@@ -14,6 +14,7 @@ import (
 	"scribex/pkg/anchors"
 	"scribex/pkg/fsx"
 	"scribex/pkg/gitx"
+	"scribex/pkg/mdsafe"
 	"scribex/pkg/safepath"
 	"scribex/pkg/symbols"
 )
@@ -447,24 +448,72 @@ func Deltas(root, base string) (DeltaResult, error) {
 	return res, nil
 }
 
-// Markdown renders a PR-comment body.
+// Markdown renders a PR-comment body with length cap and neutralised fields.
 func (r Report) Markdown(extra ...Issue) string {
 	all := append(append([]Issue{}, r.Issues...), extra...)
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].File != all[j].File {
+			return all[i].File < all[j].File
+		}
+		if all[i].Line != all[j].Line {
+			return all[i].Line < all[j].Line
+		}
+		if all[i].Ref != all[j].Ref {
+			return all[i].Ref < all[j].Ref
+		}
+		return all[i].Msg < all[j].Msg
+	})
+
+	unknowns := append([]Unknown{}, r.Unknown...)
+	sort.Slice(unknowns, func(i, j int) bool {
+		if unknowns[i].File != unknowns[j].File {
+			return unknowns[i].File < unknowns[j].File
+		}
+		return unknowns[i].Reason < unknowns[j].Reason
+	})
+
+	var unknownSection string
+	if len(unknowns) > 0 {
+		var ub strings.Builder
+		ub.WriteString("\n\nUnanalysed files:\n")
+		for _, u := range unknowns {
+			ub.WriteString("- " + mdsafe.Code(u.File) + ": " + mdsafe.Text(u.Reason) + "\n")
+		}
+		unknownSection = ub.String()
+	}
+
 	var b strings.Builder
 	if len(all) == 0 {
 		fmt.Fprintf(&b, "Scribex: docs in sync (%d anchors checked).", r.Total)
-	} else {
-		fmt.Fprintf(&b, "Scribex found %d doc issue(s) (%d anchors):\n\n", len(all), r.Total)
-		for _, i := range all {
-			fmt.Fprintf(&b, "- `%s` line %d `%s`: %s\n", i.File, i.Line, i.Ref, i.Msg)
-		}
-		b.WriteString("\nRun `scribex sync` to refresh stale anchors.")
+		b.WriteString(unknownSection)
+		return b.String()
 	}
-	if len(r.Unknown) > 0 {
-		b.WriteString("\n\nUnanalysed files:\n")
-		for _, u := range r.Unknown {
-			fmt.Fprintf(&b, "- `%s`: %s\n", u.File, u.Reason)
+
+	header := fmt.Sprintf("Scribex found %d doc issue(s) (%d anchors):\n\n", len(all), r.Total)
+	b.WriteString(header)
+
+	footer := "\nRun `scribex sync` to refresh stale anchors."
+	const maxBody = 59900 // Headroom for marker "<!-- scribex-report:v1 -->\n"
+
+	shown := 0
+	for i, iss := range all {
+		codeFile := mdsafe.Code(iss.File)
+		codeRef := mdsafe.Code(iss.Ref)
+		textMsg := mdsafe.Text(iss.Msg)
+		line := fmt.Sprintf("- %s line %d %s: %s\n", codeFile, iss.Line, codeRef, textMsg)
+
+		remaining := len(all) - shown
+		cutNotice := fmt.Sprintf("… and %d more issue(s) not shown; run scribex check locally\n", remaining)
+
+		if b.Len()+len(line)+len(cutNotice)+len(footer)+len(unknownSection) > maxBody {
+			b.WriteString(fmt.Sprintf("… and %d more issue(s) not shown; run scribex check locally\n", len(all)-i))
+			break
 		}
+		b.WriteString(line)
+		shown++
 	}
+
+	b.WriteString(footer)
+	b.WriteString(unknownSection)
 	return b.String()
 }

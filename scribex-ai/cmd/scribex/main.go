@@ -41,7 +41,7 @@ var preset, mcpURL, mcpExe, mcpArgs, mcpEnv, mcpHdr *string
 
 const usage = `usage: scribex <cmd> [flags]
   init | check [-base ref] | sync [-commit] | diagram | scavenge
-  comment -repo o/r -pr N [-base ref]      (env GITHUB_TOKEN, GITHUB_API_URL)
+  comment -repo o/r -pr N [-base ref] [-body-file path] [-author LOGIN] (env GITHUB_TOKEN, GITHUB_API_URL)
   confluence push|pull [page]              (env ATLASSIAN_URL, ATLASSIAN_USER, ATLASSIAN_TOKEN)
   jira -base ref [-key K] [-post]          (same env)
   trace -base ref [-key K] [-pr N] [-out f.csv]
@@ -66,6 +66,8 @@ func main() {
 	commit := fs.Bool("commit", false, "sync: companion commit of changed docs")
 	repo := fs.String("repo", os.Getenv("GITHUB_REPOSITORY"), "owner/name")
 	pr := fs.Int("pr", 0, "pull request number")
+	bodyFile := fs.String("body-file", "", "comment: post pre-rendered report file")
+	author := fs.String("author", "", "comment: override comment author login")
 	key := fs.String("key", "", "Jira key (default: from branch name)")
 	post := fs.Bool("post", false, "jira: also comment on the ticket")
 	out := fs.String("out", "", "output file (default stdout)")
@@ -147,7 +149,7 @@ func main() {
 	case "scavenge":
 		err = scavenge(*root)
 	case "comment":
-		err = comment(*root, *base, *repo, *pr)
+		err = comment(*root, *base, *repo, *pr, *bodyFile, *author)
 	case "confluence":
 		err = confluenceCmd(*root, a)
 	case "jira":
@@ -286,40 +288,72 @@ func pagesPath(root, id string) (string, error) {
 	return filepath.Join(pagesDir, id+".html"), nil
 }
 
-func comment(root, base, repo string, pr int) error {
-	if repo != "" && !github.ValidRepo(repo) {
+func comment(root, base, repo string, pr int, bodyFile, author string) error {
+	if repo == "" || !github.ValidRepo(repo) {
 		return fmt.Errorf("invalid -repo: %s", repo)
 	}
-	if pr != 0 && (pr <= 0 || pr > 2147483647) {
+	if pr <= 0 || pr > 2147483647 {
 		return fmt.Errorf("invalid -pr: %d", pr)
 	}
-	tok := os.Getenv("GITHUB_TOKEN")
-	if repo == "" || pr == 0 || tok == "" {
-		return fmt.Errorf("need -repo, -pr and GITHUB_TOKEN")
-	}
-	var unanalysed []docs.Unknown
-	if base != "" { // impact gate: stay silent when nothing public changed
-		res, err := docs.Deltas(root, base)
+
+	var body string
+	if bodyFile != "" {
+		b, err := os.ReadFile(bodyFile)
+		if err != nil {
+			return fmt.Errorf("read -body-file %s: %w", bodyFile, err)
+		}
+		body = string(b)
+	} else {
+		var unanalysed []docs.Unknown
+		if base != "" { // impact gate: stay silent when nothing public changed
+			res, err := docs.Deltas(root, base)
+			if err != nil {
+				return err
+			}
+			for _, u := range res.Unknown {
+				fmt.Printf("impact gate: cannot prove no change in %s: %s\n", u.File, u.Reason)
+			}
+			if len(res.Deltas) == 0 && len(res.Unknown) == 0 {
+				fmt.Println("impact gate: no public contract change; 0 tokens, nothing to do")
+				return nil
+			}
+			if len(res.Deltas) > 0 {
+				fmt.Printf("impact gate: %d contract delta(s)\n", len(res.Deltas))
+			}
+			unanalysed = res.Unknown
+		}
+		r, err := docs.Check(root, false, nil)
 		if err != nil {
 			return err
 		}
-		for _, u := range res.Unknown {
-			fmt.Printf("impact gate: cannot prove no change in %s: %s\n", u.File, u.Reason)
-		}
-		if len(res.Deltas) == 0 && len(res.Unknown) == 0 {
-			fmt.Println("impact gate: no public contract change; 0 tokens, nothing to do")
-			return nil
-		}
-		if len(res.Deltas) > 0 {
-			fmt.Printf("impact gate: %d contract delta(s)\n", len(res.Deltas))
-		}
-		unanalysed = res.Unknown
+		r.Unknown = unanalysed
+		body = r.Markdown()
 	}
-	r, err := docs.Check(root, false, nil)
-	if err != nil {
-		return err
+
+	degradeOnFork := func() error {
+		fmt.Println("scribex: cannot post PR comment (read-only token); report follows")
+		fmt.Println(body)
+		if summaryFile := os.Getenv("GITHUB_STEP_SUMMARY"); summaryFile != "" {
+			if fi, err := os.Lstat(summaryFile); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("refusing to write to symlinked GITHUB_STEP_SUMMARY: %s", summaryFile)
+			}
+			f, err := os.OpenFile(summaryFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+			if err != nil {
+				return fmt.Errorf("open GITHUB_STEP_SUMMARY: %w", err)
+			}
+			defer f.Close()
+			if _, err := f.WriteString(body + "\n"); err != nil {
+				return fmt.Errorf("write GITHUB_STEP_SUMMARY: %w", err)
+			}
+		}
+		return nil
 	}
-	r.Unknown = unanalysed
+
+	tok := os.Getenv("GITHUB_TOKEN")
+	if tok == "" {
+		return degradeOnFork()
+	}
+
 	api := os.Getenv("GITHUB_API_URL")
 	if api == "" {
 		api = "https://api.github.com"
@@ -328,7 +362,23 @@ func comment(root, base, repo string, pr int) error {
 	if err != nil {
 		return err
 	}
-	return github.Upsert(cleanAPI, tok, repo, pr, r.Markdown())
+
+	var opts []github.Option
+	if author != "" {
+		opts = append(opts, github.WithAuthor(author))
+	}
+
+	res, err := github.Upsert(cleanAPI, tok, repo, pr, body, opts...)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "Resource not accessible") && (strings.Contains(errStr, "403") || strings.Contains(errStr, "404")) {
+			return degradeOnFork()
+		}
+		return err
+	}
+
+	fmt.Printf("scribex comment: %s (id %d)\n", res.Action, res.ID)
+	return nil
 }
 
 func atlassian() (url, user, tok string, err error) {
