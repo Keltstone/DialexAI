@@ -3,8 +3,10 @@ package prose
 
 import (
 	"encoding/json"
+	"net/url"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -22,11 +24,16 @@ func (v *Violation) Error() string {
 }
 
 var (
-	reHTMLTag  = regexp.MustCompile(`(?i)<\s*/?\s*(script|iframe|object|embed|style|link|meta|form|input|button|img|svg|math|base|frame|frameset|applet|video|audio|source|template)\b`)
+	reHTMLTag  = regexp.MustCompile(`(?i)<(?:/[a-z\s]*|[a-z])`)
 	reHTMLAttr = regexp.MustCompile(`(?i)\bon[a-z]{3,}\s*=`)
+	reEntity   = regexp.MustCompile(`&#|&[A-Za-z][A-Za-z0-9]{1,31};`)
 	reScheme   = regexp.MustCompile(`(?i)(javascript|vbscript|data)\s*:`)
-	reURL      = regexp.MustCompile(`https?://[^\s)>\]]+`)
+	reURL      = regexp.MustCompile(`(?i)https?://[^\s)>\]]+`)
+	reLinkDest = regexp.MustCompile(`\]\(\s*(?:<([^>]+)>|([^\s\)]+))`)
+	reRefDef   = regexp.MustCompile(`(?m)^\s*\[[^\]]+\]:\s*(?:<([^>]+)>|([^\s]+))`)
+	reAutolink = regexp.MustCompile(`<([^\s>]+)>`)
 	reMention  = regexp.MustCompile(`@[A-Za-z0-9_-]{2,}`)
+	reEmail    = regexp.MustCompile(`\S+@\S+\.\S+`)
 
 	secretShapeRegexes = []*regexp.Regexp{
 		regexp.MustCompile(`sk-[A-Za-z0-9_-]{16,}`),
@@ -44,7 +51,9 @@ var (
 )
 
 func normalize(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
+	for strings.Contains(s, "\r\n") {
+		s = strings.ReplaceAll(s, "\r\n", "\n")
+	}
 	return strings.ReplaceAll(s, "\r", "\n")
 }
 
@@ -76,6 +85,27 @@ func StripAIMark(s string) string {
 	return strings.Join(kept, "\n")
 }
 
+func canonicalURL(raw string) string {
+	raw = strings.TrimRight(raw, ".,;:!?)")
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host) + parsed.RequestURI()
+}
+
+func hasRawHTMLTag(s string) bool {
+	matches := reHTMLTag.FindAllStringIndex(s, -1)
+	for _, idx := range matches {
+		sub := s[idx[0]:]
+		if strings.HasPrefix(strings.ToLower(sub), "<http://") || strings.HasPrefix(strings.ToLower(sub), "<https://") {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // Validate checks that new prose is safe plain markdown.
 // Rules are checked in order; the first violation wins.
 func Validate(old, new string, secrets ...string) error {
@@ -95,6 +125,13 @@ func Validate(old, new string, secrets ...string) error {
 	newNorm := normalize(new)
 	oldNorm := normalize(old)
 
+	// Rule 1b: invisible (Unicode category Cf or non-standard Zs)
+	for _, r := range newNorm {
+		if unicode.Is(unicode.Cf, r) || (unicode.Is(unicode.Zs, r) && r != ' ' && r != 0x00A0) {
+			return &Violation{Rule: "invisible", Detail: "invisible or format character"}
+		}
+	}
+
 	// Rule 2: empty
 	if strings.TrimSpace(newNorm) == "" {
 		return &Violation{Rule: "empty", Detail: "empty or whitespace-only"}
@@ -112,8 +149,11 @@ func Validate(old, new string, secrets ...string) error {
 		return &Violation{Rule: "too-long", Detail: "collapsed reply"}
 	}
 
-	// Rule 4: marker (@scribex, case-insensitive)
-	if strings.Contains(strings.ToLower(newNorm), "@scribex") {
+	// Rule 4: marker (@scribex, case-insensitive; also fullwidth ＠ and ﹫)
+	lowerMarker := strings.ToLower(newNorm)
+	lowerMarker = strings.ReplaceAll(lowerMarker, "＠", "@")
+	lowerMarker = strings.ReplaceAll(lowerMarker, "﹫", "@")
+	if strings.Contains(lowerMarker, "@scribex") {
 		return &Violation{Rule: "marker", Detail: "contains @scribex"}
 	}
 
@@ -136,8 +176,13 @@ func Validate(old, new string, secrets ...string) error {
 	}
 
 	// Rule 8: html
-	if reHTMLTag.MatchString(newNorm) || reHTMLAttr.MatchString(newNorm) {
+	if hasRawHTMLTag(newNorm) || reHTMLAttr.MatchString(newNorm) {
 		return &Violation{Rule: "html", Detail: "prohibited HTML tag or event handler"}
+	}
+
+	// Rule 8b: entity
+	if reEntity.MatchString(newNorm) {
+		return &Violation{Rule: "entity", Detail: "HTML entity"}
 	}
 
 	// Rule 9: scheme
@@ -176,16 +221,79 @@ func Validate(old, new string, secrets ...string) error {
 	}
 
 	// Rule 13: url
+	var oldCanonicalURLs []string
+	for _, u := range reURL.FindAllString(oldNorm, -1) {
+		oldCanonicalURLs = append(oldCanonicalURLs, canonicalURL(u))
+	}
 	for _, u := range reURL.FindAllString(newNorm, -1) {
-		if !strings.Contains(oldNorm, u) {
+		cNew := canonicalURL(u)
+		found := false
+		for _, cOld := range oldCanonicalURLs {
+			if cNew == cOld {
+				found = true
+				break
+			}
+		}
+		if !found {
 			return &Violation{Rule: "url", Detail: "new URL not present in existing prose"}
 		}
+	}
+
+	// Rule 13b: link
+	var linkDests []string
+	for _, match := range reLinkDest.FindAllStringSubmatch(newNorm, -1) {
+		dest := match[1]
+		if dest == "" {
+			dest = match[2]
+		}
+		linkDests = append(linkDests, strings.TrimSpace(dest))
+	}
+	for _, match := range reRefDef.FindAllStringSubmatch(newNorm, -1) {
+		dest := match[1]
+		if dest == "" {
+			dest = match[2]
+		}
+		linkDests = append(linkDests, strings.TrimSpace(dest))
+	}
+	for _, match := range reAutolink.FindAllStringSubmatch(newNorm, -1) {
+		dest := strings.TrimSpace(match[1])
+		linkDests = append(linkDests, dest)
+	}
+
+	for _, dest := range linkDests {
+		if dest == "" {
+			continue
+		}
+		if strings.HasPrefix(dest, "#") && len(dest) > 1 {
+			continue
+		}
+		if strings.Contains(oldNorm, dest) {
+			continue
+		}
+		cDest := canonicalURL(dest)
+		found := false
+		for _, cOld := range oldCanonicalURLs {
+			if cDest == cOld {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		return &Violation{Rule: "link", Detail: "prohibited or new link destination: " + dest}
 	}
 
 	// Rule 14: mention
 	for _, m := range reMention.FindAllString(newNorm, -1) {
 		if !strings.Contains(oldNorm, m) {
 			return &Violation{Rule: "mention", Detail: "new @mention not present in existing prose"}
+		}
+	}
+	for _, e := range reEmail.FindAllString(newNorm, -1) {
+		e = strings.TrimRight(e, ".,;:!?)")
+		if !strings.Contains(oldNorm, e) {
+			return &Violation{Rule: "mention", Detail: "new email address not present in existing prose"}
 		}
 	}
 
