@@ -4,15 +4,48 @@ inputs:
   base:
     description: Git ref to diff against
     default: origin/main
+  github-token:
+    description: GitHub token for PR comment
+    default: ''
+  comment:
+    description: Post PR comment if token provided
+    default: 'true'
 runs:
   using: composite
   steps:
-    - uses: actions/setup-go@v5
-      with: { go-version: stable }
+    - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+      with:
+        go-version: '1.27.0'
     - shell: bash
+      env:
+        GOTOOLCHAIN: local
+        CGO_ENABLED: '0'
+        GOFLAGS: -mod=readonly
+        BASE: ${{ inputs.base }}
       run: |
-        go install scribex/cmd/scribex@latest 2>/dev/null || (cd "${{ github.action_path }}/.." && go build -o "$RUNNER_TEMP/scribex" ./cmd/scribex && echo "$RUNNER_TEMP" >> "$GITHUB_PATH")
-        scribex check -base "${{ inputs.base }}"
-    - if: github.event_name == 'pull_request' && env.GITHUB_TOKEN != ''
+        set -euo pipefail
+        if [[ ! "$BASE" =~ ^[A-Za-z0-9._/@~^-]{1,200}$ ]] || [[ "$BASE" =~ ^- ]]; then
+          echo "scribex: invalid base ref $BASE" >&2
+          exit 2
+        fi
+        (
+          cd "${{ github.action_path }}/.."
+          mkdir -p "$RUNNER_TEMP/scribex-bin"
+          go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${VERSION:-1.0.0}" -o "$RUNNER_TEMP/scribex-bin/scribex" ./cmd/scribex
+        )
+        echo "$RUNNER_TEMP/scribex-bin" >> "$GITHUB_PATH"
+        sha256sum "$RUNNER_TEMP/scribex-bin/scribex"
+        scribex check -base "$BASE"
+    - if: github.event_name == 'pull_request' && inputs.comment == 'true' && inputs.github-token != ''
       shell: bash
-      run: scribex comment -repo "$GITHUB_REPOSITORY" -pr "${{ github.event.number }}" -base "${{ inputs.base }}"
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        BASE: ${{ inputs.base }}
+        PR_NUMBER: ${{ github.event.number }}
+      run: |
+        set -euo pipefail
+        if [[ ! "$BASE" =~ ^[A-Za-z0-9._/@~^-]{1,200}$ ]] || [[ "$BASE" =~ ^- ]]; then
+          echo "scribex: invalid base ref $BASE" >&2
+          exit 2
+        fi
+        scribex comment -repo "$GITHUB_REPOSITORY" -pr "$PR_NUMBER" -base "$BASE"

@@ -40,8 +40,8 @@ var force *bool
 var preset, mcpURL, mcpExe, mcpArgs, mcpEnv, mcpHdr *string
 
 const usage = `usage: scribex <cmd> [flags]
-  init | check [-base ref] | sync [-commit] | diagram | scavenge
-  comment -repo o/r -pr N [-base ref]      (env GITHUB_TOKEN, GITHUB_API_URL)
+  init | check [-base ref] [-report f.md] | sync [-commit] | diagram | scavenge
+  comment -repo o/r -pr N [-base ref] [-body-file f.md] (env GITHUB_TOKEN, GITHUB_API_URL)
   confluence push|pull [page]              (env ATLASSIAN_URL, ATLASSIAN_USER, ATLASSIAN_TOKEN)
   jira -base ref [-key K] [-post]          (same env)
   trace -base ref [-key K] [-pr N] [-out f.csv]
@@ -63,6 +63,8 @@ func main() {
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 	root := fs.String("C", ".", "repo root")
 	base := fs.String("base", "", "git ref to diff against")
+	report := fs.String("report", "", "check: write markdown report to file")
+	bodyFile := fs.String("body-file", "", "comment: post markdown from file")
 	commit := fs.Bool("commit", false, "sync: companion commit of changed docs")
 	repo := fs.String("repo", os.Getenv("GITHUB_REPOSITORY"), "owner/name")
 	pr := fs.Int("pr", 0, "pull request number")
@@ -98,7 +100,7 @@ func main() {
 	case "init":
 		err = initCmd(*root)
 	case "check":
-		err = check(*root, *base)
+		err = check(*root, *base, *report)
 	case "sync":
 		var preDirty map[string]bool
 		if *commit {
@@ -147,7 +149,7 @@ func main() {
 	case "scavenge":
 		err = scavenge(*root)
 	case "comment":
-		err = comment(*root, *base, *repo, *pr)
+		err = comment(*root, *base, *repo, *pr, *bodyFile)
 	case "confluence":
 		err = confluenceCmd(*root, a)
 	case "jira":
@@ -213,13 +215,20 @@ func gate(root, base string) (bool, error) {
 	return true, nil
 }
 
-func check(root, base string) error {
+func check(root, base, report string) error {
 	if base != "" {
 		if run, err := gate(root, base); err != nil || !run {
+			if !run && report != "" {
+				r, _ := docs.Check(root, false, nil)
+				_ = os.WriteFile(report, []byte(r.Markdown()), 0o644)
+			}
 			return err
 		}
 	}
 	r, err := docs.Check(root, false, nil)
+	if report != "" {
+		_ = os.WriteFile(report, []byte(r.Markdown()), 0o644)
+	}
 	for _, s := range r.Skipped {
 		fmt.Fprintf(os.Stderr, "skipped symlink: %s\n", s)
 	}
@@ -286,7 +295,7 @@ func pagesPath(root, id string) (string, error) {
 	return filepath.Join(pagesDir, id+".html"), nil
 }
 
-func comment(root, base, repo string, pr int) error {
+func comment(root, base, repo string, pr int, bodyFile string) error {
 	if repo != "" && !github.ValidRepo(repo) {
 		return fmt.Errorf("invalid -repo: %s", repo)
 	}
@@ -297,29 +306,39 @@ func comment(root, base, repo string, pr int) error {
 	if repo == "" || pr == 0 || tok == "" {
 		return fmt.Errorf("need -repo, -pr and GITHUB_TOKEN")
 	}
-	var unanalysed []docs.Unknown
-	if base != "" { // impact gate: stay silent when nothing public changed
-		res, err := docs.Deltas(root, base)
+	var body string
+	if bodyFile != "" {
+		b, err := os.ReadFile(bodyFile)
+		if err != nil {
+			return fmt.Errorf("read body file: %w", err)
+		}
+		body = string(b)
+	} else {
+		var unanalysed []docs.Unknown
+		if base != "" { // impact gate: stay silent when nothing public changed
+			res, err := docs.Deltas(root, base)
+			if err != nil {
+				return err
+			}
+			for _, u := range res.Unknown {
+				fmt.Printf("impact gate: cannot prove no change in %s: %s\n", u.File, u.Reason)
+			}
+			if len(res.Deltas) == 0 && len(res.Unknown) == 0 {
+				fmt.Println("impact gate: no public contract change; 0 tokens, nothing to do")
+				return nil
+			}
+			if len(res.Deltas) > 0 {
+				fmt.Printf("impact gate: %d contract delta(s)\n", len(res.Deltas))
+			}
+			unanalysed = res.Unknown
+		}
+		r, err := docs.Check(root, false, nil)
 		if err != nil {
 			return err
 		}
-		for _, u := range res.Unknown {
-			fmt.Printf("impact gate: cannot prove no change in %s: %s\n", u.File, u.Reason)
-		}
-		if len(res.Deltas) == 0 && len(res.Unknown) == 0 {
-			fmt.Println("impact gate: no public contract change; 0 tokens, nothing to do")
-			return nil
-		}
-		if len(res.Deltas) > 0 {
-			fmt.Printf("impact gate: %d contract delta(s)\n", len(res.Deltas))
-		}
-		unanalysed = res.Unknown
+		r.Unknown = unanalysed
+		body = r.Markdown()
 	}
-	r, err := docs.Check(root, false, nil)
-	if err != nil {
-		return err
-	}
-	r.Unknown = unanalysed
 	api := os.Getenv("GITHUB_API_URL")
 	if api == "" {
 		api = "https://api.github.com"
@@ -328,7 +347,7 @@ func comment(root, base, repo string, pr int) error {
 	if err != nil {
 		return err
 	}
-	return github.Upsert(cleanAPI, tok, repo, pr, r.Markdown())
+	return github.Upsert(cleanAPI, tok, repo, pr, body)
 }
 
 func atlassian() (url, user, tok string, err error) {

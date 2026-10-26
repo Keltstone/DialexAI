@@ -9,10 +9,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // AIHosts returns the set of AI endpoint hosts the OPERATOR (not the repo) trusts, for the given provider.
@@ -87,12 +85,8 @@ func AIHosts(provider string, env func(string) string, home string) ([]string, e
 			if fi.Mode().Perm()&0o022 != 0 {
 				return nil, fmt.Errorf("trust file %s is group or world writable (mode %04o)", trustPath, fi.Mode().Perm())
 			}
-			if runtime.GOOS != "windows" {
-				if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
-					if stat.Uid != uint32(os.Getuid()) {
-						return nil, fmt.Errorf("trust file %s is not owned by current user (uid %d != %d)", trustPath, stat.Uid, os.Getuid())
-					}
-				}
+			if err := checkOwner(fi, trustPath); err != nil {
+				return nil, err
 			}
 
 			f, err := os.Open(trustPath)
