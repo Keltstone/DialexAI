@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"scribex/pkg/anchors"
+	"scribex/pkg/ci"
 	"scribex/pkg/config"
 	"scribex/pkg/llm"
 	"scribex/pkg/prose"
@@ -98,6 +99,10 @@ func secretsCmd(root string, a []string) error {
 // proseFn builds the LLM rewriter for `sync -ai`. Context is the new signature plus the old prose
 // (an AST skeleton, not function bodies); calls are capped by ai.max_calls.
 func proseFn(root string) (anchors.Prose, error) {
+	if isPR, which := ci.IsPullRequestEvent(os.Getenv); isPR {
+		return nil, fmt.Errorf("sync -ai refuses to run on pull-request events (%s); run it on the default branch after merge", which)
+	}
+
 	c, err := config.Load(root)
 	if err != nil {
 		return nil, err

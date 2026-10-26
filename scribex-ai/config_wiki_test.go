@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,6 +77,9 @@ func TestLLMAnthropicShape(t *testing.T) {
 	}))
 	defer srv.Close()
 	os.Setenv("TEST_LLM_KEY", "k")
+	t.Setenv("SCRIBEX_ALLOW_INSECURE_LOCAL", "1")
+	u, _ := url.Parse(srv.URL)
+	t.Setenv("SCRIBEX_AI_ALLOWED_HOSTS", u.Host)
 	c, err := llm.New(config.AI{Provider: "anthropic", Model: "m", APIKeyEnv: "TEST_LLM_KEY", BaseURL: srv.URL, MaxTokens: 5})
 	if err != nil {
 		t.Fatal(err)

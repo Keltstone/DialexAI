@@ -40,6 +40,7 @@ func TestJiraAndTrace(t *testing.T) {
 }
 
 func TestGithubUpsertUpdatesInPlace(t *testing.T) {
+	t.Setenv("SCRIBEX_ALLOW_INSECURE_LOCAL", "1")
 	var methods []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		methods = append(methods, r.Method)
@@ -62,6 +63,7 @@ func TestGithubUpsertUpdatesInPlace(t *testing.T) {
 }
 
 func TestConfluenceDraft(t *testing.T) {
+	t.Setenv("SCRIBEX_ALLOW_INSECURE_LOCAL", "1")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var in map[string]any
 		json.NewDecoder(r.Body).Decode(&in)

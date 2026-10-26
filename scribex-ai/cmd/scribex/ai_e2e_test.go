@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -113,6 +114,10 @@ func setupConfig(t *testing.T, repoDir, stubURL string, maxCalls int) {
 	if maxCalls <= 0 {
 		maxCalls = 10
 	}
+	u, _ := url.Parse(stubURL)
+	if u != nil && u.Host != "" {
+		t.Setenv("SCRIBEX_AI_ALLOWED_HOSTS", u.Host)
+	}
 	cfg := fmt.Sprintf(`ai:
   provider: anthropic
   model: claude-3-5-sonnet
@@ -146,7 +151,11 @@ func TestAIE2E(t *testing.T) {
 	runCLI := func(repoDir string, args ...string) (string, error) {
 		fullArgs := append(args, "-C", repoDir)
 		cmd := exec.Command(binPath, fullArgs...)
-		cmd.Env = testEnv
+		env := append([]string{}, testEnv...)
+		if allowed := os.Getenv("SCRIBEX_AI_ALLOWED_HOSTS"); allowed != "" {
+			env = append(env, "SCRIBEX_AI_ALLOWED_HOSTS="+allowed)
+		}
+		cmd.Env = env
 		var out bytes.Buffer
 		cmd.Stdout = &out
 		cmd.Stderr = &out

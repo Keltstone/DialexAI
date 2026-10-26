@@ -4,27 +4,61 @@ package llm
 import (
 	"fmt"
 	"os"
-	"strings"
+	"time"
 
 	"scribex/pkg/config"
 	"scribex/pkg/httpx"
+	"scribex/pkg/trust"
 )
 
 type Client struct {
 	Provider, Model, Key, BaseURL string
 	MaxTokens                     int
+	http                          *httpx.Client
 }
 
 func New(a config.AI) (*Client, error) {
-	key := os.Getenv(a.APIKeyEnv)
-	if key == "" {
-		return nil, fmt.Errorf("env var %s is empty (scribex secrets set %s)", a.APIKeyEnv, a.APIKeyEnv)
-	}
 	u := a.BaseURL
 	if u == "" {
 		u = map[string]string{"anthropic": "https://api.anthropic.com", "openai": "https://api.openai.com"}[a.Provider]
 	}
-	return &Client{a.Provider, a.Model, key, strings.TrimRight(u, "/"), a.MaxTokens}, nil
+
+	home, _ := os.UserHomeDir()
+	hosts, err := trust.AIHosts(a.Provider, os.Getenv, home)
+	if err != nil {
+		return nil, fmt.Errorf("ai endpoint trust: %w", err)
+	}
+
+	insecureLocal := os.Getenv("SCRIBEX_ALLOW_INSECURE_LOCAL") == "1"
+	cleanURL, err := trust.CheckAIEndpoint(a.Provider, u, hosts, insecureLocal)
+	if err != nil {
+		return nil, err
+	}
+
+	// Key is read only after endpoint validation passes (fail-closed)
+	key := os.Getenv(a.APIKeyEnv)
+	if key == "" {
+		return nil, fmt.Errorf("env var %s is empty (scribex secrets set %s)", a.APIKeyEnv, a.APIKeyEnv)
+	}
+
+	pol := httpx.Policy{
+		Secrets:       []string{key},
+		Timeout:       90 * time.Second,
+		MaxBody:       2 << 20, // 2 MiB
+		MaxAttempts:   3,
+		RetryPOST:     true,
+		AllowHTTP:     insecureLocal,
+		AllowLoopback: insecureLocal,
+	}
+
+	return &Client{
+		Provider:  a.Provider,
+		Model:     a.Model,
+		Key:       key,
+		BaseURL:   cleanURL,
+		MaxTokens: a.MaxTokens,
+		http:      httpx.New(pol),
+	}, nil
 }
 
 // Complete sends a system+user prompt. The system prompt is marked cacheable (Anthropic prompt caching).
@@ -38,7 +72,7 @@ func (c *Client) Complete(system, user string) (string, error) {
 				} `json:"message"`
 			} `json:"choices"`
 		}
-		err := httpx.Do("POST", c.BaseURL+"/v1/chat/completions", map[string]string{"Authorization": "Bearer " + c.Key}, map[string]any{
+		err := c.http.Do("POST", c.BaseURL+"/v1/chat/completions", map[string]string{"Authorization": "Bearer " + c.Key}, map[string]any{
 			"model": c.Model, "max_tokens": c.MaxTokens,
 			"messages": []map[string]string{{"role": "system", "content": system}, {"role": "user", "content": user}},
 		}, &out)
@@ -67,7 +101,7 @@ func (c *Client) Complete(system, user string) (string, error) {
 			Text string `json:"text"`
 		} `json:"content"`
 	}
-	err := httpx.Do("POST", c.BaseURL+"/v1/messages", map[string]string{"x-api-key": c.Key, "anthropic-version": "2023-06-01"}, map[string]any{
+	err := c.http.Do("POST", c.BaseURL+"/v1/messages", map[string]string{"x-api-key": c.Key, "anthropic-version": "2023-06-01"}, map[string]any{
 		"model": c.Model, "max_tokens": c.MaxTokens,
 		"system":   []map[string]any{{"type": "text", "text": system, "cache_control": map[string]string{"type": "ephemeral"}}},
 		"messages": []map[string]string{{"role": "user", "content": user}},

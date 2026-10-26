@@ -19,6 +19,7 @@ import (
 	"scribex/pkg/diagram"
 	"scribex/pkg/docs"
 	"scribex/pkg/github"
+	"scribex/pkg/httpx"
 	"scribex/pkg/jira"
 	"scribex/pkg/manifest"
 	"scribex/pkg/mcp"
@@ -47,6 +48,7 @@ const usage = `usage: scribex <cmd> [flags]
   hash-token <token> | version`
 
 func main() {
+	httpx.Version = version
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)

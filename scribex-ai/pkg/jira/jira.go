@@ -12,6 +12,14 @@ import (
 
 type Client struct{ Base, User, Token string }
 
+func (c Client) client() *httpx.Client {
+	p := httpx.Default()
+	if c.Token != "" {
+		p.Secrets = []string{c.Token}
+	}
+	return httpx.New(p)
+}
+
 func (c Client) hdr() map[string]string {
 	return map[string]string{"Authorization": httpx.Basic(c.User, c.Token)}
 }
@@ -26,12 +34,12 @@ func (c Client) Text(key string) (string, error) {
 	var out struct {
 		Fields struct{ Summary, Description string } `json:"fields"`
 	}
-	err := httpx.Do("GET", fmt.Sprintf("%s/rest/api/2/issue/%s?fields=summary,description", strings.TrimRight(c.Base, "/"), key), c.hdr(), nil, &out)
+	err := c.client().Do("GET", fmt.Sprintf("%s/rest/api/2/issue/%s?fields=summary,description", strings.TrimRight(c.Base, "/"), key), c.hdr(), nil, &out)
 	return out.Fields.Summary + "\n" + out.Fields.Description, err
 }
 
 func (c Client) Comment(key, body string) error {
-	return httpx.Do("POST", fmt.Sprintf("%s/rest/api/2/issue/%s/comment", strings.TrimRight(c.Base, "/"), key), c.hdr(), map[string]string{"body": body}, nil)
+	return c.client().Do("POST", fmt.Sprintf("%s/rest/api/2/issue/%s/comment", strings.TrimRight(c.Base, "/"), key), c.hdr(), map[string]string{"body": body}, nil)
 }
 
 // Check flags contract changes the ticket never mentions.

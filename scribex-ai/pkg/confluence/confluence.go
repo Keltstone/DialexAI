@@ -12,6 +12,14 @@ import (
 
 type Client struct{ Base, User, Token string }
 
+func (c Client) client() *httpx.Client {
+	p := httpx.Default()
+	if c.Token != "" {
+		p.Secrets = []string{c.Token}
+	}
+	return httpx.New(p)
+}
+
 func (c Client) hdr() map[string]string {
 	return map[string]string{"Authorization": httpx.Basic(c.User, c.Token)}
 }
@@ -24,7 +32,7 @@ func (c Client) CreateDraft(space, title, storage string) (string, error) {
 		"body":  map[string]any{"storage": map[string]string{"value": storage, "representation": "storage"}},
 	}
 	var out struct{ ID string }
-	err := httpx.Do("POST", strings.TrimRight(c.Base, "/")+"/wiki/rest/api/content", c.hdr(), in, &out)
+	err := c.client().Do("POST", strings.TrimRight(c.Base, "/")+"/wiki/rest/api/content", c.hdr(), in, &out)
 	return out.ID, err
 }
 
@@ -35,7 +43,7 @@ func (c Client) Pull(id string) (string, error) {
 			Storage struct{ Value string } `json:"storage"`
 		} `json:"body"`
 	}
-	err := httpx.Do("GET", fmt.Sprintf("%s/wiki/rest/api/content/%s?expand=body.storage", strings.TrimRight(c.Base, "/"), id), c.hdr(), nil, &out)
+	err := c.client().Do("GET", fmt.Sprintf("%s/wiki/rest/api/content/%s?expand=body.storage", strings.TrimRight(c.Base, "/"), id), c.hdr(), nil, &out)
 	return out.Body.Storage.Value, err
 }
 

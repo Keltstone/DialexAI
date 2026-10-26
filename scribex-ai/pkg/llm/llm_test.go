@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -167,6 +168,10 @@ func TestLLMResponseHandling(t *testing.T) {
 				json.NewEncoder(w).Encode(tt.response)
 			}))
 			defer srv.Close()
+
+			os.Setenv("SCRIBEX_ALLOW_INSECURE_LOCAL", "1")
+			u, _ := url.Parse(srv.URL)
+			os.Setenv("SCRIBEX_AI_ALLOWED_HOSTS", u.Host)
 
 			cl, err := New(config.AI{
 				Provider:  tt.provider,
