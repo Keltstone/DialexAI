@@ -45,6 +45,35 @@ func TestValidateRules(t *testing.T) {
 			wantErr: false,
 		},
 
+		// 1b. invisible
+		{
+			name:     "invisible_bidi_override",
+			old:      oldDefault,
+			new:      "Returns the max. \u202Eevil\u202C text.",
+			wantRule: "invisible",
+			wantErr:  true,
+		},
+		{
+			name:     "invisible_bidi_isolate",
+			old:      oldDefault,
+			new:      "Returns the max. \u2066hidden\u2069 text.",
+			wantRule: "invisible",
+			wantErr:  true,
+		},
+		{
+			name:     "invisible_zero_width",
+			old:      oldDefault,
+			new:      "Returns the max.\u200B\u200B ignore",
+			wantRule: "invisible",
+			wantErr:  true,
+		},
+		{
+			name:    "invisible_space_and_nbsp_ok",
+			old:     oldDefault,
+			new:     "Standard space and non-breaking \u00A0 space are valid.",
+			wantErr: false,
+		},
+
 		// 2. empty
 		{
 			name:     "empty_string",
@@ -101,6 +130,20 @@ func TestValidateRules(t *testing.T) {
 			name:     "marker_scribex_mixed_case",
 			old:      oldDefault,
 			new:      "Some text containing @ScriBex:end reference",
+			wantRule: "marker",
+			wantErr:  true,
+		},
+		{
+			name:     "marker_fullwidth_at",
+			old:      oldDefault,
+			new:      "Some text containing ＠scribex:end reference",
+			wantRule: "marker",
+			wantErr:  true,
+		},
+		{
+			name:     "marker_small_at",
+			old:      oldDefault,
+			new:      "Some text containing ﹫scribex:ai reference",
 			wantRule: "marker",
 			wantErr:  true,
 		},
@@ -203,9 +246,59 @@ func TestValidateRules(t *testing.T) {
 			wantErr:  true,
 		},
 		{
+			name:     "html_anchor_tag_href",
+			old:      oldDefault,
+			new:      `Doc with <a href="//evil.example">link</a>`,
+			wantRule: "html",
+			wantErr:  true,
+		},
+		{
+			name:     "html_details_tag",
+			old:      oldDefault,
+			new:      `Doc with <details><summary>x</summary>hidden</details>`,
+			wantRule: "html",
+			wantErr:  true,
+		},
+		{
+			name:     "html_div_style",
+			old:      oldDefault,
+			new:      `Doc with <div style="position:fixed">x</div>`,
+			wantRule: "html",
+			wantErr:  true,
+		},
+		{
 			name:    "html_harmless_angle_bracket_ok",
 			old:     oldDefault,
 			new:     `Comparison: a < b and c > d in mathematics.`,
+			wantErr: false,
+		},
+
+		// 8b. entity
+		{
+			name:     "entity_encoded_js",
+			old:      oldDefault,
+			new:      `Doc with [x](&#106;avascript:alert(1))`,
+			wantRule: "entity",
+			wantErr:  true,
+		},
+		{
+			name:     "entity_hex_js",
+			old:      oldDefault,
+			new:      `Doc with [x](&#x6A;avascript:alert(1))`,
+			wantRule: "entity",
+			wantErr:  true,
+		},
+		{
+			name:     "entity_html_comment",
+			old:      oldDefault,
+			new:      `Doc with &lt;!-- comment --&gt;`,
+			wantRule: "entity",
+			wantErr:  true,
+		},
+		{
+			name:    "entity_ampersand_plain_ok",
+			old:     oldDefault,
+			new:     `Ben & Jerry's ice cream and R&D team.`,
 			wantErr: false,
 		},
 
@@ -292,6 +385,53 @@ func TestValidateRules(t *testing.T) {
 			new:     "Refer to https://example.com/api when configuring.",
 			wantErr: false,
 		},
+		{
+			name:    "url_trailing_dot_ok",
+			old:     "Check https://example.com/api for details.",
+			new:     "Refer to https://example.com/api. It is helpful.",
+			wantErr: false,
+		},
+		{
+			name:    "url_case_insensitive_host_ok",
+			old:     "Check https://example.com/api for details.",
+			new:     "Refer to HTTPS://EXAMPLE.COM/api for details.",
+			wantErr: false,
+		},
+
+		// 13b. link
+		{
+			name:     "link_protocol_relative",
+			old:      oldDefault,
+			new:      "Check [site](//evil.example/x) for details.",
+			wantRule: "link",
+			wantErr:  true,
+		},
+		{
+			name:     "link_ref_style",
+			old:      oldDefault,
+			new:      "Check [site][1] for details.\n\n[1]: //evil.example/x",
+			wantRule: "link",
+			wantErr:  true,
+		},
+		{
+			name:     "link_relative_path",
+			old:      oldDefault,
+			new:      "Check [doc](relative/path.md) for details.",
+			wantRule: "link",
+			wantErr:  true,
+		},
+		{
+			name:    "link_anchor_fragment_ok",
+			old:     oldDefault,
+			new:     "Jump to [section](#api-section) for details.",
+			wantErr: false,
+		},
+		{
+			name:    "link_existing_url_verbatim_ok",
+			old:     "See https://example.com/docs for info.",
+			new:     "See [documentation](https://example.com/docs) for info.",
+			wantErr: false,
+		},
 
 		// 14. mention
 		{
@@ -305,6 +445,19 @@ func TestValidateRules(t *testing.T) {
 			name:    "mention_existing_verbatim_accepted",
 			old:     "Questions to @alice and @bob-team.",
 			new:     "Reach out to @bob-team with feedback.",
+			wantErr: false,
+		},
+		{
+			name:     "mention_new_email_rejected",
+			old:      "Contact the team.",
+			new:      "Contact attacker@evil.example for assistance.",
+			wantRule: "mention",
+			wantErr:  true,
+		},
+		{
+			name:    "mention_existing_email_accepted",
+			old:     "Contact support@example.com for help.",
+			new:     "Email support@example.com anytime.",
 			wantErr: false,
 		},
 
