@@ -1,0 +1,9 @@
+﻿package test;
+
+public class App {
+    // First method
+    public void first() {}
+
+    // Second method
+    public void second() {}
+}

@@ -15,6 +15,15 @@ func ScanJava(src []byte) (map[string]string, error) {
 	return ScanJavaSource(s)
 }
 
+// ScanJavaDetailed extracts detailed public API symbols from a Java source file.
+func ScanJavaDetailed(src []byte) ([]Symbol, error) {
+	s, err := Lex(Java, src)
+	if err != nil {
+		return nil, err
+	}
+	return ScanJavaSourceDetailed(s)
+}
+
 // ScanJavaSource extracts symbols from a lexed Java Source.
 func ScanJavaSource(s *Source) (res map[string]string, retErr error) {
 	defer func() {
@@ -30,6 +39,23 @@ func ScanJavaSource(s *Source) (res map[string]string, retErr error) {
 		return nil, err
 	}
 	return c.Finalize(), nil
+}
+
+// ScanJavaSourceDetailed extracts detailed symbols from a lexed Java Source.
+func ScanJavaSourceDetailed(s *Source) (res []Symbol, retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("symbols: panic during Java scanning: %v", r)
+		}
+	}()
+
+	c := &Collector{}
+	w := &javaWalker{s: s, col: c}
+	err := w.scanScope(0, len(s.B), "", false)
+	if err != nil {
+		return nil, err
+	}
+	return c.FinalizeDetailed(s, Java), nil
 }
 
 type javaWalker struct {
@@ -210,6 +236,7 @@ func (w *javaWalker) scanScope(scopeStart, scopeEnd int, prefix string, inInterf
 
 			if isPublic {
 				sigToks := w.buildJavaSignature(s, declStart, headerEnd)
+				w.col.At(declStart)
 				w.col.Add(fullKey, Join(sigToks))
 
 				if hasBody {
@@ -269,6 +296,7 @@ func (w *javaWalker) scanScope(scopeStart, scopeEnd int, prefix string, inInterf
 
 			if isPublic {
 				sigToks := w.buildJavaSignature(s, declStart, headerEnd)
+				w.col.At(declStart)
 				w.col.Add(key, Join(sigToks), paramTypes...)
 			}
 
@@ -309,6 +337,7 @@ func (w *javaWalker) scanScope(scopeStart, scopeEnd int, prefix string, inInterf
 					}
 					fieldSigToks = w.buildJavaSignature(s, declStart, cutEnd)
 				}
+				w.col.At(declStart)
 				w.col.Add(key, Join(fieldSigToks))
 			}
 		}
@@ -371,7 +400,9 @@ func (w *javaWalker) scanEnumBody(bodyStart, bodyEnd int, enumKey string) error 
 			}
 			clean = append(clean, t)
 		}
-		w.col.Add(enumKey+"."+name, Join(clean))
+		cleanToks := clean
+		w.col.At(i)
+		w.col.Add(enumKey+"."+name, Join(cleanToks))
 
 		i = constEnd
 		skipComma := s.NextCode(i)

@@ -1,0 +1,10 @@
+package test
+
+// Outer class
+class Outer {
+    // Inner class
+    class Inner {
+        // Inner function
+        fun action() {}
+    }
+}

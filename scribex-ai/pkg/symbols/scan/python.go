@@ -15,6 +15,15 @@ func ScanPython(src []byte) (map[string]string, error) {
 	return ScanPythonSource(s)
 }
 
+// ScanPythonDetailed extracts detailed public API symbols from Python sources.
+func ScanPythonDetailed(src []byte) ([]Symbol, error) {
+	s, err := Lex(Python, src)
+	if err != nil {
+		return nil, err
+	}
+	return ScanPythonSourceDetailed(s)
+}
+
 // LogicalLine represents a logical line in Python (after joining physical lines via brackets/backslash).
 type LogicalLine struct {
 	Indent int
@@ -44,6 +53,29 @@ func ScanPythonSource(s *Source) (res map[string]string, retErr error) {
 	}
 
 	return c.Finalize(), nil
+}
+
+// ScanPythonSourceDetailed extracts detailed symbols from a lexed Python Source.
+func ScanPythonSourceDetailed(s *Source) (res []Symbol, retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("symbols: panic during Python scanning: %v", r)
+		}
+	}()
+
+	lines, err := buildLogicalLines(s)
+	if err != nil {
+		return nil, err
+	}
+
+	c := &Collector{}
+	w := &pythonWalker{s: s, col: c, lines: lines}
+	err = w.walk()
+	if err != nil {
+		return nil, err
+	}
+
+	return c.FinalizeDetailed(s, Python), nil
 }
 
 type pythonWalker struct {
@@ -164,6 +196,7 @@ func (w *pythonWalker) walk() error {
 
 	indentStack := []scopeInfo{{indent: 0, prefix: ""}}
 	var pendingDecorators []string
+	firstDecoratorStart := -1
 
 	lineIdx := 0
 	for lineIdx < len(lines) {
@@ -185,14 +218,23 @@ func (w *pythonWalker) walk() error {
 
 		// Check for decorator: starts with '@'
 		if toks[0].Text == "@" {
+			if firstDecoratorStart < 0 {
+				firstDecoratorStart = line.Start
+			}
 			pendingDecorators = append(pendingDecorators, Join(toks))
 			lineIdx++
 			continue
 		}
 
+		declStart := line.Start
+		if firstDecoratorStart >= 0 {
+			declStart = firstDecoratorStart
+		}
+
 		// Skip import statements
 		if toks[0].Text == "import" || toks[0].Text == "from" {
 			pendingDecorators = nil
+			firstDecoratorStart = -1
 			lineIdx++
 			continue
 		}
@@ -206,12 +248,14 @@ func (w *pythonWalker) walk() error {
 				lineIdx++
 			}
 			pendingDecorators = nil
+			firstDecoratorStart = -1
 			continue
 		}
 
 		// Code under `if TYPE_CHECKING:` is scanned normally: just unwrap / enter the block
 		if toks[0].Text == "if" && strings.Contains(Join(toks), "TYPE_CHECKING") {
 			pendingDecorators = nil
+			firstDecoratorStart = -1
 			lineIdx++
 			continue
 		}
@@ -246,17 +290,31 @@ func (w *pythonWalker) walk() error {
 			headerSig := w.buildDefHeader(toks, pendingDecorators)
 			paramTypes := w.extractPythonParamTypes(toks)
 
+			// Look for docstring as first statement of the body
+			var doc string
+			targetIndent := line.Indent
+			if lineIdx+1 < len(lines) && lines[lineIdx+1].Indent > targetIndent {
+				firstBodyLine := lines[lineIdx+1]
+				if len(firstBodyLine.Tokens) == 1 && firstBodyLine.Tokens[0].Type == TokStr {
+					doc = Docstring(firstBodyLine.Tokens[0].Text)
+				}
+			}
+
 			if isPublic {
+				w.col.At(declStart)
+				if doc != "" {
+					w.col.WithDoc(doc)
+				}
 				w.col.Add(key, headerSig, paramTypes...)
 			}
 
 			// Function bodies are skipped! Skip all lines more indented than def
-			targetIndent := line.Indent
 			lineIdx++
 			for lineIdx < len(lines) && lines[lineIdx].Indent > targetIndent {
 				lineIdx++
 			}
 			pendingDecorators = nil
+			firstDecoratorStart = -1
 			_ = isAsync
 			continue
 		}
@@ -281,12 +339,29 @@ func (w *pythonWalker) walk() error {
 			}
 
 			headerSig := w.buildClassHeader(toks, pendingDecorators)
-			if isPublic {
-				w.col.Add(fullKey, headerSig)
+
+			// Look for docstring as first statement of the body
+			var doc string
+			targetIndent := line.Indent
+			if lineIdx+1 < len(lines) && lines[lineIdx+1].Indent > targetIndent {
+				firstBodyLine := lines[lineIdx+1]
+				if len(firstBodyLine.Tokens) == 1 && firstBodyLine.Tokens[0].Type == TokStr {
+					doc = Docstring(firstBodyLine.Tokens[0].Text)
+				}
 			}
 
+			if isPublic {
+				w.col.At(declStart)
+				if doc != "" {
+					w.col.WithDoc(doc)
+				}
+				w.col.Add(fullKey, headerSig)
+			}
+			pendingDecorators = nil
+			firstDecoratorStart = -1
+
 			// Enter class body
-			targetIndent := line.Indent
+			targetIndent = line.Indent
 			// Find body indent
 			bodyIndent := -1
 			if lineIdx+1 < len(lines) && lines[lineIdx+1].Indent > targetIndent {
@@ -326,9 +401,11 @@ func (w *pythonWalker) walk() error {
 				key = currScope.prefix + "." + aliasName
 			}
 			if isPublic {
+				w.col.At(declStart)
 				w.col.Add(key, Join(toks))
 			}
 			pendingDecorators = nil
+			firstDecoratorStart = -1
 			lineIdx++
 			continue
 		}
@@ -360,9 +437,11 @@ func (w *pythonWalker) walk() error {
 			if hasColon || eqIdx == 1 {
 				if isPublic {
 					sig := w.buildPyAssignmentSig(name, toks, hasColon, eqIdx)
+					w.col.At(declStart)
 					w.col.Add(key, sig)
 				}
 				pendingDecorators = nil
+				firstDecoratorStart = -1
 				lineIdx++
 				continue
 			}

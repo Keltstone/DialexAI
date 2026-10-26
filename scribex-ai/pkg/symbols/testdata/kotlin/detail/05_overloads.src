@@ -1,0 +1,7 @@
+package test
+
+// Overloaded function
+fun process(x: Int): Int = x
+
+// Overloaded function with string
+fun process(s: String): String = s

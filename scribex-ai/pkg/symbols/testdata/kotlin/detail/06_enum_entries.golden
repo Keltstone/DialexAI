@@ -1,0 +1,3 @@
+Color|class|4|Color enum
+Color.RED|enum_entry|6|Red color
+Color.GREEN|enum_entry|8|Green color

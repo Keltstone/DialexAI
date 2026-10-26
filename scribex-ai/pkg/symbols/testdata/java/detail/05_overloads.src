@@ -1,0 +1,9 @@
+package test;
+
+public class App {
+    // Overloaded int
+    public void handle(int x) {}
+
+    // Overloaded string
+    public void handle(String s) {}
+}

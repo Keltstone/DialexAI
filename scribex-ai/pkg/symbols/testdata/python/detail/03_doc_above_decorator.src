@@ -1,0 +1,4 @@
+# Service runner function
+@staticmethod
+def run():
+    pass

@@ -38,6 +38,51 @@ func Supported(path string) bool {
 	return false
 }
 
+type Symbol = scan.Symbol
+
+// ExtractDetailed returns public API symbols in source order with kind, signature, 1-based start line, and doc comment.
+// Overload typed keys (Class.name(T1)) are not repeated; overload signatures are joined with \n in the plain key.
+func ExtractDetailed(path string, src []byte) (res []Symbol, retErr error) {
+	if !Supported(path) {
+		return nil, ErrUnsupported
+	}
+	if len(src) > maxFileSize {
+		return nil, errors.New("symbols: file exceeds 20 MB limit")
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("symbols: panic during extraction: %v", r)
+		}
+	}()
+
+	ext := strings.ToLower(filepath.Ext(path))
+	lower := strings.ToLower(path)
+
+	if ext == ".go" {
+		return extractGoDetailed(path, src)
+	}
+
+	if ext == ".kt" || ext == ".kts" {
+		return scan.ScanKotlinDetailed(src)
+	}
+
+	if ext == ".java" {
+		return scan.ScanJavaDetailed(src)
+	}
+
+	if ext == ".py" {
+		return scan.ScanPythonDetailed(src)
+	}
+
+	if strings.HasSuffix(lower, ".d.ts") || ext == ".ts" || ext == ".tsx" || ext == ".mts" ||
+		ext == ".cts" || ext == ".js" || ext == ".jsx" || ext == ".mjs" || ext == ".cjs" {
+		return scan.ScanTSDetailed(src)
+	}
+
+	return nil, ErrUnsupported
+}
+
 // Extract returns key -> canonical signature. For a Supported path, any problem returns (nil, error);
 // never a partial map, never a panic. For an unsupported extension it returns (nil, ErrUnsupported).
 func Extract(path string, src []byte) (res map[string]string, retErr error) {
@@ -82,13 +127,25 @@ func Extract(path string, src []byte) (res map[string]string, retErr error) {
 }
 
 func extractGo(path string, src []byte) (map[string]string, error) {
+	syms, err := extractGoDetailed(path, src)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(syms))
+	for _, s := range syms {
+		out[s.Key] = s.Sig
+	}
+	return out, nil
+}
+
+func extractGoDetailed(path string, src []byte) ([]Symbol, error) {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution)
+	f, err := parser.ParseFile(fset, path, src, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make(map[string]string)
+	var res []Symbol
 	pr := func(n any) string {
 		var b bytes.Buffer
 		printer.Fprint(&b, fset, n)
@@ -102,7 +159,9 @@ func extractGo(path string, src []byte) (map[string]string, error) {
 				continue
 			}
 			name := d.Name.Name
+			kind := "func"
 			if d.Recv != nil && len(d.Recv.List) > 0 {
+				kind = "method"
 				t := pr(d.Recv.List[0].Type)
 				t = strings.TrimPrefix(t, "*")
 				// Strip generic type parameters in the key, e.g. Box[T] -> Box
@@ -115,9 +174,25 @@ func extractGo(path string, src []byte) (map[string]string, error) {
 				}
 				name = t + "." + name
 			}
-			d.Body = nil
-			d.Doc = nil
-			out[name] = cleanGoSig(pr(d))
+
+			line := fset.Position(d.Pos()).Line
+			var doc string
+			if d.Doc != nil {
+				doc = scan.CleanDoc(d.Doc.Text())
+			}
+
+			dClone := *d
+			dClone.Body = nil
+			dClone.Doc = nil
+			sig := cleanGoSig(pr(&dClone))
+
+			res = append(res, Symbol{
+				Key:  name,
+				Kind: kind,
+				Sig:  sig,
+				Line: line,
+				Doc:  doc,
+			})
 
 		case *ast.GenDecl:
 			if d.Tok == token.IMPORT {
@@ -132,22 +207,31 @@ func extractGo(path string, src []byte) (map[string]string, error) {
 				switch s := s.(type) {
 				case *ast.TypeSpec:
 					if s.Name.IsExported() {
-						s.Doc, s.Comment = nil, nil
-						if st, ok := s.Type.(*ast.StructType); ok && st.Fields != nil {
+						line := fset.Position(s.Pos()).Line
+						var doc string
+						if s.Doc != nil {
+							doc = scan.CleanDoc(s.Doc.Text())
+						} else if d.Doc != nil && len(d.Specs) == 1 {
+							doc = scan.CleanDoc(d.Doc.Text())
+						}
+
+						sClone := *s
+						sClone.Doc, sClone.Comment = nil, nil
+						if st, ok := sClone.Type.(*ast.StructType); ok && st.Fields != nil {
 							var expFields []*ast.Field
-							for _, f := range st.Fields.List {
-								if f.Names == nil {
+							for _, fld := range st.Fields.List {
+								if fld.Names == nil {
 									// embedded field
-									expFields = append(expFields, f)
+									expFields = append(expFields, fld)
 								} else {
 									var expNames []*ast.Ident
-									for _, n := range f.Names {
+									for _, n := range fld.Names {
 										if n.IsExported() {
 											expNames = append(expNames, n)
 										}
 									}
 									if len(expNames) > 0 {
-										fClone := *f
+										fClone := *fld
 										fClone.Names = expNames
 										expFields = append(expFields, &fClone)
 									}
@@ -155,11 +239,19 @@ func extractGo(path string, src []byte) (map[string]string, error) {
 							}
 							stClone := *st
 							stClone.Fields = &ast.FieldList{List: expFields}
-							sClone := *s
 							sClone.Type = &stClone
-							s = &sClone
 						}
-						out[s.Name.Name] = cleanGoSig("type " + pr(s))
+
+						sig := cleanGoSig("type " + pr(&sClone))
+						kind := scan.DeriveKind(scan.Go, s.Name.Name, sig)
+
+						res = append(res, Symbol{
+							Key:  s.Name.Name,
+							Kind: kind,
+							Sig:  sig,
+							Line: line,
+							Doc:  doc,
+						})
 					}
 
 				case *ast.ValueSpec:
@@ -176,6 +268,14 @@ func extractGo(path string, src []byte) (map[string]string, error) {
 							if !n.IsExported() {
 								continue
 							}
+							line := fset.Position(n.Pos()).Line
+							var doc string
+							if s.Doc != nil {
+								doc = scan.CleanDoc(s.Doc.Text())
+							} else if d.Doc != nil && len(d.Specs) == 1 {
+								doc = scan.CleanDoc(d.Doc.Text())
+							}
+
 							sig := "const " + n.Name
 							if s.Type != nil {
 								sig += " " + pr(s.Type)
@@ -195,20 +295,41 @@ func extractGo(path string, src []byte) (map[string]string, error) {
 									sig += fmt.Sprintf(" // iota=%d", specIndex)
 								}
 							}
-							out[n.Name] = sig
+
+							res = append(res, Symbol{
+								Key:  n.Name,
+								Kind: "const",
+								Sig:  sig,
+								Line: line,
+								Doc:  doc,
+							})
 						}
 						specIndex++
 					} else if d.Tok == token.VAR {
-						// Var: var Name Type (declared type only; if no declared type, name only)
 						for _, n := range s.Names {
 							if !n.IsExported() {
 								continue
 							}
+							line := fset.Position(n.Pos()).Line
+							var doc string
+							if s.Doc != nil {
+								doc = scan.CleanDoc(s.Doc.Text())
+							} else if d.Doc != nil && len(d.Specs) == 1 {
+								doc = scan.CleanDoc(d.Doc.Text())
+							}
+
 							sig := "var " + n.Name
 							if s.Type != nil {
 								sig += " " + pr(s.Type)
 							}
-							out[n.Name] = sig
+
+							res = append(res, Symbol{
+								Key:  n.Name,
+								Kind: "var",
+								Sig:  sig,
+								Line: line,
+								Doc:  doc,
+							})
 						}
 					}
 				}
@@ -216,7 +337,7 @@ func extractGo(path string, src []byte) (map[string]string, error) {
 		}
 	}
 
-	return out, nil
+	return res, nil
 }
 
 func cleanGoSig(s string) string {

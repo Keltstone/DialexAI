@@ -1,0 +1,8 @@
+package test;
+
+public class App {
+    // Prüfe Methode
+    public boolean prüfe(String wert) {
+        return wert != null;
+    }
+}

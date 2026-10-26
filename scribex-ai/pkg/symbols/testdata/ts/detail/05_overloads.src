@@ -1,0 +1,6 @@
+// Overloaded process
+export function process(x: number): number;
+export function process(s: string): string;
+export function process(val: any): any {
+    return val;
+}
