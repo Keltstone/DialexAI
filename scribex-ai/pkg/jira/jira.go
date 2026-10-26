@@ -28,11 +28,42 @@ func (c Client) hdr() map[string]string {
 	return map[string]string{"Authorization": httpx.Basic(c.User, c.Token)}
 }
 
-var validKeyRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,30}-[1-9][0-9]{0,9}$`)
+type Tracker interface {
+	Issue(key string) (bool, error)
+}
+
+var (
+	validKeyRe  = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,30}-[1-9][0-9]{0,9}$`)
+	strictKeyRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,10}-[0-9]{1,9}$`)
+)
 
 // ValidKey reports whether k matches ^[A-Z][A-Z0-9_]{1,30}-[1-9][0-9]{0,9}$.
 func ValidKey(k string) bool {
 	return validKeyRe.MatchString(k)
+}
+
+// StrictKey reports whether k matches the strict format ^[A-Z][A-Z0-9_]{1,10}-[0-9]{1,9}$.
+func StrictKey(k string) bool {
+	return strictKeyRe.MatchString(k)
+}
+
+// Issue checks whether the Jira ticket exists and is active.
+func (c Client) Issue(key string) (bool, error) {
+	if !StrictKey(key) {
+		return false, errors.New("invalid Jira key format")
+	}
+	escapedKey := url.PathEscape(key)
+	var out struct {
+		Key string `json:"key"`
+	}
+	err := c.client().Do("GET", fmt.Sprintf("%s/rest/api/2/issue/%s?fields=key", strings.TrimRight(c.Base, "/"), escapedKey), c.hdr(), nil, &out)
+	if err != nil {
+		return false, err
+	}
+	if !strings.EqualFold(out.Key, key) {
+		return false, fmt.Errorf("jira key mismatch: expected %s, got %s", key, out.Key)
+	}
+	return true, nil
 }
 
 var keyCandidateRe = regexp.MustCompile(`[A-Z][A-Z0-9_]{1,30}-[0-9]+`)
