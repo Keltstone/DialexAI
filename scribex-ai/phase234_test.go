@@ -73,7 +73,11 @@ func TestConfluenceDraft(t *testing.T) {
 		w.Write([]byte(`{"id":"42"}`))
 	}))
 	defer srv.Close()
-	id, err := confluence.Client{Base: srv.URL, User: "u", Token: "t"}.CreateDraft("ENG", "T", confluence.Body(map[string]string{"a#B": "func B() <x>"}))
+	body, err := confluence.Body(map[string]string{"a#B": "func B() <x>"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := confluence.Client{Base: srv.URL, User: "u", Token: "t"}.CreateDraft("ENG", "T", body)
 	if err != nil || id != "42" {
 		t.Fatal(id, err)
 	}

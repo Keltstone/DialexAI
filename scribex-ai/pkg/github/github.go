@@ -2,7 +2,9 @@
 package github
 
 import (
+	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"scribex/pkg/httpx"
@@ -10,8 +12,33 @@ import (
 
 const marker = "<!-- scribex-report -->"
 
+var repoRe = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$`)
+
+// ValidRepo reports whether s is owner/name matching ^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$
+// with neither part equal to . or ..
+func ValidRepo(s string) bool {
+	if !repoRe.MatchString(s) {
+		return false
+	}
+	parts := strings.Split(s, "/")
+	if len(parts) != 2 {
+		return false
+	}
+	if parts[0] == "." || parts[0] == ".." || parts[1] == "." || parts[1] == ".." {
+		return false
+	}
+	return true
+}
+
 // Upsert creates or updates the Scribex comment on a PR.
 func Upsert(api, token, repo string, pr int, body string) error {
+	if !ValidRepo(repo) {
+		return errors.New("invalid repository name")
+	}
+	if pr <= 0 || pr > 2147483647 {
+		return errors.New("invalid pull request number")
+	}
+
 	p := httpx.Default()
 	if token != "" {
 		p.Secrets = []string{token}

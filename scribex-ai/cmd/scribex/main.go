@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,11 +20,13 @@ import (
 	"scribex/pkg/dashboard"
 	"scribex/pkg/diagram"
 	"scribex/pkg/docs"
+	"scribex/pkg/fsx"
 	"scribex/pkg/github"
 	"scribex/pkg/httpx"
 	"scribex/pkg/jira"
 	"scribex/pkg/manifest"
 	"scribex/pkg/mcp"
+	"scribex/pkg/safepath"
 	"scribex/pkg/secrets"
 	"scribex/pkg/trace"
 )
@@ -157,15 +161,15 @@ func main() {
 }
 
 func initCmd(root string) error {
-	dir := filepath.Join(root, ".scribex")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir, err := safepath.ScribexDir(root, true)
+	if err != nil {
 		return err
 	}
 	m := filepath.Join(dir, "manifest.yaml")
 	if _, err := os.Stat(m); err == nil {
 		return nil
 	}
-	return os.WriteFile(m, []byte("# Confluence page-to-symbol mappings\nmappings:\n#  - page: \"12345\"\n#    space: ENG\n#    title: Auth API\n#    symbols: [pkg/auth/jwt.go#VerifyToken]\n"), 0o644)
+	return fsx.WriteAtomic(m, []byte("# Confluence page-to-symbol mappings\nmappings:\n#  - page: \"12345\"\n#    space: ENG\n#    title: Auth API\n#    symbols: [pkg/auth/jwt.go#VerifyToken]\n"), 0o644)
 }
 
 // gate prints the impact-gate verdict; returns false when no public contract changed (0 tokens).
@@ -224,7 +228,49 @@ func scavenge(root string) error {
 	return nil
 }
 
+func cleanAPIURL(raw, name string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("%s: invalid URL", name)
+	}
+	if u.User != nil {
+		return "", fmt.Errorf("%s: userinfo not allowed", name)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("%s: query and fragment not allowed", name)
+	}
+	if u.Scheme != "https" {
+		if u.Scheme == "http" && os.Getenv("SCRIBEX_ALLOW_INSECURE_LOCAL") == "1" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost" || u.Hostname() == "::1") {
+			// allowed loopback
+		} else {
+			return "", fmt.Errorf("%s: scheme must be https", name)
+		}
+	}
+	return u.Scheme + "://" + u.Host + strings.TrimRight(u.Path, "/"), nil
+}
+
+func pagesPath(root, id string) (string, error) {
+	if !safepath.ValidPageID(id) {
+		return "", errors.New("invalid page id")
+	}
+	dir, err := safepath.ScribexDir(root, true)
+	if err != nil {
+		return "", err
+	}
+	pagesDir := filepath.Join(dir, "pages")
+	if err := os.MkdirAll(pagesDir, 0o755); err != nil {
+		return "", err
+	}
+	return filepath.Join(pagesDir, id+".html"), nil
+}
+
 func comment(root, base, repo string, pr int) error {
+	if repo != "" && !github.ValidRepo(repo) {
+		return fmt.Errorf("invalid -repo: %s", repo)
+	}
+	if pr != 0 && (pr <= 0 || pr > 2147483647) {
+		return fmt.Errorf("invalid -pr: %d", pr)
+	}
 	tok := os.Getenv("GITHUB_TOKEN")
 	if repo == "" || pr == 0 || tok == "" {
 		return fmt.Errorf("need -repo, -pr and GITHUB_TOKEN")
@@ -256,15 +302,23 @@ func comment(root, base, repo string, pr int) error {
 	if api == "" {
 		api = "https://api.github.com"
 	}
-	return github.Upsert(api, tok, repo, pr, r.Markdown())
+	cleanAPI, err := cleanAPIURL(api, "GITHUB_API_URL")
+	if err != nil {
+		return err
+	}
+	return github.Upsert(cleanAPI, tok, repo, pr, r.Markdown())
 }
 
 func atlassian() (url, user, tok string, err error) {
-	url, user, tok = os.Getenv("ATLASSIAN_URL"), os.Getenv("ATLASSIAN_USER"), os.Getenv("ATLASSIAN_TOKEN")
-	if url == "" || tok == "" {
-		err = fmt.Errorf("set ATLASSIAN_URL, ATLASSIAN_USER, ATLASSIAN_TOKEN")
+	rawURL, user, tok := os.Getenv("ATLASSIAN_URL"), os.Getenv("ATLASSIAN_USER"), os.Getenv("ATLASSIAN_TOKEN")
+	if rawURL == "" || tok == "" {
+		return "", "", "", fmt.Errorf("set ATLASSIAN_URL, ATLASSIAN_USER, ATLASSIAN_TOKEN")
 	}
-	return
+	cleaned, err := cleanAPIURL(rawURL, "ATLASSIAN_URL")
+	if err != nil {
+		return "", "", "", err
+	}
+	return cleaned, user, tok, nil
 }
 
 func confluenceCmd(root string, a []string) error {
@@ -276,14 +330,22 @@ func confluenceCmd(root string, a []string) error {
 	if len(a) == 0 {
 		return fmt.Errorf("confluence push|pull [page]")
 	}
-	ms, err := manifest.Load(filepath.Join(root, ".scribex", "manifest.yaml"))
+	dir, err := safepath.ScribexDir(root, false)
 	if err != nil {
 		return err
 	}
-	statePath := filepath.Join(root, ".scribex", "state.json")
+	ms, err := manifest.Load(filepath.Join(dir, "manifest.yaml"))
+	if err != nil {
+		return err
+	}
+	statePath := filepath.Join(dir, "state.json")
 	state := map[string]string{} // page -> hash of last pushed signatures
 	if b, err := os.ReadFile(statePath); err == nil {
-		json.Unmarshal(b, &state)
+		if err := json.Unmarshal(b, &state); err != nil {
+			return fmt.Errorf("corrupt state.json: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 	for _, m := range ms {
 		if len(a) > 1 && a[1] != m.Page {
@@ -295,9 +357,11 @@ func confluenceCmd(root string, a []string) error {
 			if err != nil {
 				return err
 			}
-			p := filepath.Join(root, ".scribex", "pages", m.Page+".html")
-			os.MkdirAll(filepath.Dir(p), 0o755)
-			if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			p, err := pagesPath(root, m.Page)
+			if err != nil {
+				return err
+			}
+			if err := fsx.WriteAtomic(p, []byte(body), 0o644); err != nil {
 				return err
 			}
 			fmt.Println("pulled", m.Page)
@@ -313,7 +377,10 @@ func confluenceCmd(root string, a []string) error {
 					sigs[s] = sig
 				}
 			}
-			body := confluence.Body(sigs)
+			body, err := confluence.Body(sigs)
+			if err != nil {
+				return err
+			}
 			h := sha256.Sum256([]byte(body))
 			hash := hex.EncodeToString(h[:8])
 			if state[m.Page] == hash {
@@ -331,7 +398,7 @@ func confluenceCmd(root string, a []string) error {
 	}
 	if a[0] == "push" {
 		b, _ := json.MarshalIndent(state, "", "  ")
-		return os.WriteFile(statePath, b, 0o644)
+		return fsx.WriteAtomic(statePath, append(b, '\n'), 0o644)
 	}
 	return nil
 }
@@ -353,11 +420,17 @@ func jiraCmd(root, base, key string, post bool) error {
 	if base == "" {
 		return fmt.Errorf("jira needs -base")
 	}
+	if key != "" && !jira.ValidKey(key) {
+		return fmt.Errorf("invalid Jira key")
+	}
 	if key == "" {
 		key = jira.Key(branch(root))
 	}
 	if key == "" {
 		return fmt.Errorf("no Jira key in branch name; pass -key")
+	}
+	if !jira.ValidKey(key) {
+		return fmt.Errorf("invalid Jira key")
 	}
 	u, user, tok, err := atlassian()
 	if err != nil {
@@ -384,7 +457,7 @@ func jiraCmd(root, base, key string, post bool) error {
 	body := "Scribex reality-check for " + key + ":\n* " + strings.Join(flags, "\n* ")
 	fmt.Println(body)
 	if post {
-		if err := c.Comment(key, body); err != nil {
+		if _, err := c.PostRealityCheck(key, body); err != nil {
 			return err
 		}
 	}
@@ -394,6 +467,9 @@ func jiraCmd(root, base, key string, post bool) error {
 func traceCmd(root, base, key string, pr int, out string) error {
 	if base == "" {
 		return fmt.Errorf("trace needs -base")
+	}
+	if key != "" && !jira.ValidKey(key) {
+		return fmt.Errorf("invalid Jira key")
 	}
 	if key == "" {
 		key = jira.Key(branch(root))
@@ -406,7 +482,10 @@ func traceCmd(root, base, key string, pr int, out string) error {
 		return incompleteError(res.Unknown)
 	}
 	ds := res.Deltas
-	ms, _ := manifest.Load(filepath.Join(root, ".scribex", "manifest.yaml"))
+	var ms []manifest.Mapping
+	if dir, err := safepath.ScribexDir(root, false); err == nil {
+		ms, _ = manifest.Load(filepath.Join(dir, "manifest.yaml"))
+	}
 	w := os.Stdout
 	if out != "" {
 		if w, err = os.Create(out); err != nil {

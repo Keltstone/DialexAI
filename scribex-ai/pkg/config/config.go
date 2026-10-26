@@ -8,6 +8,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"scribex/pkg/fsx"
+	"scribex/pkg/safepath"
 )
 
 type AI struct {
@@ -32,7 +35,13 @@ func Default() Config {
 	}
 }
 
-func Path(root string) string { return filepath.Join(root, ".scribex", "config.yaml") }
+func Path(root string) string {
+	dir, err := safepath.ScribexDir(root, false)
+	if err != nil {
+		dir = filepath.Join(root, safepath.DirName)
+	}
+	return filepath.Join(dir, "config.yaml")
+}
 
 var EnvName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
@@ -111,7 +120,15 @@ func apply(c *Config, k, v string) error {
 // Load returns defaults overlaid with the file (a missing file is fine).
 func Load(root string) (Config, error) {
 	c := Default()
-	b, err := os.ReadFile(Path(root))
+	dir, err := safepath.ScribexDir(root, false)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return c, nil
+		}
+		return c, err
+	}
+	p := filepath.Join(dir, "config.yaml")
+	b, err := os.ReadFile(p)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return c, nil
@@ -144,10 +161,12 @@ wiki:
 }
 
 func Save(root string, c Config) error {
-	if err := os.MkdirAll(filepath.Dir(Path(root)), 0o755); err != nil {
+	dir, err := safepath.ScribexDir(root, true)
+	if err != nil {
 		return err
 	}
-	return os.WriteFile(Path(root), []byte(c.YAML()), 0o644)
+	p := filepath.Join(dir, "config.yaml")
+	return fsx.WriteAtomic(p, []byte(c.YAML()), 0o644)
 }
 
 func Set(root, k, v string) error {
