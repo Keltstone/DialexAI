@@ -66,3 +66,11 @@ scribex wiki lint                    # broken links, orphans, duplicate names (e
 scribex wiki backlinks Home | search <q>
 scribex wiki render -out ../repo.wiki   # relative links + "Linked from" footers + Home.md/_Sidebar.md for GitHub's wiki
 ```
+
+## Verification Status
+
+The following live integrations and external execution environments have not been executed against live production tenants and are marked **UNVERIFIED**:
+- **Hosted GitHub Actions Runner**: live workflow links for fetch-depth 1 and fetch-depth 0 runs (local git diff & shallow check behavior verified; hosted runner unverified).
+- **Live PR Comment**: live GitHub PR comment upsert via `GITHUB_TOKEN` (mocked in unit test; live tenant unverified).
+- **Real LLM Call Counts & Costs**: live Anthropic / OpenAI billable API token consumption and prompt cache counts (local mock engine verified; live external API unverified).
+- **Confluence / Jira Test Tenant**: live Atlassian Cloud push/pull and issue sync (local mock HTTP tested; live tenant unverified).

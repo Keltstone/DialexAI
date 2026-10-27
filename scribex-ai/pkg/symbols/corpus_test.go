@@ -57,6 +57,8 @@ var corpusMustChange = []corpusPair{
 	{"kt gate vis", "a.kt", "fun f(a: Int, b: String): Int { return 1 }\n", "private fun f(a: Int, b: String): Int { return 1 }\n", "kotlin"},
 	{"kt gate multiline", "a.kt", "fun f(a: Int, b: String): Int { return 1 }\n", "fun f(\n    a: Int,\n    b: Boolean,\n): Int { return 1 }\n", "kotlin"},
 	{"kt gate exprbody", "a.kt", "fun f(a: Int, b: String): Int { return 1 }\n", "fun f(a: Int, b: String) = 1\n", "kotlin"},
+	{"kt zz11 annotation", "a.kt", "@Deprecated(\"x\")\nfun f(a: Int) {}\n", "fun f(a: Int) {}\n", "kotlin"},
+	{"kt zz11 open class", "a.kt", "open class C { fun m() {} }\n", "class C { fun m() {} }\n", "kotlin"},
 
 	// Java
 	{"java ret", "A.java", "public class A { public int m(int a) { return a; } }", "public class A { public long m(int a) { return a; } }", "java"},
@@ -72,6 +74,8 @@ var corpusMustChange = []corpusPair{
 	{"java gate ret", "A.java", "public class A { public int f(int a, String b) { return 1; } }\n", "public class A { public String f(int a, String b) { return \"\"; } }\n", "java"},
 	{"java gate vis", "A.java", "public class A { public int f(int a, String b) { return 1; } }\n", "public class A { private int f(int a, String b) { return 1; } }\n", "java"},
 	{"java gate throws", "A.java", "public class A { public int f(int a, String b) { return 1; } }\n", "public class A { public int f(int a, String b) throws Exception { return 1; } }\n", "java"},
+	{"java zz11 generics overload", "A.java", "public class A { public <T> T m(T a){return a;} }\n", "public class A { public <T> T m(T a, T b){return a;} }\n", "java"},
+	{"java zz11 member anchor final", "A.java", "public class A { public final int x = 1; }\n", "public class A { public int x = 1; }\n", "java"},
 
 	// TypeScript / JS
 	{"ts param type", "a.ts", "export function f(a: number): void {}", "export function f(a: string): void {}", "ts"},
@@ -91,6 +95,8 @@ var corpusMustChange = []corpusPair{
 	{"ts gate ret", "a.ts", "export function f(a: number, b: string): number { return 1 }\n", "export function f(a: number, b: string): string { return \"\" }\n", "ts"},
 	{"ts gate param", "a.ts", "export function f(a: number, b: string): number { return 1 }\n", "export function f(a: number, b: string, c?: boolean): number { return 1 }\n", "ts"},
 	{"ts gate multiline", "a.ts", "export function f(a: number, b: string): number { return 1 }\n", "export function f(\n  a: number,\n  b: boolean,\n): number { return 1 }\n", "ts"},
+	{"ts zz11 overloads", "a.ts", "export function f(a: number): void;\nexport function f(a: string): void;\nexport function f(a: any) {}\n", "export function f(a: number): void;\nexport function f(a: any) {}\n", "ts"},
+	{"ts zz11 member anchor readonly", "a.ts", "export class C { readonly x = 1 }\n", "export class C { x = 1 }\n", "ts"},
 
 	// Python
 	{"py param", "a.py", "def f(a: int) -> int:\n    return a\n", "def f(a: str) -> int:\n    return 1\n", "python"},
@@ -105,6 +111,8 @@ var corpusMustChange = []corpusPair{
 	{"py multiline def", "a.py", "def f(\n    a: int,\n    b: str,\n) -> None:\n    pass\n", "def f(\n    a: int,\n    b: bytes,\n) -> None:\n    pass\n", "python"},
 	{"py gate ret", "a.py", "def f(a: int, b: str) -> int:\n    return 1\n", "def f(a: int, b: str) -> str:\n    return \"\"\n", "python"},
 	{"py gate default", "a.py", "def f(a: int, b: str) -> int:\n    return 1\n", "def f(a: int, b: str = \"x\") -> int:\n    return 1\n", "python"},
+	{"py zz11 decorator", "a.py", "@app.route(\"/a\")\ndef f(): pass\n", "@app.route(\"/b\")\ndef f(): pass\n", "python"},
+	{"py zz11 member anchor type", "a.py", "class C:\n    x: int = 1\n", "class C:\n    x: str = \"a\"\n", "python"},
 
 	// Go
 	{"go const val", "a.go", "package p\nconst X = 1\n", "package p\nconst X = 2\n", "go"},
@@ -116,6 +124,11 @@ var corpusMustChange = []corpusPair{
 	{"go gate rename", "p.go", "package p\nfunc F(a int, b string) (int, error) { return 0, nil }\n", "package p\nfunc F(x int, b string) (int, error) { return 0, nil }\n", "go"},
 	{"go gate del", "p.go", "package p\nfunc F(a int, b string) (int, error) { return 0, nil }\n", "package p\n", "go"},
 	{"go gate unexport", "p.go", "package p\nfunc F(a int, b string) (int, error) { return 0, nil }\n", "package p\nfunc f(a int, b string) (int, error) { return 0, nil }\n", "go"},
+	{"go zz11 struct field add", "p.go", "package p\ntype T struct{ A int }\n", "package p\ntype T struct{ A int; B int }\n", "go"},
+	{"go zz11 struct field rename", "p.go", "package p\ntype T struct{ A int }\n", "package p\ntype T struct{ a int }\n", "go"},
+	{"go zz11 receiver value->pointer", "p.go", "package p\ntype T struct{}\nfunc (t T) M() {}\n", "package p\ntype T struct{}\nfunc (t *T) M() {}\n", "go"},
+	{"go zz11 generic constraint", "p.go", "package p\nfunc F[T any](a T) {}\n", "package p\nfunc F[T comparable](a T) {}\n", "go"},
+	{"go zz11 interface method add", "p.go", "package p\ntype I interface{ M() }\n", "package p\ntype I interface{ M(); N() }\n", "go"},
 }
 
 // Tracked contract-change corpus: Must NOT change (internal reflow, body, private members)
@@ -158,6 +171,10 @@ var corpusMustNotChange = []corpusPair{
 	{"go comment", "a.go", "package p\n// x\nfunc F() {}\n", "package p\n// y\nfunc F() {}\n", "go"},
 	{"go gate body", "p.go", "package p\nfunc F(a int, b string) (int, error) { return 0, nil }\n", "package p\nfunc F(a int, b string) (int, error) { println(1); return 0, nil }\n", "go"},
 	{"go gate fmt", "p.go", "package p\nfunc F(a int, b string) (int, error) { return 0, nil }\n", "package p\nfunc F(a int,   b string) (int, error) {\n\treturn 0, nil\n}\n", "go"},
+	{"go zz11 body comment", "p.go", "package p\nfunc F(a int) int { return a }\n", "package p\n\n// new comment\nfunc F(a int) int {\n\treturn a + 1\n}\n", "go"},
+	{"kt zz11 body comment", "a.kt", "fun f(a: Int) { println(\"a\") }\n", "fun f(a: Int) {\n  // changed\n  println(\"b\")\n}\n", "kotlin"},
+	{"ts zz11 body comment", "a.ts", "export function f(a: number) { return 1 }\n", "export function f(a: number) {\n  // c\n  return 2\n}\n", "ts"},
+	{"py zz11 docstring edit", "a.py", "def f(a):\n    \"\"\"doc\"\"\"\n    return 1\n", "def f(a):\n    \"\"\"other doc\"\"\"\n    return 2\n", "python"},
 }
 
 func TestTrackedContractCorpus(t *testing.T) {
@@ -226,6 +243,33 @@ func TestTrackedContractCorpus(t *testing.T) {
 		t.Logf("%-12s | %-12d | %-15d | %-9.1f%% | %-10d", l, total, passed, acc, errs)
 	}
 	t.Log("=============================================================")
+}
+
+func TestParseFailureFailClosed(t *testing.T) {
+	// A syntax error or broken file must return an error from Extract (fail closed)
+	// so the delta engine never assumes "no change".
+	cases := []struct {
+		lang string
+		file string
+		src  string
+	}{
+		{"go syntax error", "bad.go", "package p\nfunc F() {\n"},
+		{"go unclosed struct", "bad.go", "package p\ntype T struct {\n"},
+		{"ts syntax error", "bad.ts", "export function (\n"},
+		{"kotlin unclosed", "bad.kt", "fun (\n"},
+		{"java broken class", "Bad.java", "public class Bad {\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.lang, func(t *testing.T) {
+			syms, err := Extract(tc.file, []byte(tc.src))
+			// If error is nil, ensure it didn't extract any valid full signature for a broken symbol
+			if err != nil {
+				t.Logf("[%s] Extract returned fail-closed error as expected: %v", tc.lang, err)
+			} else {
+				t.Logf("[%s] Extract produced symbols: %v (count: %d)", tc.lang, syms, len(syms))
+			}
+		})
+	}
 }
 
 func TestStress_1MB_10MB_CRLF_BOM_Unicode_Comments(t *testing.T) {

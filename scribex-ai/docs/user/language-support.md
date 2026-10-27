@@ -14,7 +14,7 @@ Evaluated against the tracked contract mutation and no-change corpus ([`pkg/symb
 | **TypeScript / JS** | Lexical tokenizer (`pkg/symbols/scan/ts.go`) | 27 / 27 | **100.0%** | 0 | 0 |
 | **Python** | Lexical tokenizer (`pkg/symbols/scan/python.go`) | 20 / 20 | **100.0%** | 0 | 0 |
 | **Kotlin** | Lexical tokenizer (`pkg/symbols/scan/kotlin.go`) | 29 / 29 | **100.0%** | 0 | 0 |
-| **Java** | Lexical tokenizer (`pkg/symbols/scan/java.go`) | 22 / 22 | **100.0%** | 0 | 0 |
+| **Java** | Lexical tokenizer (`pkg/symbols/scan/java.go`) | 21 / 21 | **100.0%** | 0 | 0 |
 
 > **Note on Scope**: Accuracy metrics reflect performance against the tracked corpus in `scribex-ai`. Real-world accuracy depends on language construct coverage.
 

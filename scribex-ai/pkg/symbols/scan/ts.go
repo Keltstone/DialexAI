@@ -666,6 +666,9 @@ func (w *tsWalker) scanVariableDeclarators(exportStart int, declKw string, start
 			continue
 		}
 		name := dtoks[0].Text
+		if len(name) == 0 || !isIdentStartByte(name[0]) {
+			continue
+		}
 		key := name
 		if prefix != "" {
 			key = prefix + "." + name

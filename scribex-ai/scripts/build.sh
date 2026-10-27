@@ -61,7 +61,7 @@ for target in "${TARGETS[@]}"; do
   echo "  -> ${GOOS}/${GOARCH} -> ${BIN_NAME}"
   (
     cd "$ROOT_DIR"
-    CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" GOTOOLCHAIN=local \
+    CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
       go build -trimpath -buildvcs=false \
       -ldflags "-s -w -X main.version=${VERSION}" \
       -o "$OUT_PATH" ./cmd/scribex

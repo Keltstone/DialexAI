@@ -27,7 +27,7 @@ CACHE1="$DIR1/gocache"
 mkdir -p "$CACHE1"
 (
   cd "$ROOT_DIR"
-  GOCACHE="$CACHE1" CGO_ENABLED=0 GOTOOLCHAIN=local \
+  GOCACHE="$CACHE1" CGO_ENABLED=0 \
     go build -trimpath -buildvcs=false \
     -ldflags "-s -w -X main.version=${VERSION}" \
     -o "$BIN1" ./cmd/scribex
@@ -46,7 +46,7 @@ CACHE2="$DIR2/gocache"
 mkdir -p "$CACHE2"
 (
   cd "$ROOT_DIR"
-  GOCACHE="$CACHE2" CGO_ENABLED=0 GOTOOLCHAIN=local \
+  GOCACHE="$CACHE2" CGO_ENABLED=0 \
     go build -trimpath -buildvcs=false \
     -ldflags "-s -w -X main.version=${VERSION}" \
     -o "$BIN2" ./cmd/scribex

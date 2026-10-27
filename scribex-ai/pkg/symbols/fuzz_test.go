@@ -147,7 +147,9 @@ func assertFuzzInvariants(t *testing.T, filename string, data []byte) {
 			t.Fatalf("ExtractDetailed non-deterministic: %v vs %v, lengths %d vs %d", errDet1, errDet2, len(det1), len(det2))
 		}
 
-		totalLines := bytes.Count(data, []byte("\n")) + 1
+		normData := bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+		normData = bytes.ReplaceAll(normData, []byte("\r"), []byte("\n"))
+		totalLines := bytes.Count(normData, []byte("\n")) + 1
 		for i, s := range det1 {
 			if s != det2[i] {
 				t.Fatalf("ExtractDetailed non-deterministic symbol %d:\nfirst:  %+v\nsecond: %+v", i, s, det2[i])

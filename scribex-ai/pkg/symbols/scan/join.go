@@ -125,6 +125,10 @@ func isIdentByte(c byte) bool {
 		c == '_' || c == '$' || c >= 0x80
 }
 
+func isIdentStartByte(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == '$' || c >= 0x80
+}
+
 func matchMultiPunct(b []byte, k []Kind, i, end int) (string, int) {
 	rem := end - i
 	if rem >= 3 {

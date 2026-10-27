@@ -44,6 +44,11 @@ func (c *Collector) WithDoc(doc string) {
 
 // Add appends a declaration to the collector.
 func (c *Collector) Add(key, sig string, paramTypes ...string) {
+	key = strings.TrimSpace(key)
+	if key == "" || strings.HasPrefix(key, ".") || strings.HasSuffix(key, ".") {
+		c.curDoc = ""
+		return
+	}
 	c.decls = append(c.decls, Decl{
 		Key:        key,
 		Sig:        sig,

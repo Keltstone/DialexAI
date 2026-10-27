@@ -20,6 +20,13 @@ DIST_DIR="$ROOT_DIR/dist"
 
 mkdir -p "$DIST_DIR"
 
+if command -v go >/dev/null 2>&1; then
+  GOPATH_BIN="$(go env GOPATH)/bin"
+  if [ -d "$GOPATH_BIN" ] && [[ ":$PATH:" != *":$GOPATH_BIN:"* ]]; then
+    export PATH="$GOPATH_BIN:$PATH"
+  fi
+fi
+
 WANT_CYCLONEDX=false
 for arg in "$@"; do
   case "$arg" in
