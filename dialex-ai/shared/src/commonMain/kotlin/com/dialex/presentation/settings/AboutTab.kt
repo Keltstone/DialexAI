@@ -38,7 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dialex.theme.LocalCcColors
 import com.dialex.ui.DialexLogoView
-import com.dialex.ui.KoltaLabsLogoView
+import com.dialex.ui.KeltstoneLogoView
 
 private enum class AboutSubTab(val label: String, val icon: ImageVector) {
     OVERVIEW("Product Overview", Icons.Outlined.Info),
@@ -50,7 +50,7 @@ private enum class AboutSubTab(val label: String, val icon: ImageVector) {
 
 /**
  * Enterprise-grade About & Governance screen for Dialex.
- * Maintained and sponsored by Kolta Labs.
+ * Maintained and sponsored by Keltstone Systems.
  * Features responsive adaptive layout that reflows pills and sub-tabs cleanly
  * across arbitrary window widths without text clipping or horizontal overflow.
  */
@@ -392,7 +392,7 @@ private fun OverviewSection(
             }
         }
 
-        // Section: Kolta Labs (Privacy-Focused Developer Brand)
+        // Section: Keltstone Systems (Privacy-Focused Developer Brand)
         SettingCard {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(
@@ -404,10 +404,10 @@ private fun OverviewSection(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        KoltaLabsLogoView(size = 40.dp)
+                        KeltstoneLogoView(size = 40.dp)
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
-                                "Kolta Labs",
+                                "Keltstone Systems",
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
                                 color = cc.textPrimary
                             )
@@ -442,7 +442,7 @@ private fun OverviewSection(
                 )
 
                 Text(
-                    "Kolta Labs was started to take a different architectural path: building tools that run entirely on local machines, keep credentials under the developer's sole custody, and treat your workstation as sovereign ground. Dialex is designed from first principles so that project files, debate transcripts, and API traffic travel directly between your machine and your chosen model providers—with zero intermediary servers, zero platform markups, and zero background analytics.",
+                    "Keltstone Systems was started to take a different architectural path: building tools that run entirely on local machines, keep credentials under the developer's sole custody, and treat your workstation as sovereign ground. Dialex is designed from first principles so that project files, debate transcripts, and API traffic travel directly between your machine and your chosen model providers—with zero intermediary servers, zero platform markups, and zero background analytics.",
                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.5.sp, lineHeight = 19.sp),
                     color = cc.textPrimary
                 )
@@ -456,7 +456,7 @@ private fun OverviewSection(
                         .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    SpecRow("Project Maintainer", "Kolta Labs", cc)
+                    SpecRow("Project Maintainer", "Keltstone Systems", cc)
                     SpecRow("Software License", "PolyForm Noncommercial License 1.0.0", cc)
                     SpecRow("Source Code", "github.com/Keltstone/DialexAI", cc)
                 }
@@ -650,7 +650,7 @@ private fun PrivacySection(
                 ) {
                     SectionHeader(
                         title = "Privacy Policy & Data Sovereignty Charter",
-                        subtitle = "Effective Date: January 1, 2026 • Legal Standard v1.0 • Maintained by Kolta Labs"
+                        subtitle = "Effective Date: January 1, 2026 • Legal Standard v1.0 • Maintained by Keltstone Systems"
                     )
 
                     DisableSelection {
@@ -674,7 +674,7 @@ private fun PrivacySection(
 
                 LegalParagraph(
                     title = "1. Absolute Zero-Telemetry Warranty",
-                    content = "Dialex is architected by Kolta Labs from the ground up as a zero-telemetry system. The software does not collect, record, harvest, profile, or transmit user analytics, tracking pixels, crash identifiers, prompt logs, or behavioral telemetry to Kolta Labs maintainers or any third-party analytics vendor. Dialex operates no intermediary cloud servers, proxy networks, or central collection databases.",
+                    content = "Dialex is architected by Keltstone Systems from the ground up as a zero-telemetry system. The software does not collect, record, harvest, profile, or transmit user analytics, tracking pixels, crash identifiers, prompt logs, or behavioral telemetry to Keltstone Systems maintainers or any third-party analytics vendor. Dialex operates no intermediary cloud servers, proxy networks, or central collection databases.",
                     cc = cc
                 )
 
@@ -729,7 +729,7 @@ private fun LicenseSection(
                 ) {
                     SectionHeader(
                         title = "Software License Agreement",
-                        subtitle = "PolyForm Noncommercial License 1.0.0 • Free for Individuals • Kolta Labs"
+                        subtitle = "PolyForm Noncommercial License 1.0.0 • Free for Individuals • Keltstone Systems"
                     )
 
                     DisableSelection {
@@ -784,7 +784,7 @@ private fun LicenseSection(
 
                 LegalParagraph(
                     title = "Individual & Noncommercial Scope",
-                    content = "Under the PolyForm Noncommercial License 1.0.0, personal use for research, experimentation, personal study, hobby projects, or use by noncommercial/educational organizations is permitted. Any use that involves using the software to earn revenue or run a commercial business directly or indirectly requires an agreement with Kolta Labs.",
+                    content = "Under the PolyForm Noncommercial License 1.0.0, personal use for research, experimentation, personal study, hobby projects, or use by noncommercial/educational organizations is permitted. Any use that involves using the software to earn revenue or run a commercial business directly or indirectly requires an agreement with Keltstone Systems.",
                     cc = cc
                 )
 
@@ -854,7 +854,7 @@ private fun TermsSection(
                 ) {
                     SectionHeader(
                         title = "Terms of Service & Advisory Notice",
-                        subtitle = "Responsible AI Usage & Professional Advisory Bounds • Kolta Labs"
+                        subtitle = "Responsible AI Usage & Professional Advisory Bounds • Keltstone Systems"
                     )
 
                     DisableSelection {
@@ -896,13 +896,13 @@ private fun TermsSection(
 
                 LegalParagraph(
                     title = "4. Intellectual Property & Customer Work Product",
-                    content = "Dialex and Kolta Labs assert zero ownership, claim, or intellectual property rights over the prompts you submit, the files you attach, or the deliverables, transcripts, and code synthesized during deliberations. All generated deliverables remain your exclusive work product, subject only to your direct bilateral contracts with third-party model providers.",
+                    content = "Dialex and Keltstone Systems assert zero ownership, claim, or intellectual property rights over the prompts you submit, the files you attach, or the deliverables, transcripts, and code synthesized during deliberations. All generated deliverables remain your exclusive work product, subject only to your direct bilateral contracts with third-party model providers.",
                     cc = cc
                 )
 
                 LegalParagraph(
                     title = "5. Comprehensive Limitation of Liability",
-                    content = "To the maximum extent permitted under applicable law, Kolta Labs, the authors, maintainers, and contributors of Dialex shall not be liable for any direct, indirect, special, incidental, punitive, or consequential damages (including loss of business profits, data corruption, system downtime, production incidents, or security breaches) arising from or relating to your use of or reliance upon Dialex.",
+                    content = "To the maximum extent permitted under applicable law, Keltstone Systems, the authors, maintainers, and contributors of Dialex shall not be liable for any direct, indirect, special, incidental, punitive, or consequential damages (including loss of business profits, data corruption, system downtime, production incidents, or security breaches) arising from or relating to your use of or reliance upon Dialex.",
                     cc = cc
                 )
             }

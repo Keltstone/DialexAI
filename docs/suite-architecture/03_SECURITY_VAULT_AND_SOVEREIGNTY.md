@@ -1,6 +1,6 @@
 # Dialex Suite: Sovereign Vault & Zero-Cloud Security
 
-**Author:** Kolta Labs Security Architecture & Governance Team  
+**Author:** Keltstone Systems Security Architecture & Governance Team  
 **Audience:** CISOs, Security Engineers, Compliance Officers, DevSecOps Leads  
 **Scope:** Cryptographic algorithms, credential vaults, execution sandboxes, data isolation guarantees, and compliance certifications.
 

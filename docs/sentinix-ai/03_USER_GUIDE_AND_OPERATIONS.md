@@ -1,7 +1,7 @@
 # Sentinix AI: User Guide & Operational Operations
 
 **Module:** `sentinix-ai`  
-**Author:** Kolta Labs Security & Systems Engineering Group  
+**Author:** Keltstone Systems Security & Systems Engineering Group  
 **Audience:** Security Engineers, Developers, SOC Analysts, System Administrators  
 **Scope:** CLI command reference, baseline operations, rule pack authoring, web dashboard workflows, and reporting.
 

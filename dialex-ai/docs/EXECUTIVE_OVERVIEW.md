@@ -97,11 +97,11 @@ Dialex AI is built upon the **Kolt Ecosystem (`KoltLibs`)**, ensuring production
 Dialex AI is published under the **PolyForm Noncommercial License 1.0.0**.
 
 - **Free for Personal, Academic & Noncommercial Use:** Individuals, hobbyists, students, and non-profit researchers are granted full rights to inspect, modify, run, and distribute Dialex AI free of charge.
-- **Commercial & Enterprise Licensing:** Any use of Dialex AI to develop commercial products, generate business revenue, or provide paid advisory services requires a commercial license agreement with **Kolta Labs**.
+- **Commercial & Enterprise Licensing:** Any use of Dialex AI to develop commercial products, generate business revenue, or provide paid advisory services requires a commercial license agreement with **Keltstone Systems**.
 
 For commercial inquiries, custom model integrations, or enterprise SLA support, contact:  
-📧 **`licensing@koltalabs.com`**
+📧 **`licensing@keltstone.com`**
 
 ---
 
-*Copyright (c) 2026 Kolta Labs. Licensed under the [PolyForm Noncommercial License 1.0.0](file:///LICENSE).*
+*Copyright (c) 2026 Keltstone Systems. Licensed under the [PolyForm Noncommercial License 1.0.0](file:///LICENSE).*

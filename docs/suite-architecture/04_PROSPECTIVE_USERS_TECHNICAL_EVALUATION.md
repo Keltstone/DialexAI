@@ -1,6 +1,6 @@
 # Dialex Suite: Prospective Users Technical Evaluation Guide
 
-**Author:** Kolta Labs Solutions Architecture  
+**Author:** Keltstone Systems Solutions Architecture  
 **Audience:** Prospective Enterprise Users, VP of Engineering, CTOs, Lead Architects  
 **Scope:** Comparative matrix, technical trade-offs, deployment models, economic ROI, and architectural evaluation criteria.
 
@@ -68,7 +68,7 @@ For prospective technical evaluators evaluating our stack for long-term maintain
 │    • Single unified business logic in commonMain (Strict Clean Architecture).  │
 │    • Compose Desktop on JVM 21 (Skiko / Skia hardware accelerated rendering).  │
 │    • Android native target with Biometric Hardware Keystore (TEE/StrongBox).   │
-│    • Built on Kolta Engineering Standards (KoltLibs: MVI, AsyncState, Tokens). │
+│    • Built on Keltstone Engineering Standards (KoltLibs: MVI, AsyncState, Tokens). │
 │                                                                                │
 │ 3. Security & Sandboxing Layer: Native OS Primitives                           │
 │    • macOS: Apple Seatbelt (sandbox-exec) with restricted filesystem profiles. │

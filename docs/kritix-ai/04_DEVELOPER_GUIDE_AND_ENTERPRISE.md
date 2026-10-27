@@ -1,7 +1,7 @@
 # Kritix AI Platform: Developer Guide & Enterprise Administration
 
 **Platform:** `kritix-ai` (Go 1.27 & Compose Desktop)  
-**Author:** Kolta Labs Security & Systems Architecture  
+**Author:** Keltstone Systems Security & Systems Architecture  
 **Audience:** Platform Engineers, Security Administrators, SDET Contributors  
 **Scope:** Custom workflow block authoring, Enterprise RBAC, cryptographic audit logs, and CI/CD integration.
 

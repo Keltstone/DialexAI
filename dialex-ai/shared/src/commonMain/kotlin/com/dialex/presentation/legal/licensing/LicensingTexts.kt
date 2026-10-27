@@ -11,12 +11,12 @@ object LicensingTexts {
 
     const val APPLICATION_NAME = "Dialex AI"
     const val CURRENT_VERSION = "1.0.0"
-    const val COPYRIGHT_HOLDER = "Kolta Labs & Dialex AI Contributors"
+    const val COPYRIGHT_HOLDER = "Keltstone Systems & Dialex AI Contributors"
     const val COPYRIGHT_YEAR = "2026"
     const val PRIMARY_LICENSE_NAME = "PolyForm Noncommercial License 1.0.0"
     const val PRIMARY_LICENSE_URL = "https://polyformproject.org/licenses/noncommercial/1.0.0"
-    const val CONTACT_EMAIL = "licensing@koltalabs.com"
-    const val PRIVACY_EMAIL = "privacy@koltalabs.com"
+    const val CONTACT_EMAIL = "licensing@keltstone.com"
+    const val PRIVACY_EMAIL = "privacy@keltstone.com"
 
     val PrimaryDedicationStatement: String = """
         DIALEX AI — SOFTWARE DEDICATION & STATUTORY LICENSING CHARTER
@@ -27,7 +27,7 @@ object LicensingTexts {
         You are permitted to download, compile, execute, inspect, study, test, adapt, and redistribute Dialex AI for any noncommercial purpose—including personal study, academic research, education, hobbyist experimentation, and use by non-profit charitable organizations.
         
         2. COMMERCIAL RESERVATION:
-        Any use of the software to run a commercial enterprise, charge fees for analytical services, bundle with proprietary commercial offerings, or support revenue-generating business operations is strictly conditioned upon obtaining a separate commercial enterprise license from Kolta Labs ($CONTACT_EMAIL).
+        Any use of the software to run a commercial enterprise, charge fees for analytical services, bundle with proprietary commercial offerings, or support revenue-generating business operations is strictly conditioned upon obtaining a separate commercial enterprise license from Keltstone Systems ($CONTACT_EMAIL).
         
         3. SOURCE AVAILABILITY & AUDITABILITY:
         Dialex AI commits to local execution, transparent reproducible builds, verifiable cryptographic provenance, and zero telemetry. You retain 100% ownership and custody of your discussion transcripts, custom personas, workspace configurations, and synthesized deliverables.
@@ -39,7 +39,7 @@ object LicensingTexts {
         TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE JURISDICTIONAL LAW:
         THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITH ALL FAULTS AND DEFECTS, WITHOUT WARRANTY OF ANY KIND.
         
-        THE LICENSOR, AUTHORS, CONTRIBUTORS, AND SPONSORING ENTITIES (INCLUDING KOLTA LABS) EXPRESSLY DISCLAIM ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING WITHOUT LIMITATION:
+        THE LICENSOR, AUTHORS, CONTRIBUTORS, AND SPONSORING ENTITIES (INCLUDING KELTSTONE SYSTEMS) EXPRESSLY DISCLAIM ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING WITHOUT LIMITATION:
         - ANY IMPLIED WARRANTIES OF MERCHANTABILITY, SATISFACTORY QUALITY, FITNESS FOR A PARTICULAR PURPOSE, OR ACCURACY;
         - ANY WARRANTIES ARISING OUT OF COURSE OF DEALING, USAGE, OR TRADE PRACTICE;
         - ANY WARRANTIES THAT THE SOFTWARE WILL MEET YOUR REQUIREMENTS, ACHIEVE ANY INTENDED RESULTS, BE COMPATIBLE OR WORK WITH ANY OTHER SOFTWARE, APPLICATIONS, SYSTEMS, OR SERVICES; AND
@@ -49,7 +49,7 @@ object LicensingTexts {
     val StatutoryLimitationOfLiability: String = """
         COMPREHENSIVE LIMITATION OF LIABILITY
         
-        TO THE MAXIMUM EXTENT PERMITTED UNDER APPLICABLE LAW, IN NO EVENT SHALL KOLTA LABS, ITS DIRECTORS, EMPLOYEES, AFFILIATES, OR CONTRIBUTORS BE LIABLE FOR:
+        TO THE MAXIMUM EXTENT PERMITTED UNDER APPLICABLE LAW, IN NO EVENT SHALL KELTSTONE SYSTEMS, ITS DIRECTORS, EMPLOYEES, AFFILIATES, OR CONTRIBUTORS BE LIABLE FOR:
         
         (A) ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, PUNITIVE, OR CONSEQUENTIAL DAMAGES WHATSOEVER;
         (B) LOSS OF PROFITS, REVENUE, DATA, GOODWILL, REPUTATIONAL CAPITAL, OR BUSINESS OPPORTUNITIES;
@@ -58,7 +58,7 @@ object LicensingTexts {
         
         WHETHER BASED IN CONTRACT, TORT (INCLUDING NEGLIGENCE), STRICT LIABILITY, STATUTORY DUTY, OR OTHERWISE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
         
-        THE TOTAL AGGREGATE LIABILITY FOR ALL CLAIMS ARISING OUT OF OR RELATING TO THIS SOFTWARE SHALL IN NO EVENT EXCEED $0.00 USD (ZERO UNITED STATES DOLLARS) OR THE ACTUAL SUM PAID BY YOU TO KOLTA LABS FOR USE OF THE SOFTWARE DURING THE PRIOR TWELVE (12) MONTHS.
+        THE TOTAL AGGREGATE LIABILITY FOR ALL CLAIMS ARISING OUT OF OR RELATING TO THIS SOFTWARE SHALL IN NO EVENT EXCEED $0.00 USD (ZERO UNITED STATES DOLLARS) OR THE ACTUAL SUM PAID BY YOU TO KELTSTONE SYSTEMS FOR USE OF THE SOFTWARE DURING THE PRIOR TWELVE (12) MONTHS.
     """.trimIndent()
 
     val AiAdvisorySafeHarbor: String = """
@@ -84,7 +84,7 @@ object LicensingTexts {
         All project records, local JSON storage, encrypted API tokens, discussion branches, and custom personas reside exclusively on your host workstation.
         
         3. DIRECT TRANSPORT PRIVACY:
-        When using third-party foundation models via API keys, HTTPS requests travel directly and exclusively between your host device and the designated provider endpoint. Kolta Labs operates no intermediate cloud proxies, intercepting relays, or payload caching brokers.
+        When using third-party foundation models via API keys, HTTPS requests travel directly and exclusively between your host device and the designated provider endpoint. Keltstone Systems operates no intermediate cloud proxies, intercepting relays, or payload caching brokers.
     """.trimIndent()
 
     val DefaultThirdPartyNotices: ImmutableList<ThirdPartyNoticeItem> = listOf(

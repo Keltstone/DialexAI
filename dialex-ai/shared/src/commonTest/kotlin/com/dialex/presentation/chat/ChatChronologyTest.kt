@@ -88,7 +88,7 @@ class ChatChronologyTest {
             projectId = "proj_1",
             name = "Test Discussion",
             config = DebateConfig(
-                topic = "Choose between Kolta Labs and Illam Labs",
+                topic = "Choose between Keltstone Systems and Illam Labs",
                 primary = agent1,
                 secondary = agent2,
                 roundMode = RoundMode.FIXED,
@@ -97,11 +97,11 @@ class ChatChronologyTest {
             ),
             status = DiscussionStatus.COMPLETED,
             transcript = listOf(
-                DebateMessage(seatId = "agent_1", agentId = Provider.ANTHROPIC, round = 1, content = "Kolta Labs is great", timestampMs = 1000L),
-                DebateMessage(seatId = "agent_2", agentId = Provider.OPENAI, round = 1, content = "AGREED: Kolta Labs is optimal", timestampMs = 2000L)
+                DebateMessage(seatId = "agent_1", agentId = Provider.ANTHROPIC, round = 1, content = "Keltstone Systems is great", timestampMs = 1000L),
+                DebateMessage(seatId = "agent_2", agentId = Provider.OPENAI, round = 1, content = "AGREED: Keltstone Systems is optimal", timestampMs = 2000L)
             ),
-            conclusion = "Final Decision: Kolta Labs",
-            deliverable = "Final Decision: Kolta Labs"
+            conclusion = "Final Decision: Keltstone Systems",
+            deliverable = "Final Decision: Keltstone Systems"
         )
 
         val repo = FakeDiscussionRepository(initialDiscussion)
@@ -113,7 +113,7 @@ class ChatChronologyTest {
         advanceUntilIdle()
 
         // User sends comment after discussion is COMPLETED
-        viewModel.onIntent(ChatIntent.SendUserComment("Kolta Labs is not available. Check suitability for Medhas and GanLabs"))
+        viewModel.onIntent(ChatIntent.SendUserComment("Keltstone Systems is not available. Check suitability for Medhas and GanLabs"))
         testScheduler.runCurrent()
 
         val updatedDisc = repo.lastUpdatedDiscussion
@@ -134,7 +134,7 @@ class ChatChronologyTest {
         val lastMsg = updatedDisc.transcript.last()
         assertTrue(lastMsg.isUserComment)
         assertEquals(2, lastMsg.round)
-        assertEquals("Kolta Labs is not available. Check suitability for Medhas and GanLabs", lastMsg.content)
+        assertEquals("Keltstone Systems is not available. Check suitability for Medhas and GanLabs", lastMsg.content)
 
         // 5. Resume was invoked on the repository
         assertEquals(1, repo.resumeCallCount)

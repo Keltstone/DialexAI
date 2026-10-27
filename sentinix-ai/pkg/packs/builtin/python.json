@@ -5,7 +5,7 @@
     "python",
     "django"
   ],
-  "author": "Kolta Labs",
+  "author": "Keltstone Systems",
   "rules": [
     {
       "id": "python/sql-injection",

@@ -88,8 +88,8 @@ if git diff --cached --quiet; then
     exit 0
 fi
 
-git config user.name "Kolta Labs Bot"
-git config user.email "bot@koltalabs.com"
+git config user.name "Keltstone Systems Bot"
+git config user.email "bot@keltstone.com"
 git commit -m "feat(tap): synchronize formulas and casks from DialexAI suite"
 
 echo ""

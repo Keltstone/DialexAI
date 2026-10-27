@@ -1,6 +1,6 @@
 # Dialex Suite: Ecosystem Architecture & System Design
 
-**Author:** Kolta Labs Core Architecture Group  
+**Author:** Keltstone Systems Core Architecture Group  
 **Audience:** Staff & Principal Engineers, Enterprise Architects, Technical Evaluators  
 **Scope:** Holistic multi-engine architecture, interoperability contracts, design principles, and unified system topology.
 
@@ -103,7 +103,7 @@ flowchart TB
 Every component across the Dialex Suite adheres to five non-negotiable architectural invariants:
 
 ### Invariant 1: Local-First and Zero-Cloud Data Sovereignty
-- Credentials (API keys, OAuth tokens) never transit to any intermediary cloud server hosted by Kolta Labs.
+- Credentials (API keys, OAuth tokens) never transit to any intermediary cloud server hosted by Keltstone Systems.
 - On macOS, keys reside in the **macOS Keychain Services**.
 - On Linux, keys reside in **Secret Service API / secret-tool** with a fallback to `0600` encrypted file storage.
 - On Android, keys reside in the **Android Keystore System** backed by a Hardware Security Module (TEE / StrongBox).

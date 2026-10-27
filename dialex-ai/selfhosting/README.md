@@ -165,7 +165,7 @@ Creates an encrypted tarball of your discussion history, accounts, and AES keys 
 ## 📄 License
 
 Dialex AI is licensed under the [PolyForm Noncommercial License 1.0.0](../LICENSE) (dual-licensed: see [COMMERCIAL_LICENSE.md](../../COMMERCIAL_LICENSE.md)).  
-Copyright (c) 2026 Kolta Labs. Free for personal, academic, and noncommercial research. Commercial deployments require an enterprise license from Kolta Labs.
+Copyright (c) 2026 Keltstone Systems. Free for personal, academic, and noncommercial research. Commercial deployments require an enterprise license from Keltstone Systems.
 
 ---
 
@@ -191,4 +191,4 @@ Copyright (c) 2026 Kolta Labs. Free for personal, academic, and noncommercial re
 
 **Recommended deployment**: Tailscale or another private network, or a reverse proxy (Caddy/nginx) with TLS. Never expose the raw port to the internet.
 
-**Data retention**: Kolta Labs holds none of your data. On your instance, data stays until you delete it in the app or remove the data directory; deleting a discussion removes it from the local store. Content sent to a model provider is retained under that provider's policy (see the privacy policy).
+**Data retention**: Keltstone Systems holds none of your data. On your instance, data stays until you delete it in the app or remove the data directory; deleting a discussion removes it from the local store. Content sent to a model provider is retained under that provider's policy (see the privacy policy).

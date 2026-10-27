@@ -10,7 +10,7 @@ Dialex AI Project is young. The fastest way to make it better, and to be credite
 - Do not add telemetry or unverified claims to the docs.
 
 ## License of contributions
-The project is dual-licensed (see [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md)). By opening a pull request you confirm that you wrote the change or have the right to submit it, and you grant Kolta Labs a perpetual, worldwide, non-exclusive, royalty-free, irrevocable license to use, modify, sublicense and distribute your contribution under the PolyForm Noncommercial License and under commercial licenses. You keep your copyright. Sign off commits with `git commit -s`. _This grant text should be reviewed by a lawyer before you rely on it._
+The project is dual-licensed (see [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md)). By opening a pull request you confirm that you wrote the change or have the right to submit it, and you grant Keltstone Systems a perpetual, worldwide, non-exclusive, royalty-free, irrevocable license to use, modify, sublicense and distribute your contribution under the PolyForm Noncommercial License and under commercial licenses. You keep your copyright. Sign off commits with `git commit -s`. _This grant text should be reviewed by a lawyer before you rely on it._
 
 ## Setup
 ```bash

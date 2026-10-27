@@ -1,7 +1,7 @@
 # Dialex AI Client: Conceptual Foundation & Visual Deliberation
 
 **Client:** `dialex-ai` (Kotlin Multiplatform / Compose Multiplatform)  
-**Author:** Kolta Labs UI/UX & Cognitive Systems Group  
+**Author:** Keltstone Systems UI/UX & Cognitive Systems Group  
 **Audience:** Product Managers, Enterprise Architects, Mobile & Desktop Engineers  
 **Scope:** Synthetic advisory boards, visual epistemology, Hegelian interface design, and decision artifacts.
 

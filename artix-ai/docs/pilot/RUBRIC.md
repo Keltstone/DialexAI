@@ -17,7 +17,7 @@ Every task record must be fully joinable and verifiable across four independent 
 3. **Audit Event Hash (`auditRecordHash`)**: A 64-character hex SHA-256 hash identifying the immutable, hash-chained convergence audit record signed by the enterprise audit logger.
 4. **Ledger Reference (`ledgerRef`)**: The file-locked token/financial ledger entry recording provider-reported usage and USD reconciliation.
 
-Self-graded records, records targeting vendor-controlled repositories, and records evaluated by unidentifiable aliases are strictly rejected and discarded by the pilot harness ([`pilot.go`](file:///Users/arunelectra/Project/Tech/KMP/Kolta/DialexAI/artix-ai/pkg/pilot/pilot.go)).
+Self-graded records, records targeting vendor-controlled repositories, and records evaluated by unidentifiable aliases are strictly rejected and discarded by the pilot harness ([`pilot.go`](../../pkg/pilot/pilot.go)).
 
 ---
 

@@ -1,7 +1,7 @@
 # Sentinix AI: Core Technical Architecture & Security Model
 
 **Module:** `sentinix-ai`  
-**Author:** Kolta Labs Security & Systems Engineering Group  
+**Author:** Keltstone Systems Security & Systems Engineering Group  
 **Audience:** Principal Architects, Security Engineers, Infrastructure Leads  
 **Scope:** Component topologies, data flow lifecycles, database schemas, cryptographic isolation, and sandbox runtime contracts.
 

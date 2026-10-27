@@ -25,7 +25,7 @@ android {
     namespace = "com.dialex.android"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
     defaultConfig {
-        applicationId = "com.koltalabs.dialex"
+        applicationId = "com.keltstone.dialex"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = (project.findProperty("app.versionCode") as? String)?.toIntOrNull() ?: 1

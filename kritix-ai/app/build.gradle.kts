@@ -42,18 +42,18 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "KritixAI"
             packageVersion = project.findProperty("app.version") as? String ?: "1.0.0"
-            vendor = "Kolta Labs"
+            vendor = "Keltstone Systems"
             description = "Kritix AI — Autonomous QA Testing Studio & Cockpit"
             val engineResourcesDir = project.findProperty("engine.resources.dir") as? String
             if (!engineResourcesDir.isNullOrBlank()) {
                 appResourcesRootDir.set(project.file(engineResourcesDir))
             }
             macOS {
-                bundleID = "com.koltalabs.kritix"
+                bundleID = "com.keltstone.kritix"
                 dockName = "Kritix AI"
             }
             windows {
-                menuGroup = "Kolta Labs"
+                menuGroup = "Keltstone Systems"
                 upgradeUuid = "E49F4231-2B9F-4C8C-9C44-36BA43F50F12"
                 shortcut = true
                 menu = true

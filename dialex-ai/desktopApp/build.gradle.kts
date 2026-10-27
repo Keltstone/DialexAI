@@ -37,19 +37,19 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "DialexAI"
             packageVersion = project.findProperty("app.version") as? String ?: "1.0.0"
-            vendor = "Kolta Labs"
-            description = "Dialex AI by Kolta Labs - Sovereign Multi-Agent AI Deliberation Platform"
+            vendor = "Keltstone Systems"
+            description = "Dialex AI by Keltstone Systems - Sovereign Multi-Agent AI Deliberation Platform"
             val engineResourcesDir = project.findProperty("engine.resources.dir") as? String
             if (!engineResourcesDir.isNullOrBlank()) {
                 appResourcesRootDir.set(project.file(engineResourcesDir))
             }
             macOS {
-                bundleID = "com.koltalabs.dialex"
+                bundleID = "com.keltstone.dialex"
                 dockName = "Dialex AI"
                 iconFile.set(project.file("src/jvmMain/resources/icon.icns"))
             }
             windows {
-                menuGroup = "Kolta Labs"
+                menuGroup = "Keltstone Systems"
                 upgradeUuid = "B9F01447-2442-4818-A9D3-7BD6718C80DE"
                 shortcut = true
                 menu = true

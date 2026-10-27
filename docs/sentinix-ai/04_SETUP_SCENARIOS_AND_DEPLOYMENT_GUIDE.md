@@ -1,7 +1,7 @@
 # Sentinix AI: Complete Setup Scenarios & Deployment Guide
 
 **Module:** `sentinix-ai`  
-**Author:** Kolta Labs Security & Systems Engineering Group  
+**Author:** Keltstone Systems Security & Systems Engineering Group  
 **Audience:** DevSecOps Engineers, Platform Teams, Cloud Architects, Developers  
 **Scope:** Step-by-step instructions for every deployment scenario, from zero-server pipelines to multi-tenant Kubernetes clusters.
 
@@ -390,7 +390,7 @@ Reload Caddy: `sudo systemctl reload caddy`.
 For production teams requiring PostgreSQL durability, automated container restarts, and isolated networks.
 
 ### Step 1: Clone Deployment Directory
-In your operations repository, use [`sentinix-ai/deploy/docker-compose.yml`](file:///Users/arunelectra/Project/Tech/KMP/Kolta/DialexAI/sentinix-ai/deploy/docker-compose.yml):
+In your operations repository, use [`sentinix-ai/deploy/docker-compose.yml`](../../sentinix-ai/deploy/docker-compose.yml):
 
 ```yaml
 services:
@@ -463,7 +463,7 @@ docker compose logs -f sentinix
 
 ## Scenario 5: Enterprise Kubernetes Deployment (Helm)
 
-For high-availability clusters using the official Helm chart located at [`sentinix-ai/deploy/helm/sentinix`](file:///Users/arunelectra/Project/Tech/KMP/Kolta/DialexAI/sentinix-ai/deploy/helm/sentinix).
+For high-availability clusters using the official Helm chart located at [`sentinix-ai/deploy/helm/sentinix`](../../sentinix-ai/deploy/helm/sentinix).
 
 ### Step 1: Create Kubernetes Secrets
 ```bash
@@ -589,7 +589,7 @@ Configure your frontier and local LLMs. Secrets formatted as `$NAME` are resolve
 ```
 
 ### Step 2: Build the Hardened Scanner Sandbox Image
-Build the container sandbox image from [`sentinix-ai/deploy/Dockerfile.scanner`](file:///Users/arunelectra/Project/Tech/KMP/Kolta/DialexAI/sentinix-ai/deploy/Dockerfile.scanner):
+Build the container sandbox image from [`sentinix-ai/deploy/Dockerfile.scanner`](../../sentinix-ai/deploy/Dockerfile.scanner):
 
 ```bash
 docker build -f deploy/Dockerfile.scanner -t sentinix-scanner:latest .

@@ -7,7 +7,7 @@
     "javascript",
     "typescript"
   ],
-  "author": "Kolta Labs",
+  "author": "Keltstone Systems",
   "rules": [
     {
       "id": "react/dangerously-set-inner-html",

@@ -1,7 +1,7 @@
 # Dialex AI Client: Core Technical Architecture & Internals
 
 **Client:** `dialex-ai` (Kotlin Multiplatform / Compose Multiplatform)  
-**Author:** Kolta Labs Core Mobile & Desktop Architecture  
+**Author:** Keltstone Systems Core Mobile & Desktop Architecture  
 **Audience:** KMP Developers, Compose Architects, Contributors  
 **Scope:** Strict Clean Architecture layering, Unidirectional MVI contracts, KoltLibs integration, and Vault security.
 
@@ -9,7 +9,7 @@
 
 ## 1. Clean Architecture Call Chain
 
-In compliance with the **Kolta KMP Engineering Standards**, `dialex-ai` enforces a strict, unidirectional call chain with zero skipped layers:
+In compliance with the **Keltstone KMP Engineering Standards**, `dialex-ai` enforces a strict, unidirectional call chain with zero skipped layers:
 
 ```
 ViewModel ──► UseCase ──► Repository (Domain Interface) ──► RepositoryImpl ──► DataSource ──► Originator (Ktor / Engine / SQLite)
@@ -104,7 +104,7 @@ interface ArenaContract {
 
 ## 3. Design System & Kolt Tokens (`KoltLibs`)
 
-Dialex AI strictly enforces the **Kolta Design Token System** (`Kolt.colors`, `Kolt.sizes`, `Kolt.typography`):
+Dialex AI strictly enforces the **Keltstone Design Token System** (`Kolt.colors`, `Kolt.sizes`, `Kolt.typography`):
 
 ```kotlin
 // Strictly Forbidden:

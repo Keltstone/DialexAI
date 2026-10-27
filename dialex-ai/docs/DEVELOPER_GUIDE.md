@@ -49,7 +49,7 @@ DialexAI/
 > Anyone cloning, downloading, or forking the source code must also clone the `KoltLibs` repository into the same parent workspace directory.
 
 ### 2.1 Why KoltLibs is Required
-Kolt provides the foundational architecture across all Kolta Labs multiplatform projects:
+Kolt provides the foundational architecture across all Keltstone Systems multiplatform projects:
 - **`io.github.keltstone.kolt:compose-kmp`**: The design system architecture (`CcPalette`, `LocalCcColors`, `ThemeMode`), elevation tokens, button styles, and fluid typography.
 - **`io.github.keltstone.kolt:utils`**: The canonical `AsyncState<T>` reactive monad (`Uninitialized`, `Loading`, `Success`, `Error`) used across all ViewModels and domain repositories.
 - **`io.github.keltstone.kolt:logutils`**: Release-gated multiplatform structured logging with level filters and telemetry sinks.
@@ -243,4 +243,4 @@ The release pipeline automatically generates and publishes the following assets 
 
 ---
 
-*Copyright (c) 2026 Kolta Labs. Licensed under the [PolyForm Noncommercial License 1.0.0](file:///LICENSE).*
+*Copyright (c) 2026 Keltstone Systems. Licensed under the [PolyForm Noncommercial License 1.0.0](file:///LICENSE).*

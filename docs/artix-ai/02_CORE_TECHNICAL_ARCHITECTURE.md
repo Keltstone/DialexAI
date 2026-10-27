@@ -1,7 +1,7 @@
 # Artix AI Platform: Core Technical Architecture & Internals
 
 **Platform:** `artix-ai` (Go 1.27 & Compose Desktop)  
-**Author:** Kolta Labs Core Systems Architecture  
+**Author:** Keltstone Systems Core Systems Architecture  
 **Audience:** Compiler Engineers, DevOps Architects, Core Contributors  
 **Scope:** Shadow worktree mechanics, sandbox execution containment, AST taboo reviewers, LSP 3.17 server, and webhook daemons.
 

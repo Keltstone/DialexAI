@@ -4,7 +4,7 @@
   "stacks": [
     "dotnet"
   ],
-  "author": "Kolta Labs",
+  "author": "Keltstone Systems",
   "rules": [
     {
       "id": "dotnet/sql-injection",

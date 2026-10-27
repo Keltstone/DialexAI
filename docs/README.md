@@ -1,6 +1,6 @@
 # Dialex Suite Knowledge Base & Technical Wiki
 
-Welcome to the comprehensive technical documentation wiki for the **Dialex Suite**, engineered by **Kolta Labs**. Dialex Suite is an enterprise-grade ecosystem of autonomous deliberation, software engineering, and quality assurance engines designed on a shared principle: **AI models must adversarially disagree and verify their claims deterministically before human engineers trust their output.**
+Welcome to the comprehensive technical documentation wiki for the **Dialex Suite**, engineered by **Keltstone Systems**. Dialex Suite is an enterprise-grade ecosystem of autonomous deliberation, software engineering, and quality assurance engines designed on a shared principle: **AI models must adversarially disagree and verify their claims deterministically before human engineers trust their output.**
 
 ---
 
@@ -130,4 +130,4 @@ graph TD
 | **Security & Compliance Auditor** | [Security Vault](suite-architecture/03_SECURITY_VAULT_AND_SOVEREIGNTY.md) | [Sentinix User Guide](sentinix-ai/03_USER_GUIDE_AND_OPERATIONS.md), [Kritix Enterprise Guide](kritix-ai/04_DEVELOPER_GUIDE_AND_ENTERPRISE.md) |
 
 ---
-*Maintained by Kolta Labs. Licensed under the PolyForm Noncommercial License 1.0.0.*
+*Maintained by Keltstone Systems. Licensed under the PolyForm Noncommercial License 1.0.0.*

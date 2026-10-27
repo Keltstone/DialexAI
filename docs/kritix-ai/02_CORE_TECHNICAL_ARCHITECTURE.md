@@ -1,7 +1,7 @@
 # Kritix AI Platform: Core Technical Architecture & Internals
 
 **Platform:** `kritix-ai` (Go 1.27 & Compose Desktop)  
-**Author:** Kolta Labs Core Systems Architecture  
+**Author:** Keltstone Systems Core Systems Architecture  
 **Audience:** SDET Architects, Performance Engineers, Security Auditors  
 **Scope:** DOM pruning algorithms, CDP virtual driver, self-healing locator math, DAG workflow pipeline, and DAST fuzzers.
 

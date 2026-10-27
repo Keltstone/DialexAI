@@ -27,7 +27,7 @@ import com.dialex.theme.LocalCcColors
 @Composable
 fun AboutDialog(
     authorName: String = "Arun Electra",
-    companyName: String = "Kolta Labs",
+    companyName: String = "Keltstone Systems",
     onDismiss: () -> Unit,
     onOpenFullAbout: (() -> Unit)? = null,
     onOpenLicensingDedication: (() -> Unit)? = null
@@ -115,7 +115,7 @@ fun AboutDialog(
                         ) {
                             Text("Organization", style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp), color = cc.textMuted)
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                KoltaLabsLogoView(size = 14.dp)
+                                KeltstoneLogoView(size = 14.dp)
                                 Text(companyName, style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold), color = cc.textPrimary)
                             }
                         }
@@ -158,7 +158,7 @@ fun AboutDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Copyright © 2026 Kolta Labs. Free & Open Source.",
+                            "Copyright © 2026 Keltstone Systems. Free & Open Source.",
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.5.sp),
                             color = cc.textMuted.copy(alpha = 0.6f)
                         )

@@ -1,6 +1,6 @@
 # Dialex Suite
 
-**By Kolta Labs.** Tools that make AI disagree with itself before you trust it.
+**By Keltstone Systems.** Tools that make AI disagree with itself before you trust it.
 
 Dialex Suite comprises five sovereign software systems built on local-first engineering and deliberation principles:
 
@@ -189,4 +189,4 @@ We want real contributors on scoped pieces of work (docs, a runner, a platform p
 
 ## Development & Engineering Standards
 
-All modules adhere to the [Kolta KMP & Go Engineering Standards](https://github.com/keltstone/Kolt). Personas, agents, and tooling are governed by rules symlinked in `.standards/`.
+All modules adhere to the [Keltstone KMP & Go Engineering Standards](https://github.com/keltstone/Kolt). Personas, agents, and tooling are governed by rules symlinked in `.standards/`.

@@ -167,7 +167,7 @@ fun TermsConsentDialog(
                         ConsentPillarCard(
                             icon = Icons.Outlined.VerifiedUser,
                             title = "PolyForm Noncommercial License 1.0.0",
-                            description = "Free for individuals, personal study, research, education, and noncommercial pursuits. Commercial use to generate revenue or run a business requires a commercial license from Kolta Labs.",
+                            description = "Free for individuals, personal study, research, education, and noncommercial pursuits. Commercial use to generate revenue or run a business requires a commercial license from Keltstone Systems.",
                             cc = cc
                         )
 

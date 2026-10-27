@@ -1,7 +1,7 @@
 # Dialex AI Client: User Guide & Deliberation Manual
 
 **Client:** `dialex-ai` (Desktop & Android Compose)  
-**Author:** Kolta Labs Product & Experience Design Group  
+**Author:** Keltstone Systems Product & Experience Design Group  
 **Audience:** Architects, Engineering Leaders, Strategists, End Users  
 **Scope:** Desktop & Mobile user guide, Council setup, live deliberation arena, steering, deliverable exports, and pairing.
 

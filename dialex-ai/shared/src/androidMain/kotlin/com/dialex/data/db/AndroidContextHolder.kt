@@ -24,7 +24,7 @@ object AndroidContextHolder {
             dbFile.parentFile?.mkdirs()
             dbFile.absolutePath
         } else {
-            val fallback = File("/data/data/com.koltalabs.dialex/databases")
+            val fallback = File("/data/data/com.keltstone.dialex/databases")
             fallback.mkdirs()
             File(fallback, dbName).absolutePath
         }

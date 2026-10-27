@@ -4,7 +4,7 @@
  "stacks": [
   "kotlin"
  ],
- "author": "Kolta Labs",
+ "author": "Keltstone Systems",
  "rules": [
   {
    "id": "spring-csrf-disabled",
