@@ -1,0 +1,9 @@
+package test
+
+// Multiline signature
+fun multiLine(
+    a: Int,
+    b: String
+): Boolean {
+    return true
+}

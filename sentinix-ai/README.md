@@ -786,9 +786,101 @@ These actions appear as buttons on a finding.
 - **Draft patch:** a unified diff for the finding's file only, size-limited. It is shown to you and never applied or committed automatically.
 - **Test generation** (`POST /api/findings/{id}/ai/test`, Owner only, needs the sandbox): proposes a patch and a regression test, runs the command you give it in the sandbox against the vulnerable code and the patched code, and keeps both only if the test **fails before and passes after**. A test that passes on the vulnerable code proves nothing, so it is discarded.
 
-### Why prompt injection does not get far
+### Hunt v2: Configurable AI Security Audit Engine
 
-Only a short snippet around the finding is sent. It is wrapped and labelled as untrusted data, models have no tools, no shell and no network access of their own, and everything they return is parsed as data and checked before use. A malicious comment in a repository can at worst produce a bad suggestion that a human has to accept.
+`sentinix hunt` audits application entry points for complex logic bugs that deterministic rules cannot detect — such as confused deputy vulnerabilities, intent redirection, path traversal, tapjacking overlays, broken object level authorization (IDOR), command injection, and SSRF.
+
+Hunt v2 brings benchmark-grade, declarative security audits with state persistence, multi-model consensus, multi-stage validation, CodeQL data-flow hints, and live dashboard tracking.
+
+```bash
+# Basic run with config file or CLI flags
+sentinix hunt -ai models.json [path]
+
+# Declarative run using a taskflow and dry-run preview
+sentinix hunt --taskflow android-audit --dry-run [path]
+
+# Fast incremental audit on changed code only
+sentinix hunt --diff [path]
+```
+
+#### Key Capabilities in Hunt v2
+
+- **Declarative Taskflows:** Built-in flows (`android-audit`, `backend-audit`, `ios-audit`, `variant-analysis`, `triage-codeql`) define tasks, passes, and tools. Taskflows can be customized, cryptographically signed with ed25519, and verified before execution.
+- **Config Precedence:** Layered hierarchy: CLI Flags > Organization Ceilings > Project Config (`.sentinix/hunt.json`) > Taskflow Defaults > Engine Defaults. Safeguard-loosening changes require two-person reviewer approval.
+- **Multi-Model Consensus & Roles:** Assign specialized models to roles (`classify`, `reason`, `verify`). Run multi-model consensus voting with majority rule and dissenting evidence capture.
+- **Bounded Tool Registry:** Up to 10 read-only inspection tools (`read_file`, `grep`, `entrypoints`, `list_dir`, `read_symbol`, `find_references`, `callers`, `manifest_query`, `semgrep_file`, `codeql_query`, `mcp_call`) with step caps, byte caps, path traversal confinement via `os.OpenRoot`, and full audit logging.
+- **Multi-Stage Validation Pipeline:**
+  1. *Schema & Confidence Filter:* Enforces `min_confidence` (default 0.60) and structural reasons.
+  2. *Mitigation Check:* Discards findings mitigated by design (e.g. `android:exported="false"`, signature permissions, auth annotations).
+  3. *Dynamic PoC Reproduction:* Synthesizes and executes tests in the no-network sandbox with compiler feedback loops.
+  4. *Severity & CVSS Calibration:* Caps unconfirmed findings at High and calculates calibrated CVSS scores.
+  5. *Deduplication & False-Positive Memory:* Deduplicates findings across passes and auto-demotes noisy rules using historical dismissal telemetry.
+- **CodeQL & Semgrep Hints:** Integrates SARIF data-flow traces (`[source] -> [step] -> [sink]`) as rich prompt context, and auto-generates deterministic Semgrep regression rules.
+- **Gating Modes:**
+  - `gate: advisory` (default): Findings are tagged "AI-suggested, unverified" at notice level, never failing CI.
+  - `gate: confirmed-only`: Opt-in mode that blocks CI only when a finding is reproduced with a confirmed PoC and severity meets or exceeds the threshold.
+- **Diff Mode (`--diff`):** Only audits entry points touched in the current PR or git diff against the base branch.
+
+#### Configuration Schema (`.sentinix/hunt.json`)
+
+```json
+{
+  "version": 1,
+  "taskflow": "android-audit",
+  "gate": "advisory",
+  "policy": "local-only",
+  "max_calls": 200,
+  "max_tokens": 500000,
+  "max_cost_usd": 5.00,
+  "max_wall_time": "30m",
+  "passes": [
+    {"name": "strict", "prompt": "Report only a bug that is clearly exploitable by an unprivileged attacker."},
+    {"name": "broad", "prompt": "Think creatively about unusual attacker-controlled inputs and chained weaknesses."}
+  ],
+  "stop_on_hit": true,
+  "roles": {
+    "classify": "fast-local",
+    "reason": "smart-cloud",
+    "verify": "fast-local"
+  },
+  "tools": {
+    "enabled": true,
+    "step_cap": 3,
+    "size_cap_bytes": 6000,
+    "allowlist": ["read_file", "grep", "entrypoints", "manifest_query"]
+  },
+  "poc": {
+    "enabled": false,
+    "max_attempts": 2
+  },
+  "validation": {
+    "mitigation_check": true,
+    "severity_calibration": true,
+    "dedupe": true,
+    "min_confidence": 0.60
+  }
+}
+```
+
+#### CLI Command Reference
+
+| Command | Description |
+| --- | --- |
+| `sentinix hunt config init [path]` | Generate starter `.sentinix/hunt.json` configuration |
+| `sentinix hunt config show [--explain] [path]` | Inspect resolved configuration with layer source annotations |
+| `sentinix hunt config validate <path>` | Validate configuration schema and budget constraints |
+| `sentinix hunt runs [--project id]` | List historical hunt audit runs and token/cost metrics |
+| `sentinix hunt show <run-id>` | View detailed run metrics and audited tool calls |
+| `sentinix hunt resume <run-id>` | Resume an interrupted audit run skipping finished tasks |
+| `sentinix hunt rerun --task <key>` | Re-run a specific entrypoint task for fast debugging |
+| `sentinix hunt bundle new <name>` | Scaffold a new community vulnerability pack bundle template |
+| `sentinix hunt bundle test <bundle.json>` | Test and validate a community pack bundle |
+| `sentinix hunt bundle sign <bundle.json> --key <privkey>` | Cryptographically sign a bundle using ed25519 |
+| `sentinix hunt bundle verify <bundle.json> --trust <pubkey>` | Verify bundle signature against trusted public keys |
+
+#### Why Prompt Injection Does Not Get Far
+
+Source code and advisories are always framed with `ai.Untrusted()`, models operate with strict tool caps, output schemas are strictly validated, and shell execution is strictly confined to unprivileged sandbox containers. A malicious comment or prompt payload in audited code cannot escape containment or compromise the host.
 
 ---
 
@@ -969,7 +1061,7 @@ Being clear about the edges is part of being trustworthy.
 - **Isolation:** engines run on the host unless `-sandbox-image` is set.
 - **Comments and caching:** a new comment is posted on every push, and results are not cached by file hash.
 - **Scaling:** one server replica only, because scheduled scans run in the process.
-- **Depth of analysis:** rule packs are pattern based. They find known risky constructs, not data flows or business-logic flaws.
+- **Depth of analysis:** rule packs are pattern based. They find known risky constructs; data flows need CodeQL (`SENTINIX_CODEQL=1`) and logic flaws need the advisory `hunt` audit.
 - **Dashboard:** it is a plain-JavaScript page served by the server, not a separate TypeScript application. SCIM provisioning, logo branding and a native PDF renderer are not included.
 - **Platforms:** iOS binary analysis, Flutter and Dart AOT analysis, and runtime mobile instrumentation are not covered.
 - **Not a substitute:** Sentinix does not replace a human security review for regulated products.

@@ -1,0 +1,9 @@
+public class Formatter {
+    public static String format(
+        String template,
+        int flags,
+        Object... values
+    ) {
+        return "";
+    }
+}

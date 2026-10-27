@@ -1,0 +1,3 @@
+def prüfe(wert: str) -> bool:
+    """Prüft den Wert."""
+    return len(wert) > 0

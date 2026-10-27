@@ -1,0 +1,6 @@
+export abstract class BaseService {
+    abstract run(): void;
+    private secret = 1;
+    protected helper() {}
+    #privateField = 2;
+}

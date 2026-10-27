@@ -1,0 +1,7 @@
+package p
+
+type Buffer struct{ data []byte }
+
+func (b *Buffer) Reset() {
+	b.data = nil
+}

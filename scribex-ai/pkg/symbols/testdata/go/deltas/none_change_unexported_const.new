@@ -1,0 +1,3 @@
+package p
+const Pub = 1
+const priv = 999

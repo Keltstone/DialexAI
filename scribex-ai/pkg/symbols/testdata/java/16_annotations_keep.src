@@ -1,0 +1,8 @@
+public class AnnotatedClass {
+    @Deprecated
+    public void oldMethod() {}
+    @Override
+    public String toString() { return ""; }
+    @SuppressWarnings("unchecked")
+    public void castMethod() {}
+}

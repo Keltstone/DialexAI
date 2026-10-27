@@ -1,0 +1,2 @@
+package p
+func F() int { x := 1; return x }

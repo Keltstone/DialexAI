@@ -1,0 +1,2 @@
+MaxRetries|const|4|MaxRetries is the maximum retry limit.
+DefaultTimeout|var|7|DefaultTimeout is the default duration.

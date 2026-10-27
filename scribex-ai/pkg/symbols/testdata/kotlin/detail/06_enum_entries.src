@@ -1,0 +1,9 @@
+package test
+
+// Color enum
+enum class Color {
+    // Red color
+    RED,
+    // Green color
+    GREEN
+}

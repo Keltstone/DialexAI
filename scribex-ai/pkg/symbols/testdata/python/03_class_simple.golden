@@ -1,0 +1,2 @@
+Greeter	class Greeter:
+Greeter.greet	def greet(self, name: str) -> str:

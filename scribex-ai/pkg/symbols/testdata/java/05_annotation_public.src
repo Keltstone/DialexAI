@@ -1,0 +1,4 @@
+public @interface Query {
+    String value() default "";
+    int timeout() default 1000;
+}

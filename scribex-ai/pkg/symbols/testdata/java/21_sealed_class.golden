@@ -1,0 +1,6 @@
+Circle	public final class Circle extends Shape
+Circle.area	public double area()
+Shape	public sealed class Shape permits Circle, Square
+Shape.area	public abstract double area()
+Square	public final class Square extends Shape
+Square.area	public double area()

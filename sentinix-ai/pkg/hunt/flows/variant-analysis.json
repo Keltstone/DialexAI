@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "name": "variant-analysis",
+  "description": "Seeded security advisory variant analysis across all entry points",
+  "globals": {
+    "system_rules": "You are a specialized security variant analysis researcher."
+  },
+  "tasks": [
+    {
+      "name": "classify",
+      "model": "classify",
+      "for_each": "entrypoints",
+      "passes": ["strict"],
+      "tools": ["read_file", "grep", "entrypoints"],
+      "budget": 200,
+      "fresh_context": true,
+      "prompt": "Entry point ({{ entry.kinds }}): {{ entry.name }}\nVulnerability class: variant\nLook for a variant of this known vulnerability (same root cause, different code path):\n{{ globals.advisory }}\n{{ tools.help }}\n{{ entry.code }}\nReply {\"vulnerable\":bool,\"severity\":\"low|medium|high|critical\",\"confidence\":0..1,\"reason\":\"short\"}."
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+package test;
+
+// Doc above annotation
+@Deprecated
+public class App {
+    public void run() {}
+}

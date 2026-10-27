@@ -1,0 +1,9 @@
+package test;
+
+// Direction enum
+public enum Direction {
+    // North
+    NORTH,
+    // South
+    SOUTH;
+}

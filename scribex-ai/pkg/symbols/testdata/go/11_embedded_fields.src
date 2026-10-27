@@ -1,0 +1,6 @@
+package p
+
+type AdminUser struct {
+	User
+	Role string
+}

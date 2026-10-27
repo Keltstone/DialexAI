@@ -1,0 +1,2 @@
+def get_matrix() -> list[list[int]]:
+    return [[1, 2], [3, 4]]

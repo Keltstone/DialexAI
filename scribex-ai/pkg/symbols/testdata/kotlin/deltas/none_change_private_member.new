@@ -1,0 +1,4 @@
+class Service {
+    val publicApi = 1
+    private val secret = 999
+}

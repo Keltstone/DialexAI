@@ -1,0 +1,1 @@
+export enum State { On = "ON", Off = "OFF" }

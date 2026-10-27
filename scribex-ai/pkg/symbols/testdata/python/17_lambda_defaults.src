@@ -1,0 +1,2 @@
+def filter_items(items: list, predicate = lambda x: x > 0) -> list:
+    return [i for i in items if predicate(i)]

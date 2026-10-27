@@ -1,0 +1,2 @@
+Animal	class Animal(Organism, metaclass = Meta):
+Animal.species	species: str

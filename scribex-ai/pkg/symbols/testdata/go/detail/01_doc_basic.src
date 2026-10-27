@@ -1,0 +1,6 @@
+package test
+
+// Greet prints a greeting.
+func Greet(name string) string {
+	return "Hello " + name
+}

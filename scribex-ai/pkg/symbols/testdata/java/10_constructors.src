@@ -1,0 +1,4 @@
+public class Connection {
+    public Connection(String url) {}
+    public Connection(String url, int timeout) {}
+}

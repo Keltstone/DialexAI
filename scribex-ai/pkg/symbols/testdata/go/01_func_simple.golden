@@ -1,0 +1,1 @@
+Hello	func Hello(name string) string

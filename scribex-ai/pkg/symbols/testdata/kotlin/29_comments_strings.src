@@ -1,0 +1,4 @@
+// Comments and strings looking like code
+val text = """fun hidden() { val x = 1 }"""
+/* fun fake() {} */
+fun real() {}

@@ -1,0 +1,2 @@
+class Animal(Organism, metaclass=Meta):
+    species: str = "unknown"

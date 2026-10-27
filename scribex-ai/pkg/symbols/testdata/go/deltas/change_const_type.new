@@ -1,0 +1,2 @@
+package p
+const Timeout int64 = 100

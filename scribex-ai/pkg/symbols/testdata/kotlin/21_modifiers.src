@@ -1,0 +1,5 @@
+// Modifiers: suspend, inline, operator, infix
+suspend fun fetch(): String = "data"
+inline fun <reified T> parse(raw: String): T? = null
+operator fun Point.plus(other: Point): Point = Point(x + other.x, y + other.y)
+infix fun Int.pow(exp: Int): Int = 1

@@ -1,0 +1,4 @@
+public class ArrayTest {
+    public int[] getList() { return new int[0]; }
+    public String[][] getMatrix() { return new String[0][0]; }
+}

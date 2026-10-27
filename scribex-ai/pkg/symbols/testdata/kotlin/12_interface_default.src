@@ -1,0 +1,5 @@
+// Interface with default and abstract methods
+interface Greeter {
+    fun hello(name: String): String = "Hello, $name"
+    fun bye(): String
+}

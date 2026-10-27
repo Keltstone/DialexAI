@@ -1,0 +1,4 @@
+public abstract class BaseService {
+    public abstract void run();
+    public void stop() {}
+}

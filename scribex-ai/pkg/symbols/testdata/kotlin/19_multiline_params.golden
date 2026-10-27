@@ -1,0 +1,2 @@
+multiParam	fun multiParam(first: String, second: Int, third: Boolean): Unit
+multiParamNoComma	fun multiParamNoComma(a: Double, b: Float): Double

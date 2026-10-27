@@ -47,6 +47,7 @@ type App struct {
 	Workers         int
 	RequiredEngines []string
 	AIModels        []ai.Model // empty: AI add-on unavailable
+	HuntMaxCalls    int        // >0: AI-enabled projects also run the llm-audit engine, capped per scan
 	TestRunner     ai.Runner         // sandboxed runner for model-written tests; nil disables test generation
 	Integrations   *integrations.Set // nil: no chat, webhooks or tickets
 	Brand          report.Brand      // white-label name and accent for HTML reports
@@ -151,6 +152,9 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("DELETE /api/projects/{id}/rule-policies/{rule...}", api("manage", a.deleteProjectRulePolicy))
 	m.HandleFunc("POST /api/projects/{id}/scan", api("scan", a.scanNow))
 	m.HandleFunc("GET /api/projects/{id}/scans", api("read", a.scans))
+	m.HandleFunc("GET /api/projects/{id}/hunt/runs", api("read", a.listHuntRuns))
+	m.HandleFunc("GET /api/projects/{id}/hunt/runs/{runID}", api("read", a.getHuntRun))
+	m.HandleFunc("POST /api/projects/{id}/hunt/run", api("scan", a.triggerHuntRun))
 	m.HandleFunc("GET /api/projects/{id}/surface", api("read", a.surface))
 	m.HandleFunc("POST /api/advisories/rescan", api("scan", a.rescanAdvisories))
 	m.HandleFunc("GET /api/projects/{id}/sbom", api("read", a.sbom))

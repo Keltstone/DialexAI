@@ -1,0 +1,6 @@
+package p
+
+type ReadCloser interface {
+	Reader
+	Close() error
+}

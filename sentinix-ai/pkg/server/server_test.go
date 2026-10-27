@@ -333,3 +333,46 @@ func TestIngestTrust_UnsignedCappedAndRefusesReopen(t *testing.T) {
 	}
 }
 
+func TestHuntServerAPIEndpoints(t *testing.T) {
+	e := setup(t)
+	p, err := e.st.CreateProject(store.Project{Name: "hunt-project", Repo: "keltstone/hunt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Trigger hunt run
+	w := e.call("reviewer@example.test", auth.Reviewer, "POST", "/api/projects/"+p.ID+"/hunt/run", "")
+	e.ok(w, 200)
+
+	var run store.HuntRun
+	if err := json.Unmarshal(w.Body.Bytes(), &run); err != nil {
+		t.Fatalf("failed to decode hunt run: %v", err)
+	}
+	if run.ProjectID != p.ID || run.Status != "running" {
+		t.Errorf("unexpected run created: %+v", run)
+	}
+
+	// 2. List hunt runs
+	wList := e.call("admin@example.test", auth.Admin, "GET", "/api/projects/"+p.ID+"/hunt/runs", "")
+	e.ok(wList, 200)
+	var runs []store.HuntRun
+	if err := json.Unmarshal(wList.Body.Bytes(), &runs); err != nil {
+		t.Fatalf("failed to decode hunt runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != run.ID {
+		t.Errorf("expected 1 run in list, got %+v", runs)
+	}
+
+	// 3. Get hunt run details
+	wDetail := e.call("admin@example.test", auth.Admin, "GET", "/api/projects/"+p.ID+"/hunt/runs/"+run.ID, "")
+	e.ok(wDetail, 200)
+	var detail map[string]any
+	if err := json.Unmarshal(wDetail.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("failed to decode run detail: %v", err)
+	}
+	if detail["run"] == nil {
+		t.Errorf("missing run in detail response: %+v", detail)
+	}
+}
+
+

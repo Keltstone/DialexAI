@@ -1,0 +1,2 @@
+appVersion	val appVersion: String
+counter	var counter: Int

@@ -1,0 +1,2 @@
+API_KEY	const val API_KEY = "xyz123"
+MAX_RETRIES	const val MAX_RETRIES = 3

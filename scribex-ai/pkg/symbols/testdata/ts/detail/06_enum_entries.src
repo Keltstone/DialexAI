@@ -1,0 +1,7 @@
+// Direction enum
+export enum Direction {
+    // Up direction
+    Up = 1,
+    // Down direction
+    Down = 2
+}

@@ -1,0 +1,8 @@
+public class Outer {
+    public static class StaticNested {
+        public int val = 1;
+    }
+    public class Inner {
+        public String text = "hi";
+    }
+}

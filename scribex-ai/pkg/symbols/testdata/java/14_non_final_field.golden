@@ -1,0 +1,3 @@
+User	public class User
+User.age	public int age
+User.name	public String name

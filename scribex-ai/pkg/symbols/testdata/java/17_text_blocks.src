@@ -1,0 +1,6 @@
+public class Template {
+    public static final String SQL = """
+        SELECT * FROM users
+        WHERE active = 1
+        """;
+}

@@ -1,0 +1,4 @@
+[
+ {"rule": "hunt/confused-deputy", "file": "app/src/main/kotlin/MapActivity.kt"},
+ {"rule": "hunt/deeplink-host", "file": "app/src/main/kotlin/DeepLinkActivity.kt"}
+]

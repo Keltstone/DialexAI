@@ -133,3 +133,20 @@ func (s *Store) TokenProject(raw string) (string, bool) {
 }
 
 var ErrNotFound = sql.ErrNoRows
+
+// GetProjectHuntConfig retrieves the JSON configuration for a project's hunt v2 settings.
+func (s *Store) GetProjectHuntConfig(projectID string) (string, error) {
+	var cfg string
+	err := s.db.QueryRow("select config_json from project_hunt_configs where project_id=$1", projectID).Scan(&cfg)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return cfg, err
+}
+
+// SetProjectHuntConfig updates or inserts the JSON configuration for a project.
+func (s *Store) SetProjectHuntConfig(projectID, configJSON, updatedBy string) error {
+	_, err := s.db.Exec("insert into project_hunt_configs(project_id, config_json, updated_at, updated_by) values($1, $2, $3, $4) on conflict(project_id) do update set config_json=excluded.config_json, updated_at=excluded.updated_at, updated_by=excluded.updated_by",
+		projectID, configJSON, now(), updatedBy)
+	return err
+}

@@ -1,0 +1,2 @@
+// Extension property
+val String.lastChar: Char get() = this[length - 1]

@@ -1,0 +1,12 @@
+package test
+
+// MultiLine demonstrates a function spanning multiple lines.
+func MultiLine(
+	a int,
+	b string,
+) (
+	bool,
+	error,
+) {
+	return true, nil
+}

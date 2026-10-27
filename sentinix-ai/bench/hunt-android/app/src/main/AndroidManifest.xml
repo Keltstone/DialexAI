@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <activity android:name=".MapActivity" android:exported="true">
+      <intent-filter><action android:name="app.IMPORT"/></intent-filter>
+    </activity>
+    <activity android:name=".DeepLinkActivity" android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW"/>
+        <data android:scheme="https" android:host="example.org"/>
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

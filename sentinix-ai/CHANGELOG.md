@@ -63,6 +63,30 @@ Initial general availability release of **Sentinix AI**, the continuous security
   - Zero-config local SQLite store (`sqlite:sentinix.db`) for workstation and small team use.
   - Enterprise PostgreSQL backend with connection pooling, transactional state management, and RBAC isolation.
 
+### 🎯 Hunt v2: Configurable AI Security Audit Engine
+- **Declarative YAML/JSON Taskflows**:
+  - Pre-built taskflows (`android-audit`, `backend-audit`, `ios-audit`, `variant-analysis`, `triage-codeql`).
+  - Safe Mustache templating without shell or network escape.
+  - Cryptographic ed25519 bundle signing and verification via `sentinix hunt bundle sign/verify`.
+- **Precedence Hierarchy & Safeguard Protection**:
+  - Multi-tier configuration (CLI flags > Org ceilings > Project config > Taskflow > Defaults).
+  - Two-person reviewer approval workflow before loosening audit ceilings or disabling security checks.
+- **Multi-Model Consensus & Budget Accounting**:
+  - Role-based model assignment (`classify`, `reason`, `verify`) with majority voting and dissenting evidence capture.
+  - Atomic tracking of model calls, tokens, and USD costs with hard cutoff guarantees.
+- **Bounded Tool Registry**:
+  - 10 read-only code analysis tools with traversal sandboxing via Go `os.OpenRoot()`, byte caps, and full database audit logging.
+- **Multi-Stage Validation Pipeline**:
+  - Automatic mitigation filtering (`android:exported="false"`, signature permissions, auth middleware).
+  - Dynamic PoC test verification in isolated Docker sandbox with compiler feedback loop.
+  - Severity calibration and historical false-positive auto-demotion.
+- **CodeQL & Semgrep Data-Flow Integration**:
+  - SARIF trace parsing converting complex sinks to prompt context.
+  - Deterministic Semgrep taint rule synthesis with fixture verification.
+- **Diff Mode & Audit Lifecycle**:
+  - Incremental scanning (`sentinix hunt --diff`) for sub-minute PR turnaround.
+  - Persistent run history, resume, task-level rerun, and MCP tools (`sentinix_hunt_plan`, `sentinix_hunt_results`).
+
 ---
 
 [1.0.0]: https://github.com/Keltstone/DialexAI/releases/tag/sentinix-v1.0.0

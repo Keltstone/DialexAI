@@ -1,0 +1,2 @@
+Container	type Container[T any] struct { }
+Container.Get	func(c * Container[T]) Get() T

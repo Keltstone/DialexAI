@@ -1,0 +1,2 @@
+// Extension functions with generics
+fun <T> List<T>.second(): T? = if (size >= 2) this[1] else null

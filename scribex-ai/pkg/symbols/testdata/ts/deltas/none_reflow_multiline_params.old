@@ -1,0 +1,1 @@
+export function test(a: number, b: string): void {}

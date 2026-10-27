@@ -1,0 +1,1 @@
+fetchData	export async function fetchData(url: string): Promise<Response>

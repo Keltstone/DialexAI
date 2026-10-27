@@ -1,0 +1,9 @@
+public class AccessTest {
+    public int pubField = 1;
+    protected int protField = 2;
+    int packageField = 3;
+    private int privField = 4;
+    public void pubMethod() {}
+    protected void protMethod() {}
+    private void privMethod() {}
+}

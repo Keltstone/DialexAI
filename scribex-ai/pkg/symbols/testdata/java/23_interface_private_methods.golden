@@ -1,0 +1,2 @@
+Helper	public interface Helper
+Helper.doWork	default void doWork()

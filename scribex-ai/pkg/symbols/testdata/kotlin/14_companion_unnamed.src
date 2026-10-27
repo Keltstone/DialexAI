@@ -1,0 +1,6 @@
+// Unnamed companion object
+class Factory {
+    companion object {
+        fun create(): Factory = Factory()
+    }
+}

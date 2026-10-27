@@ -1,0 +1,3 @@
+Direction|enum|4|Direction enum
+Direction.NORTH|enum_entry|6|North
+Direction.SOUTH|enum_entry|8|South

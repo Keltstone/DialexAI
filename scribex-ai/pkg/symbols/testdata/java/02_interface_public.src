@@ -1,0 +1,5 @@
+public interface Service {
+    void execute();
+    default String getName() { return "Service"; }
+    static void log() {}
+}

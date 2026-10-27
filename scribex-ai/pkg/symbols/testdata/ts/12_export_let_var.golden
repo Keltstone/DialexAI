@@ -1,0 +1,2 @@
+activeConnections	export let activeConnections: number
+globalState	export var globalState: any

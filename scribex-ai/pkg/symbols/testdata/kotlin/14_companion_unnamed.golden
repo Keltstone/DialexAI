@@ -1,0 +1,2 @@
+Factory	class Factory
+Factory.Companion.create	fun create(): Factory

@@ -1,0 +1,2 @@
+TabIndented	class TabIndented:
+TabIndented.method_one	def method_one(self):

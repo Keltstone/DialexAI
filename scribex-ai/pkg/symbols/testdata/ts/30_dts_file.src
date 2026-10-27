@@ -1,0 +1,4 @@
+export declare function initialize(options?: object): boolean;
+export declare class Engine {
+    start(): void;
+}

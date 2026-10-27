@@ -1,0 +1,2 @@
+package p
+func Get() int64 { return 0 }

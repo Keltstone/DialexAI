@@ -1,0 +1,6 @@
+// Named companion object
+class CustomFactory {
+    companion object Builder {
+        fun build(): CustomFactory = CustomFactory()
+    }
+}

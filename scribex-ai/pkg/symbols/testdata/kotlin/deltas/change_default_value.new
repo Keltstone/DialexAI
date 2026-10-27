@@ -1,0 +1,1 @@
+fun delay(ms: Long = 500): Unit {}

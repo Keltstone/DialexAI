@@ -1,0 +1,4 @@
+Outer	class Outer
+Outer.Inner	inner class Inner
+Outer.Inner.innerField	val innerField: Int
+Outer.outerField	val outerField: String

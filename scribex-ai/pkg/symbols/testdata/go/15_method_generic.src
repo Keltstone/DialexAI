@@ -1,0 +1,7 @@
+package p
+
+type Container[T any] struct{ val T }
+
+func (c *Container[T]) Get() T {
+	return c.val
+}

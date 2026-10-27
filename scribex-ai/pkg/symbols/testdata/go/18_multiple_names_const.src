@@ -1,0 +1,3 @@
+package p
+
+const A, B = 1, 2

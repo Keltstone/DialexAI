@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "name": "triage-codeql",
+  "description": "Triage CodeQL taint flows and judge reachability and mitigations",
+  "globals": {
+    "system_rules": "You are a specialized security triager evaluating static analysis data flows."
+  },
+  "tasks": [
+    {
+      "name": "triage",
+      "model": "validate",
+      "for_each": "findings",
+      "passes": ["strict"],
+      "tools": ["read_file", "grep"],
+      "budget": 200,
+      "fresh_context": true,
+      "prompt": "Evaluate this CodeQL finding and data flow path for real-world exploitability:\nFinding: {{ finding.rule }} at {{ finding.file }}:{{ finding.line }}\nMessage: {{ finding.message }}\nData flow:\n{{ finding.evidence }}\nSource code:\n{{ finding.code }}\nReply {\"vulnerable\":bool,\"severity\":\"low|medium|high|critical\",\"confidence\":0..1,\"reason\":\"reachability and mitigation rationale\"}."
+    }
+  ]
+}

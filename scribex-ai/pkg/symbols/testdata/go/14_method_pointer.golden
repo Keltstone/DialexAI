@@ -1,0 +1,2 @@
+Buffer	type Buffer struct { }
+Buffer.Reset	func(b * Buffer) Reset()

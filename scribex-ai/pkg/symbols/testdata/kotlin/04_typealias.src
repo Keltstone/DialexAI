@@ -1,0 +1,3 @@
+// Typealias
+typealias StringMap<V> = Map<String, V>
+typealias Predicate<T> = (T) -> Boolean

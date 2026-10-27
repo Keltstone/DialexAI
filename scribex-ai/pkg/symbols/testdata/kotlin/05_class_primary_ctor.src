@@ -1,0 +1,2 @@
+// Class with primary constructor params and defaults
+class User(val id: Long, var name: String, val active: Boolean = true)

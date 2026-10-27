@@ -1,0 +1,6 @@
+package test
+
+// Runner runs tasks.
+type Runner interface {
+	Run()
+}

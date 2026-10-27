@@ -1,0 +1,7 @@
+package p
+
+// func Hidden() {}
+/*
+func AlsoFake() {}
+*/
+func Real() {}

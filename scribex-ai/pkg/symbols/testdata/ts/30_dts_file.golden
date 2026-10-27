@@ -1,0 +1,3 @@
+Engine	export declare class Engine
+Engine.start	start(): void
+initialize	export declare function initialize(options?: object): boolean

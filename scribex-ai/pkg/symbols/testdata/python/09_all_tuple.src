@@ -1,0 +1,5 @@
+__all__ = ("public_a", "public_b")
+
+def public_a(): pass
+def public_b(): pass
+def private_c(): pass

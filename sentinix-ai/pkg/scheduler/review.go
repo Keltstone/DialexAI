@@ -389,6 +389,9 @@ func scanAll(ctx context.Context, root string, extra []engines.Engine) ([]engine
 		}
 		meta[e.Name()] = m
 		ran = append(ran, e.Name())
+		if ge, ok := e.(interface{ Gap() string }); ok && ge.Gap() != "" {
+			gaps = append(gaps, ge.Gap())
+		}
 		if se, ok := e.(interface{ Skipped() []string }); ok {
 			skipped = append(skipped, se.Skipped()...)
 		}

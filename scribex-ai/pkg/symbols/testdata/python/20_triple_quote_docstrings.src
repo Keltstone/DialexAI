@@ -1,0 +1,6 @@
+def sample():
+    """
+    def fake_code():
+        pass
+    """
+    return 1

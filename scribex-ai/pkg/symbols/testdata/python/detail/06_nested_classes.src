@@ -1,0 +1,7 @@
+class Outer:
+    """Outer class."""
+    class Inner:
+        """Inner class."""
+        def action(self):
+            """Action method."""
+            pass

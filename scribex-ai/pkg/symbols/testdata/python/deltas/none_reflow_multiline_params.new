@@ -1,0 +1,4 @@
+def run(
+    a: int,
+    b: str
+) -> None: pass

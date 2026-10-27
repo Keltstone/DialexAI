@@ -20,19 +20,23 @@ import (
 	"time"
 
 	"sentinix/pkg/advisories"
+	"sentinix/pkg/ai"
 	"sentinix/pkg/bench"
 	"sentinix/pkg/diffmap"
 	"sentinix/pkg/engines"
+	"sentinix/pkg/hunt"
+	"sentinix/pkg/mcp"
 	"sentinix/pkg/packs"
 	"sentinix/pkg/policy"
 	"sentinix/pkg/report"
+	"sentinix/pkg/sandbox"
 	"sentinix/pkg/scheduler"
 	"sentinix/pkg/store"
 )
 
 var version = "1.0.0"
 
-const usage = "usage: sentinix scan [flags] [path] | sign [flags] [file] | surface [base-ref] | packs keygen|sign|verify|new|test | rules new|test|sign | policy init|show | hook install|run|uninstall | bench <dir> | audit verify [-db <dsn>] | version"
+const usage = "usage: sentinix scan [flags] [path] | sign [flags] [file] | surface [base-ref] | packs keygen|sign|verify|new|test | rules new|test|sign | policy init|show | hook install|run|uninstall | bench <dir> | audit verify [-db <dsn>] | hunt -ai models.json [path] | mcp serve [dir] | version"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -59,6 +63,18 @@ func main() {
 		benchCmd(args)
 	case "audit":
 		auditCmd(args)
+	case "hunt":
+		huntCmd(args)
+	case "mcp":
+		if len(args) < 1 || args[0] != "serve" {
+			fmt.Fprintln(os.Stderr, "usage: sentinix mcp serve [dir]")
+			os.Exit(2)
+		}
+		root := "."
+		if len(args) > 1 {
+			root = args[1]
+		}
+		die(mcp.Serve(os.Stdin, os.Stdout, root))
 	default:
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
@@ -604,5 +620,431 @@ func auditCmd(args []string) {
 		os.Exit(1)
 	}
 	fmt.Println("AUDIT CHAIN VERIFIED: all rows valid, hash chain intact.")
+}
+
+
+func huntConfigCmd(args []string) {
+	if len(args) == 0 {
+		die(fmt.Errorf("usage: sentinix hunt config init|show|validate [--explain] [path]"))
+	}
+	switch args[0] {
+	case "init":
+		target := ""
+		if len(args) > 1 {
+			target = args[1]
+		}
+		err := hunt.InitConfigFile(target)
+		die(err)
+		if target == "" {
+			fmt.Println("Initialized Hunt v2 config at .sentinix/hunt.json")
+		} else {
+			fmt.Println("Initialized Hunt v2 config at", target)
+		}
+	case "show":
+		explain := false
+		root := "."
+		for _, a := range args[1:] {
+			if a == "--explain" {
+				explain = true
+			} else if !strings.HasPrefix(a, "-") {
+				root = a
+			}
+		}
+		cfg, err := hunt.ResolveConfig(root, nil, hunt.CLIFlags{})
+		die(err)
+		if explain {
+			fmt.Print(cfg.Explain())
+		} else {
+			b, _ := json.MarshalIndent(cfg, "", "  ")
+			fmt.Println(string(b))
+		}
+	case "validate":
+		target := filepath.Join(".", ".sentinix", "hunt.json")
+		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
+			target = args[1]
+		}
+		cfg, err := hunt.LoadConfigFile(target)
+		die(err)
+		err = cfg.Validate(nil)
+		die(err)
+		fmt.Printf("Config %s is VALID.\n", target)
+	default:
+		die(fmt.Errorf("unknown hunt config command %q; choose init, show, or validate", args[0]))
+	}
+}
+
+func huntCmd(args []string) {
+	if len(args) > 0 {
+		switch args[0] {
+		case "config":
+			huntConfigCmd(args[1:])
+			return
+		case "runs":
+			huntRunsCmd(args[1:])
+			return
+		case "show":
+			huntShowCmd(args[1:])
+			return
+		case "resume":
+			huntResumeCmd(args[1:])
+			return
+		case "rerun":
+			huntRerunCmd(args[1:])
+			return
+		case "bundle":
+			huntBundleCmd(args[1:])
+			return
+		}
+	}
+	fl := flag.NewFlagSet("hunt", flag.ExitOnError)
+	models := fl.String("ai", "", "models JSON (required unless in config)")
+	policy := fl.String("policy", "", "model policy: local-only|cloud-redacted|cloud")
+	maxCalls := fl.Int("max-calls", 0, "hard cap on model calls")
+	sbImage := fl.String("sandbox-image", "", "container image; with -poc-cmd, model-written PoC tests run in it (no network)")
+	pocCmd := fl.String("poc-cmd", "", "test command for PoC tests, e.g. \"./gradlew test\" (needs -sandbox-image)")
+	huntPacks := fl.String("hunt-packs", "", "directory of signed hunt packs (extra vulnerability classes)")
+	trust := fl.String("trust", "", "file of trusted pack public keys (needed with -hunt-packs)")
+	variant := fl.String("variant", "", "file with a known vulnerability description; also hunt for variants of it")
+	useTools := fl.Bool("tools", false, "let the model read files and grep inside the path before answering (read-only)")
+	toolSteps := fl.Int("tool-steps", 0, "max tool calls per task")
+	platform := fl.String("platform", "", "audit only mobile or backend entry points (default: both)")
+	resume := fl.String("resume", "", "state file; finished tasks are skipped on re-run")
+	only := fl.String("only", "", "run only tasks whose file|class contains this text")
+	ghsa := fl.String("variant-ghsa", "", "public GitHub advisory id (GHSA-...); fetched and used like -variant")
+	gate := fl.String("gate", "", "gating policy: advisory|confirmed-only")
+	taskflow := fl.String("taskflow", "", "taskflow file or name")
+	dryRun := fl.Bool("dry-run", false, "plan tasks and display budget estimates without invoking models")
+	diffMode := fl.Bool("diff", false, "only audit entry points touched in git diff against HEAD/base")
+	fl.Parse(args)
+
+	root := "."
+	if fl.NArg() > 0 {
+		root = fl.Arg(0)
+	}
+
+	var toolsFlag *bool
+	fl.Visit(func(f *flag.Flag) {
+		if f.Name == "tools" {
+			toolsFlag = useTools
+		}
+	})
+
+	cliFlags := hunt.CLIFlags{
+		AI:           *models,
+		Policy:       *policy,
+		MaxCalls:     *maxCalls,
+		SandboxImage: *sbImage,
+		PoCCmd:       *pocCmd,
+		HuntPacks:    *huntPacks,
+		Trust:        *trust,
+		Variant:      *variant,
+		VariantGHSA:  *ghsa,
+		Tools:        toolsFlag,
+		ToolSteps:    *toolSteps,
+		Platform:     *platform,
+		Resume:       *resume,
+		Only:         *only,
+		Gate:         *gate,
+		Taskflow:     *taskflow,
+		DryRun:       *dryRun,
+		Diff:         *diffMode,
+	}
+
+	cfg, err := hunt.ResolveConfig(root, nil, cliFlags)
+	die(err)
+
+	if cfg.ModelsFile == "" {
+		die(fmt.Errorf("usage: hunt -ai models.json [-policy p] [-max-calls n] [path]"))
+	}
+	ms, err := ai.LoadModels(cfg.ModelsFile)
+	die(err)
+
+	e := &hunt.Engine{
+		Models:   ms,
+		Policy:   cfg.Policy,
+		MaxCalls: cfg.MaxCalls,
+		Config:   &cfg,
+	}
+	e.Tools, e.ToolSteps, e.Platform, e.Only = cfg.Tools.Enabled, cfg.Tools.StepCap, cfg.Platform, cfg.Only
+	if cfg.Resume != "" {
+		e.State, err = hunt.LoadState(cfg.Resume)
+		die(err)
+	}
+	if cfg.Variant != "" {
+		b, err := os.ReadFile(cfg.Variant)
+		die(err)
+		e.Variant = string(b)
+	}
+	if cfg.VariantGHSA != "" {
+		e.Variant, err = hunt.FetchGHSA(context.Background(), cfg.VariantGHSA, "")
+		die(err)
+	}
+	if len(cfg.HuntPacks) > 0 && cfg.HuntPacks[0] != "" {
+		keys, err := packs.ReadKeys(cfg.Trust)
+		die(err)
+		for _, dir := range cfg.HuntPacks {
+			files, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+			for _, f := range files {
+				b, err := os.ReadFile(f)
+				die(err)
+				p, err := hunt.LoadPack(b, keys)
+				if err != nil {
+					die(fmt.Errorf("%s: %w", f, err))
+				}
+				e.Packs = append(e.Packs, p)
+			}
+		}
+	}
+	if cfg.PoC.Enabled && len(cfg.PoC.Command) > 0 {
+		if cfg.PoC.SandboxImage == "" {
+			die(fmt.Errorf("-poc-cmd runs model-written code: -sandbox-image is required"))
+		}
+		e.Run, e.PoCCmd = sandbox.Docker{Image: cfg.PoC.SandboxImage}.Run, cfg.PoC.Command
+	}
+	fs, err := e.Scan(context.Background(), root)
+	die(err)
+	for _, f := range fs {
+		fmt.Printf("[%s] %s %s (AI-suggested, unverified) %s %s\n", f.Severity, f.Rule, f.File, f.Message, f.Evidence)
+	}
+	fmt.Printf("%d finding(s). Engines run: llm-audit (advisory).", len(fs))
+	if e.Truncated {
+		fmt.Printf(" Not covered: stopped at -max-calls %d.", cfg.MaxCalls)
+	}
+	fmt.Println()
+}
+
+func huntRunsCmd(args []string) {
+	fl := flag.NewFlagSet("hunt runs", flag.ExitOnError)
+	project := fl.String("project", "", "project ID filter")
+	limit := fl.Int("limit", 20, "maximum runs to list")
+	db := fl.String("db", "sentinix.db", "database DSN")
+	fl.Parse(args)
+
+	st, err := store.Open(*db)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening store: %v\n", err)
+		os.Exit(1)
+	}
+	defer st.Close()
+
+	runs, err := st.ListHuntRuns(context.Background(), *project, *limit)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error listing runs: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(runs) == 0 {
+		fmt.Println("No hunt runs found.")
+		return
+	}
+
+	fmt.Printf("%-24s %-16s %-10s %-8s %-6s %-8s %-8s\n", "RUN ID", "PROJECT", "STATUS", "CALLS", "TOKENS", "COST", "FINDINGS")
+	for _, r := range runs {
+		costStr := fmt.Sprintf("$%.2f", r.CostUSD)
+		fmt.Printf("%-24s %-16s %-10s %-8d %-6d %-8s %-8d\n", r.ID, r.ProjectID, r.Status, r.Calls, r.Tokens, costStr, r.FindingsCount)
+	}
+}
+
+func huntShowCmd(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: sentinix hunt show <run-id> [--db dsn]")
+		os.Exit(1)
+	}
+	runID := args[0]
+	fl := flag.NewFlagSet("hunt show", flag.ExitOnError)
+	db := fl.String("db", "sentinix.db", "database DSN")
+	fl.Parse(args[1:])
+
+	st, err := store.Open(*db)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening store: %v\n", err)
+		os.Exit(1)
+	}
+	defer st.Close()
+
+	run, err := st.GetHuntRun(context.Background(), runID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error fetching run: %v\n", err)
+		os.Exit(1)
+	}
+	if run == nil {
+		fmt.Fprintf(os.Stderr, "run %q not found\n", runID)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Hunt Run: %s\n", run.ID)
+	fmt.Printf("Project:  %s\n", run.ProjectID)
+	fmt.Printf("Status:   %s\n", run.Status)
+	fmt.Printf("Started:  %d\n", run.Started)
+	fmt.Printf("Calls:    %d\n", run.Calls)
+	fmt.Printf("Tokens:   %d\n", run.Tokens)
+	fmt.Printf("Cost:     $%.2f USD\n", run.CostUSD)
+	fmt.Printf("Findings: %d\n", run.FindingsCount)
+	if run.Gaps != "" {
+		fmt.Printf("Gaps:     %s\n", run.Gaps)
+	}
+
+	calls, _ := st.GetHuntRunToolCalls(context.Background(), runID)
+	if len(calls) > 0 {
+		fmt.Printf("\nAudited Tool Calls (%d):\n", len(calls))
+		for _, c := range calls {
+			fmt.Printf("- [%s] tool=%s args_hash=%s bytes=%d\n", c.TaskID, c.Tool, c.ArgsHash, c.BytesReturned)
+		}
+	}
+}
+
+func huntResumeCmd(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: sentinix hunt resume <run-id> [options]")
+		os.Exit(1)
+	}
+	// For resume, forward to huntCmd with resume flag
+	huntCmd(append([]string{"-resume", args[0]}, args[1:]...))
+}
+
+func huntRerunCmd(args []string) {
+	fl := flag.NewFlagSet("hunt rerun", flag.ExitOnError)
+	task := fl.String("task", "", "task id/key to rerun")
+	fl.Parse(args)
+	if *task == "" {
+		fmt.Fprintln(os.Stderr, "usage: sentinix hunt rerun --task <task-key>")
+		os.Exit(1)
+	}
+	huntCmd(append([]string{"-only", *task}, fl.Args()...))
+}
+
+func huntBundleCmd(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: sentinix hunt bundle <new|test|sign|verify> [args...]")
+		os.Exit(1)
+	}
+
+	b64 := base64.StdEncoding
+
+	switch args[0] {
+	case "new":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: sentinix hunt bundle new <name>")
+			os.Exit(1)
+		}
+		name := args[1]
+		filename := name
+		if !strings.HasSuffix(filename, ".json") {
+			filename += ".json"
+		}
+		packName := strings.TrimSuffix(filepath.Base(name), ".json")
+		p := hunt.Pack{
+			Name:    packName,
+			Version: "1.0.0",
+			Classes: map[string][]hunt.Class{
+				"component": {
+					{
+						ID:   "custom-audit-check",
+						CWE:  "CWE-200",
+						Hint: "Check specifically for information disclosure to unprivileged caller components.",
+					},
+				},
+			},
+		}
+		b, err := json.MarshalIndent(p, "", "  ")
+		die(err)
+		die(os.WriteFile(filename, append(b, '\n'), 0o644))
+		fmt.Printf("✓ Created hunt bundle template in %s\n", filename)
+
+	case "test":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: sentinix hunt bundle test <bundle.json>")
+			os.Exit(1)
+		}
+		body, err := os.ReadFile(args[1])
+		die(err)
+		var signed packs.Signed
+		if json.Unmarshal(body, &signed) == nil && len(signed.Body) > 0 {
+			body = signed.Body
+		}
+		p, err := hunt.ParsePack(body)
+		die(err)
+		totalClasses := 0
+		for _, cs := range p.Classes {
+			totalClasses += len(cs)
+		}
+		fmt.Printf("✓ Hunt bundle %q v%s: %d class(es) verified across %d kind(s).\n", p.Name, p.Version, totalClasses, len(p.Classes))
+
+	case "sign":
+		var bundleFile, privFile string
+		for i := 1; i < len(args); i++ {
+			switch {
+			case args[i] == "--key" && i+1 < len(args):
+				privFile = args[i+1]
+				i++
+			case strings.HasPrefix(args[i], "--key="):
+				privFile = strings.TrimPrefix(args[i], "--key=")
+			case !strings.HasPrefix(args[i], "-"):
+				if bundleFile == "" {
+					bundleFile = args[i]
+				} else if privFile == "" {
+					privFile = args[i]
+				}
+			}
+		}
+		if bundleFile == "" || privFile == "" {
+			fmt.Fprintln(os.Stderr, "usage: sentinix hunt bundle sign <bundle.json> [--key <keyfile>]")
+			os.Exit(1)
+		}
+		body, err := os.ReadFile(bundleFile)
+		die(err)
+		_, err = hunt.ParsePack(body)
+		die(err)
+		kb, err := os.ReadFile(privFile)
+		die(err)
+		privStr := strings.TrimSpace(string(kb))
+		priv, err := b64.DecodeString(privStr)
+		if err != nil || len(priv) != ed25519.PrivateKeySize {
+			if len(kb) == ed25519.PrivateKeySize {
+				priv = kb
+			} else {
+				die(fmt.Errorf("invalid ed25519 private key in %s", privFile))
+			}
+		}
+		signed, err := packs.Sign(body, ed25519.PrivateKey(priv))
+		die(err)
+		os.Stdout.Write(signed)
+
+	case "verify":
+		var bundleFile, trustFile string
+		for i := 1; i < len(args); i++ {
+			switch {
+			case args[i] == "--trust" && i+1 < len(args):
+				trustFile = args[i+1]
+				i++
+			case strings.HasPrefix(args[i], "--trust="):
+				trustFile = strings.TrimPrefix(args[i], "--trust=")
+			case !strings.HasPrefix(args[i], "-"):
+				if bundleFile == "" {
+					bundleFile = args[i]
+				} else if trustFile == "" {
+					trustFile = args[i]
+				}
+			}
+		}
+		if bundleFile == "" || trustFile == "" {
+			fmt.Fprintln(os.Stderr, "usage: sentinix hunt bundle verify <bundle.json> [--trust <pubkeyfile>]")
+			os.Exit(1)
+		}
+		data, err := os.ReadFile(bundleFile)
+		die(err)
+		keys, err := packs.ReadKeys(trustFile)
+		die(err)
+		p, err := hunt.LoadPack(data, keys)
+		die(err)
+		totalClasses := 0
+		for _, cs := range p.Classes {
+			totalClasses += len(cs)
+		}
+		fmt.Printf("✓ Hunt bundle %q v%s verified with trusted signature (%d class(es)).\n", p.Name, p.Version, totalClasses)
+
+	default:
+		die(fmt.Errorf("unknown hunt bundle subcommand: %s", args[0]))
+	}
 }
 

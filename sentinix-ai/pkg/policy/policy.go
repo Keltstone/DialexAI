@@ -53,8 +53,24 @@ func (b Baseline) New(fs []engines.Finding) []engines.Finding {
 // Fails reports whether any finding is at or above the threshold.
 // Unattested CI findings are excluded from the gate.
 func Fails(fs []engines.Finding, min engines.Severity) bool {
+	return FailsWithHuntGate(fs, min, "advisory")
+}
+
+// FailsWithHuntGate evaluates gating taking into account the hunt gate mode ("advisory" or "confirmed-only").
+// Under "advisory" (default), llm findings never gate. Under "confirmed-only", ONLY confirmed PoC findings
+// with severity >= min block.
+func FailsWithHuntGate(fs []engines.Finding, min engines.Severity, gateMode string) bool {
 	for _, f := range fs {
 		if f.Source == "ci-unattested" {
+			continue
+		}
+		if f.Source == "llm" {
+			if gateMode == "confirmed-only" {
+				isConfirmed := strings.Contains(f.Evidence, "[exploitability:confirmed]") || strings.Contains(f.Evidence, "PoC reproduced")
+				if isConfirmed && f.Severity >= min {
+					return true
+				}
+			}
 			continue
 		}
 		if f.Severity >= min {
@@ -81,6 +97,9 @@ func CategoryFails(fs []engines.Finding, cat string, pol CategoryPolicy) bool {
 		return false
 	}
 	for _, f := range fs {
+		if f.Source == "llm" {
+			continue
+		}
 		if f.Source == "ci-unattested" {
 			if cat != engines.CategoryArchitecture || (f.Engine != "" && strings.ToLower(f.Engine) != "konsist") {
 				continue
@@ -173,6 +192,7 @@ type ProjectPolicy struct {
 	Version      string                          `json:"version,omitempty"`
 	DefaultLevel RuleEnforcementLevel            `json:"default_level,omitempty"`
 	Rules        map[string]RuleEnforcementLevel `json:"rules,omitempty"`
+	HuntGate     string                          `json:"hunt_gate,omitempty"` // "advisory" (default) or "confirmed-only"
 }
 
 func LoadProjectPolicy(path string) (*ProjectPolicy, error) {
@@ -196,6 +216,9 @@ func (p *ProjectPolicy) EffectiveLevel(ruleID string, defaultSeverity engines.Se
 			}
 		}
 	}
+	if strings.HasPrefix(ruleID, "hunt/") {
+		return LevelNotice
+	}
 	if p != nil && p.DefaultLevel != "" {
 		if norm, valid := ParseEnforcementLevel(string(p.DefaultLevel)); valid {
 			return norm
@@ -208,6 +231,25 @@ func (p *ProjectPolicy) EffectiveLevel(ruleID string, defaultSeverity engines.Se
 		return LevelWarn
 	}
 	return LevelNotice
+}
+
+// EffectiveFindingLevel returns the enforcement level for a concrete finding.
+// Considers finding Source and confirmed-only hunt gating.
+func (p *ProjectPolicy) EffectiveFindingLevel(f engines.Finding) RuleEnforcementLevel {
+	if f.Source == "llm" {
+		if p != nil && p.HuntGate == "confirmed-only" {
+			isConfirmed := strings.Contains(f.Evidence, "[exploitability:confirmed]") || strings.Contains(f.Evidence, "PoC reproduced")
+			if isConfirmed {
+				if f.Severity >= engines.High {
+					return LevelBlock
+				} else if f.Severity >= engines.Low {
+					return LevelWarn
+				}
+			}
+		}
+		return LevelNotice
+	}
+	return p.EffectiveLevel(f.Rule, f.Severity)
 }
 
 // EvaluatedFindings partitions findings into blocked, warned, noticed, and ignored.

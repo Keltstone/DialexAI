@@ -1,0 +1,8 @@
+package p
+
+type Status int
+
+const (
+	Running Status = 1
+	Stopped Status = 2
+)

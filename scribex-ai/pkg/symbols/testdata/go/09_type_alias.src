@@ -1,0 +1,4 @@
+package p
+
+type ID = string
+type MyInt int

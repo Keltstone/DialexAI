@@ -1,0 +1,4 @@
+Config	export interface Config
+Config.host	host?: string;
+Config.port	port: number;
+Config.readonly	readonly debug: boolean;

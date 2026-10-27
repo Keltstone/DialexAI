@@ -1,0 +1,33 @@
+{
+  "planted_count": 13,
+  "clean_count": 12,
+  "planted": [
+    {"rule": "hunt/confused-deputy", "file": "app/src/main/kotlin/ConfusedDeputyActivity.kt", "cwe": "CWE-441", "platform": "mobile"},
+    {"rule": "hunt/intent-redirect", "file": "app/src/main/kotlin/IntentRedirectActivity.kt", "cwe": "CWE-601", "platform": "mobile"},
+    {"rule": "hunt/path-traversal", "file": "app/src/main/kotlin/FileProviderActivity.kt", "cwe": "CWE-22", "platform": "mobile"},
+    {"rule": "hunt/deeplink-host", "file": "app/src/main/kotlin/DeepLinkHostActivity.kt", "cwe": "CWE-939", "platform": "mobile"},
+    {"rule": "hunt/webview-bridge", "file": "app/src/main/kotlin/WebViewBridgeActivity.kt", "cwe": "CWE-749", "platform": "mobile"},
+    {"rule": "hunt/tapjacking", "file": "app/src/main/kotlin/TapjackingActivity.kt", "cwe": "CWE-1021", "platform": "mobile"},
+    {"rule": "hunt/pending-intent-hijack", "file": "app/src/main/kotlin/PendingIntentActivity.kt", "cwe": "CWE-927", "platform": "mobile"},
+    {"rule": "hunt/sql-injection", "file": "server/user_handler.go", "cwe": "CWE-89", "platform": "backend"},
+    {"rule": "hunt/command-injection", "file": "server/exec_handler.go", "cwe": "CWE-78", "platform": "backend"},
+    {"rule": "hunt/authz-bypass", "file": "server/admin_route.go", "cwe": "CWE-862", "platform": "backend"},
+    {"rule": "hunt/ssrf", "file": "server/fetch_proxy.go", "cwe": "CWE-918", "platform": "backend"},
+    {"rule": "hunt/insecure-deserialization", "file": "server/deser_handler.go", "cwe": "CWE-502", "platform": "backend"},
+    {"rule": "hunt/xpc-authz", "file": "ios/XPCListener.swift", "cwe": "CWE-285", "platform": "mobile"}
+  ],
+  "clean": [
+    {"file": "clean/SafeMapActivity.kt", "mitigation": "validates component and caller identity"},
+    {"file": "clean/SafeDeepLinkActivity.kt", "mitigation": "strict URI authority and path validation"},
+    {"file": "clean/SafeTapjackingActivity.kt", "mitigation": "filterTouchesWhenObscured = true enabled"},
+    {"file": "clean/SafePendingIntentActivity.kt", "mitigation": "FLAG_IMMUTABLE with explicit component"},
+    {"file": "clean/SafeWebViewActivity.kt", "mitigation": "JavascriptInterface disabled and Origin verified"},
+    {"file": "clean/SafeFileProviderActivity.kt", "mitigation": "Canonical path checked with getCanonicalPath().startsWith"},
+    {"file": "clean/SafeSqlHandler.go", "mitigation": "Parameterized query using $1 placeholders"},
+    {"file": "clean/SafeExecHandler.go", "mitigation": "Command arguments passed as separate slice elements, no shell"},
+    {"file": "clean/SafeAdminRoute.go", "mitigation": "Role-based authentication middleware enforced"},
+    {"file": "clean/SafeProxy.go", "mitigation": "Strict outbound domain allowlist and private IP filtering"},
+    {"file": "clean/SafeJsonHandler.go", "mitigation": "Type-safe JSON schema decoding"},
+    {"file": "clean/SafeXPCListener.swift", "mitigation": "Code signing requirements and audit token validation"}
+  ]
+}

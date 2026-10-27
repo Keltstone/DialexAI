@@ -1,0 +1,2 @@
+export type ID = string | number;
+export type Handler<T> = (event: T) => void;

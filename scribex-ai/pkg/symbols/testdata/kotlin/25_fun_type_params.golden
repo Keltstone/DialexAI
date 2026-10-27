@@ -1,0 +1,2 @@
+Box	class Box<out T>(val value: T?)
+transform	fun<T> transform(input: List<T>, action: (T) -> Unit): Unit

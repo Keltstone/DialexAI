@@ -1,0 +1,4 @@
+public interface Helper {
+    default void doWork() { secret(); }
+    private void secret() {}
+}

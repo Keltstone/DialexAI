@@ -1,0 +1,2 @@
+Logger	public class Logger
+Logger.info	public void info(String format, Object... args)

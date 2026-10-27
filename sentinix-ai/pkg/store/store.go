@@ -60,6 +60,14 @@ create table if not exists project_policies(project_id text not null, category t
 create table if not exists project_rule_policies(project_id text not null, rule_id text not null, level text not null, updated_at bigint not null, primary key(project_id, rule_id));
 create table if not exists ingest_uploads(id text primary key, project_id text not null, commit_sha text not null, pr text not null default '', engine text not null, category text not null default '', format text not null, received_at bigint not null, parse_status text not null, finding_count bigint not null default 0, findings_json text not null default '', error_message text not null default '', attested integer not null default 0, unique(project_id, commit_sha, engine));
 create table if not exists ingest_signatures(sig_hash text primary key, project_id text not null, ts bigint not null, created_at bigint not null);
+create table if not exists project_hunt_configs(project_id text primary key, config_json text not null, updated_at bigint not null, updated_by text not null default '');
+create table if not exists hunt_runs(id text primary key, project_id text not null, mode text not null, status text not null, started bigint not null, duration_ms bigint not null default 0, calls bigint not null default 0, tokens bigint not null default 0, cost_usd real not null default 0.0, findings_count bigint not null default 0, gaps text not null default '');
+create table if not exists hunt_tasks(id text primary key, run_id text not null, task_key text not null, status text not null, code_hash text not null default '', file text not null default '', class text not null default '', pass text not null default '', model text not null default '', result_json text not null default '', started bigint not null default 0, duration_ms bigint not null default 0);
+create table if not exists hunt_tool_calls(id text primary key, run_id text not null, task_id text not null, tool text not null, args_hash text not null default '', bytes_returned bigint not null default 0, ts bigint not null);
+create index if not exists idx_hunt_runs_proj on hunt_runs(project_id);
+create index if not exists idx_hunt_tasks_run on hunt_tasks(run_id);
+create index if not exists idx_hunt_tasks_key on hunt_tasks(task_key);
+create index if not exists idx_hunt_tool_calls_run on hunt_tool_calls(run_id);
 create index if not exists idx_ingest_signatures_created on ingest_signatures(created_at);
 create index if not exists idx_findings_project on findings(project_id);
 create index if not exists idx_findings_status on findings(status);
@@ -131,6 +139,14 @@ func Open(dsn string) (*Store, error) {
 		"create index if not exists idx_finding_prs_fp on finding_prs(project_id, fingerprint)",
 		"create table if not exists ingest_signatures(sig_hash text primary key, project_id text not null, ts bigint not null, created_at bigint not null)",
 		"create index if not exists idx_ingest_signatures_created on ingest_signatures(created_at)",
+		"create table if not exists project_hunt_configs(project_id text primary key, config_json text not null, updated_at bigint not null, updated_by text not null default '')",
+		"create table if not exists hunt_runs(id text primary key, project_id text not null, mode text not null, status text not null, started bigint not null, duration_ms bigint not null default 0, calls bigint not null default 0, tokens bigint not null default 0, cost_usd real not null default 0.0, findings_count bigint not null default 0, gaps text not null default '')",
+		"create table if not exists hunt_tasks(id text primary key, run_id text not null, task_key text not null, status text not null, code_hash text not null default '', file text not null default '', class text not null default '', pass text not null default '', model text not null default '', result_json text not null default '', started bigint not null default 0, duration_ms bigint not null default 0)",
+		"create table if not exists hunt_tool_calls(id text primary key, run_id text not null, task_id text not null, tool text not null, args_hash text not null default '', bytes_returned bigint not null default 0, ts bigint not null)",
+		"create index if not exists idx_hunt_runs_proj on hunt_runs(project_id)",
+		"create index if not exists idx_hunt_tasks_run on hunt_tasks(run_id)",
+		"create index if not exists idx_hunt_tasks_key on hunt_tasks(task_key)",
+		"create index if not exists idx_hunt_tool_calls_run on hunt_tool_calls(run_id)",
 	} {
 		if _, err := db.Exec(q); err != nil && !strings.Contains(err.Error(), "duplicate column") && !strings.Contains(err.Error(), "already exists") {
 			return nil, err

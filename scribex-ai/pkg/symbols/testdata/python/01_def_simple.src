@@ -1,0 +1,3 @@
+def calculate(x: int, y: int) -> int:
+    """Docstring with def hidden(): pass"""
+    return x + y

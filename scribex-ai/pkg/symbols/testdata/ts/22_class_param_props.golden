@@ -1,0 +1,4 @@
+Person	export class Person
+Person.constructor	constructor(public id: number, readonly name: string)
+Person.id	public id: number
+Person.name	readonly name: string)

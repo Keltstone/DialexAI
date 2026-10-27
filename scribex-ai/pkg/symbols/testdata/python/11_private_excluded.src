@@ -1,0 +1,4 @@
+def public_name(): pass
+def _private_name(): pass
+class PublicClass:
+    def _internal_method(self): pass

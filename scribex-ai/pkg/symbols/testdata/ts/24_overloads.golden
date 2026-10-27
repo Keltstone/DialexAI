@@ -1,0 +1,6 @@
+parse	export function parse(input: string): string
+export function parse(input: number): number
+export function parse(input: any): any
+parse(any)	export function parse(input: any): any
+parse(number)	export function parse(input: number): number
+parse(string)	export function parse(input: string): string

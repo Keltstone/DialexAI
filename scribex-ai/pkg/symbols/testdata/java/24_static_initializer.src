@@ -1,0 +1,9 @@
+public class InitTest {
+    static {
+        System.out.println("init");
+    }
+    {
+        int x = 1;
+    }
+    public int field = 10;
+}

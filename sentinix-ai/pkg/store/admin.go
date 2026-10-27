@@ -559,6 +559,12 @@ func applyTx(tx *sql.Tx, a Approval) error {
 		}
 		_, err := tx.Exec("update projects set ai=$1 where id=$2", aiVal, getString("project"))
 		return err
+	case "hunt_config":
+		projID := getString("project")
+		cfgJSON := getString("config")
+		_, err := tx.Exec("insert into project_hunt_configs(project_id, config_json, updated_at, updated_by) values($1, $2, $3, $4) on conflict(project_id) do update set config_json=excluded.config_json, updated_at=excluded.updated_at, updated_by=excluded.updated_by",
+			projID, cfgJSON, currentTime, a.Approver)
+		return err
 	}
 	return nil
 }

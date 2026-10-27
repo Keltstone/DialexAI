@@ -1,0 +1,2 @@
+package p
+func Render() string { return "func Fake() {}" }

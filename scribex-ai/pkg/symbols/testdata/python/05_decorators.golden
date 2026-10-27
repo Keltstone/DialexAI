@@ -1,0 +1,2 @@
+decorated_function	@decorator def decorated_function(x: int):
+decorator	def decorator(fn):

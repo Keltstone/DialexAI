@@ -1,0 +1,1 @@
+Connect	func Connect(host string, port int, timeout int)(bool, error)

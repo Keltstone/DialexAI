@@ -1,0 +1,11 @@
+// Multi-line parameters with and without trailing comma
+fun multiParam(
+    first: String,
+    second: Int,
+    third: Boolean,
+): Unit {}
+
+fun multiParamNoComma(
+    a: Double,
+    b: Float
+): Double = a + b

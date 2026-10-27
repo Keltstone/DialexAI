@@ -1,0 +1,2 @@
+type Vector = list[float]
+type UserId = str

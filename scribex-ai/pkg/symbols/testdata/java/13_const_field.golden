@@ -1,0 +1,3 @@
+Constants	public class Constants
+Constants.BUFFER_SIZE	public static final int BUFFER_SIZE = 4096
+Constants.PROTOCOL	public static final String PROTOCOL = "HTTPS"

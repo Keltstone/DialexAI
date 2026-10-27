@@ -1,0 +1,6 @@
+package test
+
+// Prüfe prüft den Wert.
+func Prüfe(wert string) bool {
+	return len(wert) > 0
+}

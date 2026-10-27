@@ -267,3 +267,43 @@ curl -H "Authorization: Bearer <TOKEN>" \
 | **`sarif`** | `application/sarif+json` | Standard SARIF format for ingestion into GitHub Security, GitLab, or IDE plugins. |
 | **`csv`** | `text/csv` | Spreadsheet export. All formula prefixes (`=`, `+`, `-`, `@`) are safely escaped to prevent CSV formula injection attacks. |
 | **`json`** | `application/json` | Raw programmatic data export for enterprise SIEM/SOAR platforms. |
+
+---
+
+## 5. Hunt v2: Configurable AI Security Audit Operations
+
+`sentinix hunt` executes declarative, benchmark-parity AI security audits targeting application entry points across mobile, backend, and iOS targets.
+
+### 5.1 CLI Workflow
+
+```bash
+# Initialize project configuration
+sentinix hunt config init
+
+# Inspect effective configuration and layered provenance
+sentinix hunt config show --explain
+
+# Dry run: preview entry points and budget limits without making model calls
+sentinix hunt --taskflow android-audit --dry-run .
+
+# Run full audit or fast diff audit on changed entry points
+sentinix hunt --diff .
+
+# Review audit runs, metrics, and tool calls
+sentinix hunt runs
+sentinix hunt show <run-id>
+
+# Community Pack Bundles
+sentinix hunt bundle new custom-audit-pack.json
+sentinix hunt bundle test custom-audit-pack.json
+sentinix hunt bundle sign custom-audit-pack.json --key author.key > custom-audit-pack.signed.json
+sentinix hunt bundle verify custom-audit-pack.signed.json --trust trusted.pub
+```
+
+### 5.2 Configuration Precedence & Governance
+
+Audit configuration resolves through a strict hierarchy:
+`CLI Flags > Organization Ceilings > Project Config (.sentinix/hunt.json) > Taskflow Defaults > Engine Defaults`
+
+Any change that loosens safeguards (such as increasing budget ceilings or disabling vulnerability classes) triggers a requirement for two-person reviewer approval before enforcement.
+
