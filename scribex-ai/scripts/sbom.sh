@@ -38,7 +38,7 @@ if command -v cyclonedx-gomod >/dev/null 2>&1; then
   echo "Generating CycloneDX SBOM via cyclonedx-gomod..."
   (
     cd "$ROOT_DIR"
-    cyclonedx-gomod app -output "$DIST_DIR/sbom.cdx.json" -json .
+    cyclonedx-gomod app -main cmd/scribex -output "$DIST_DIR/sbom.cdx.json" -json .
   )
   echo "CycloneDX SBOM written to dist/sbom.cdx.json"
 else

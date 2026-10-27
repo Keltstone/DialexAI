@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -411,5 +412,198 @@ func TestEnterpriseAuth(t *testing.T) {
 	}
 	if !strings.HasPrefix(requestedPath, "/api/v3") {
 		t.Errorf("enterprise API path prefix missing, got %s", requestedPath)
+	}
+}
+
+func TestRealGateCheckBaseCorpus(t *testing.T) {
+	cases := []struct {
+		name     string
+		file     string
+		sym      string
+		oldCode  string
+		newCode  string
+		wantGate bool // true = contract delta detected; false = zero-token early exit (no contract change)
+	}{
+		// Go
+		{
+			name:     "go ret type change",
+			file:     "p.go",
+			sym:      "F",
+			oldCode:  "package p\n// F doc\nfunc F(a int, b string) (int, error) { return 0, nil }\n",
+			newCode:  "package p\nfunc F(a int, b string) (string, error) { return \"\", nil }\n",
+			wantGate: true,
+		},
+		{
+			name:     "go body only change",
+			file:     "p.go",
+			sym:      "F",
+			oldCode:  "package p\nfunc F(a int, b string) (int, error) { return 0, nil }\n",
+			newCode:  "package p\nfunc F(a int, b string) (int, error) { println(\"body change\"); return 0, nil }\n",
+			wantGate: false,
+		},
+		{
+			name:     "go fmt only change",
+			file:     "p.go",
+			sym:      "F",
+			oldCode:  "package p\nfunc F(a int, b string) (int, error) { return 0, nil }\n",
+			newCode:  "package p\nfunc F(a int,   b string) (int, error) {\n\treturn 0, nil\n}\n",
+			wantGate: false,
+		},
+		// TypeScript
+		{
+			name:     "ts param type change",
+			file:     "a.ts",
+			sym:      "f",
+			oldCode:  "export function f(a: number, b: string): number { return 1 }\n",
+			newCode:  "export function f(a: string, b: string): number { return 1 }\n",
+			wantGate: true,
+		},
+		{
+			name:     "ts body only change",
+			file:     "a.ts",
+			sym:      "f",
+			oldCode:  "export function f(a: number, b: string): number { return 1 }\n",
+			newCode:  "export function f(a: number, b: string): number { const x = 42; return x; }\n",
+			wantGate: false,
+		},
+		{
+			name:     "ts multiline signature change",
+			file:     "a.ts",
+			sym:      "f",
+			oldCode:  "export function f(a: number, b: string): number { return 1 }\n",
+			newCode:  "export function f(\n  a: number,\n  b: boolean,\n): number { return 1 }\n",
+			wantGate: true,
+		},
+		// Python
+		{
+			name:     "py return annotation change",
+			file:     "a.py",
+			sym:      "f",
+			oldCode:  "def f(a: int) -> int:\n    return a\n",
+			newCode:  "def f(a: int) -> str:\n    return str(a)\n",
+			wantGate: true,
+		},
+		{
+			name:     "py body only change",
+			file:     "a.py",
+			sym:      "f",
+			oldCode:  "def f(a: int) -> int:\n    return a\n",
+			newCode:  "def f(a: int) -> int:\n    # internal logic change\n    x = a * 2\n    return x // 2\n",
+			wantGate: false,
+		},
+		// Kotlin
+		{
+			name:     "kt visibility change",
+			file:     "a.kt",
+			sym:      "f",
+			oldCode:  "fun f(a: Int, b: String): Int { return 1 }\n",
+			newCode:  "private fun f(a: Int, b: String): Int { return 1 }\n",
+			wantGate: true,
+		},
+		{
+			name:     "kt body only change",
+			file:     "a.kt",
+			sym:      "f",
+			oldCode:  "fun f(a: Int, b: String): Int { return 1 }\n",
+			newCode:  "fun f(a: Int, b: String): Int { println(\"kt body\"); return 1 }\n",
+			wantGate: false,
+		},
+		{
+			name:     "kt multiline signature change",
+			file:     "a.kt",
+			sym:      "f",
+			oldCode:  "fun f(a: Int, b: String): Int { return 1 }\n",
+			newCode:  "fun f(\n    a: Int,\n    b: Boolean,\n): Int { return 1 }\n",
+			wantGate: true,
+		},
+		// Java
+		{
+			name:     "java throws clause change",
+			file:     "A.java",
+			sym:      "A.f",
+			oldCode:  "public class A { public int f(int a, String b) { return 1; } }\n",
+			newCode:  "public class A { public int f(int a, String b) throws Exception { return 1; } }\n",
+			wantGate: true,
+		},
+		{
+			name:     "java body only change",
+			file:     "A.java",
+			sym:      "A.f",
+			oldCode:  "public class A { public int f(int a, String b) { return 1; } }\n",
+			newCode:  "public class A { public int f(int a, String b) { int z = a + 1; return z; } }\n",
+			wantGate: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, a := range [][]string{
+				{"init", "-q"},
+				{"config", "user.email", "test@test.com"},
+				{"config", "user.name", "test"},
+			} {
+				if _, err := gitx.Run(dir, a...); err != nil {
+					t.Fatalf("git %v: %v", a, err)
+				}
+			}
+
+			// Initial state
+			srcPath := filepath.Join(dir, tc.file)
+			if err := os.WriteFile(srcPath, []byte(tc.oldCode), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			docContent := fmt.Sprintf("# Title\n<!-- @scribex:anchor(%s#%s) -->\n<!-- @scribex:end -->\n", tc.file, tc.sym)
+			docPath := filepath.Join(dir, "doc.md")
+			if err := os.WriteFile(docPath, []byte(docContent), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			// Sync anchors to establish baseline
+			if _, err := docs.Check(dir, true, nil); err != nil {
+				t.Fatalf("initial sync failed: %v", err)
+			}
+
+			if _, err := gitx.Run(dir, "add", "-A"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := gitx.Run(dir, "commit", "-qm", "initial"); err != nil {
+				t.Fatal(err)
+			}
+
+			// Mutate code
+			if err := os.WriteFile(srcPath, []byte(tc.newCode), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := gitx.Run(dir, "add", "-A"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := gitx.Run(dir, "commit", "-qm", "mutation"); err != nil {
+				t.Fatal(err)
+			}
+
+			// 1. Test gate() verdict
+			gotGate, err := gate(dir, "HEAD~1")
+			if err != nil {
+				t.Fatalf("gate error: %v", err)
+			}
+			if gotGate != tc.wantGate {
+				t.Errorf("gate(HEAD~1) = %v, want %v", gotGate, tc.wantGate)
+			}
+
+			// 2. Test full check(dir, "HEAD~1", "") early exit / exit code
+			checkErr := check(dir, "HEAD~1", "")
+			if tc.wantGate {
+				// Must detect change and fail because doc.md has not been synced to new signature
+				if checkErr == nil {
+					t.Errorf("check(HEAD~1) expected non-nil error on contract change, got nil")
+				}
+			} else {
+				// Must cleanly pass with nil (0 tokens early exit)
+				if checkErr != nil {
+					t.Errorf("check(HEAD~1) expected nil (zero tokens early exit), got: %v", checkErr)
+				}
+			}
+		})
 	}
 }

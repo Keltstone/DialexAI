@@ -939,14 +939,14 @@ func TestRBACAndIDORSweep(t *testing.T) {
 		}
 	}
 
-	// Print RBAC & IDOR Matrix Table
-	fmt.Println("\n====================== RBAC & IDOR ROUTE SWEEP MATRIX ======================")
-	fmt.Printf("%-15s | %-32s | %-6s | %s\n", "Role", "Route", "Status", "Access Level / Data Scope")
-	fmt.Println("----------------+----------------------------------+--------+-----------------------------------")
+	// Log RBAC & IDOR Matrix Table
+	t.Log("\n====================== RBAC & IDOR ROUTE SWEEP MATRIX ======================")
+	t.Logf("%-15s | %-32s | %-6s | %s", "Role", "Route", "Status", "Access Level / Data Scope")
+	t.Log("----------------+----------------------------------+--------+-----------------------------------")
 	for _, res := range results {
-		fmt.Printf("%-15s | %-32s | %-6d | %s\n", res.role, res.route, res.status, res.access)
+		t.Logf("%-15s | %-32s | %-6d | %s", res.role, res.route, res.status, res.access)
 	}
-	fmt.Println("=============================================================================")
+	t.Log("=============================================================================")
 }
 
 // 14. Comprehensive XSS payloads in doc text, symbol names, and repo names
@@ -1008,13 +1008,18 @@ func TestComprehensiveXSSPayloads(t *testing.T) {
 
 // 15. Load scale test: 100 repositories, 50 concurrent viewers, bounded RSS memory
 func TestLoadScale100Repos50Viewers(t *testing.T) {
+	numRepos := 100
+	numViewers := 50
+	reqsPerViewer := 20
 	if testing.Short() {
-		t.Skip("skipping load test in short mode")
+		numRepos = 20
+		numViewers = 10
+		reqsPerViewer = 5
 	}
 
 	root := t.TempDir()
 	var repos []Repo
-	for i := 0; i < 100; i++ {
+	for i := 0; i < numRepos; i++ {
 		rDir := filepath.Join(root, fmt.Sprintf("repo_%d", i))
 		_ = os.MkdirAll(rDir, 0o755)
 		repos = append(repos, Repo{
@@ -1025,7 +1030,7 @@ func TestLoadScale100Repos50Viewers(t *testing.T) {
 	}
 
 	var principals []Principal
-	for i := 0; i < 50; i++ {
+	for i := 0; i < numViewers; i++ {
 		tName := fmt.Sprintf("team_%d", i%10)
 		principals = append(principals, Principal{
 			Hash:  hash(fmt.Sprintf("viewer_tok_%d", i)),
@@ -1059,15 +1064,14 @@ func TestLoadScale100Repos50Viewers(t *testing.T) {
 	var completedReqs int64
 
 	start := time.Now()
-	// 50 concurrent goroutines, each making 20 requests = 1000 requests total
-	for i := 0; i < 50; i++ {
+	for i := 0; i < numViewers; i++ {
 		wg.Add(1)
 		workerID := i
 		go func() {
 			defer wg.Done()
 			client := &http.Client{Timeout: 5 * time.Second}
 			token := fmt.Sprintf("viewer_tok_%d", workerID)
-			for j := 0; j < 20; j++ {
+			for j := 0; j < reqsPerViewer; j++ {
 				path := "/"
 				if j%2 == 1 {
 					path = "/api/health"
@@ -1092,16 +1096,25 @@ func TestLoadScale100Repos50Viewers(t *testing.T) {
 	var mAfter runtime.MemStats
 	runtime.ReadMemStats(&mAfter)
 
-	heapGrowthMB := float64(mAfter.HeapAlloc-mBefore.HeapAlloc) / (1024 * 1024)
-	t.Logf("Completed %d requests across 100 repos / 50 concurrent viewers in %v", completedReqs, elapsed)
-	t.Logf("Heap before: %.2f MB, Heap after: %.2f MB (Net growth: %.2f MB)",
-		float64(mBefore.HeapAlloc)/(1024*1024), float64(mAfter.HeapAlloc)/(1024*1024), heapGrowthMB)
-
-	if completedReqs != 1000 {
-		t.Errorf("expected 1000 successful requests, got %d", completedReqs)
+	var heapGrowthMB float64
+	if mAfter.HeapAlloc > mBefore.HeapAlloc {
+		heapGrowthMB = float64(mAfter.HeapAlloc-mBefore.HeapAlloc) / (1024 * 1024)
 	}
-	// Verify memory remains strictly bounded (< 50 MB growth for 1000 requests on 100 repos)
-	if heapGrowthMB > 50.0 {
-		t.Errorf("excessive memory growth during load: %.2f MB", heapGrowthMB)
+	t.Logf("Completed %d requests across %d repos / %d concurrent viewers in %v", completedReqs, numRepos, numViewers, elapsed)
+	t.Logf("Heap before: %.2f MB, Heap after: %.2f MB (Net growth: %.2f MB), Sys: %.2f MB",
+		float64(mBefore.HeapAlloc)/(1024*1024), float64(mAfter.HeapAlloc)/(1024*1024), heapGrowthMB, float64(mAfter.Sys)/(1024*1024))
+
+	expectedReqs := int64(numViewers * reqsPerViewer)
+	if completedReqs != expectedReqs {
+		t.Errorf("expected %d successful requests, got %d", expectedReqs, completedReqs)
+	}
+
+	// Strictly assert bounded RSS/heap memory: must not exceed 50 MB total heap or 25 MB net growth
+	totalHeapMB := float64(mAfter.HeapAlloc) / (1024 * 1024)
+	if totalHeapMB > 50.0 {
+		t.Errorf("unbounded memory: total heap allocation %.2f MB exceeds 50 MB limit", totalHeapMB)
+	}
+	if heapGrowthMB > 25.0 {
+		t.Errorf("unbounded memory: net heap growth %.2f MB exceeds 25 MB limit", heapGrowthMB)
 	}
 }

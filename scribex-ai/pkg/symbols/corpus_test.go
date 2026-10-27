@@ -1,7 +1,6 @@
 package symbols
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -211,10 +210,10 @@ func TestTrackedContractCorpus(t *testing.T) {
 		}
 	}
 
-	// 3. Print per-language accuracy table
-	fmt.Println("\n================ PER-LANGUAGE ACCURACY TABLE ================")
-	fmt.Printf("%-12s | %-12s | %-15s | %-10s | %-10s\n", "Language", "Total Tests", "Passed Tests", "Accuracy", "Errors")
-	fmt.Println("-------------+--------------+-----------------+------------+-----------")
+	// 3. Log per-language accuracy table
+	t.Log("\n================ PER-LANGUAGE ACCURACY TABLE ================")
+	t.Logf("%-12s | %-12s | %-15s | %-10s | %-10s", "Language", "Total Tests", "Passed Tests", "Accuracy", "Errors")
+	t.Log("-------------+--------------+-----------------+------------+-----------")
 	for _, l := range langs {
 		s := stats[l]
 		total := s.mustChangeTotal + s.mustNotChangeTotal
@@ -224,9 +223,9 @@ func TestTrackedContractCorpus(t *testing.T) {
 			acc = float64(passed) / float64(total) * 100.0
 		}
 		errs := total - passed
-		fmt.Printf("%-12s | %-12d | %-15d | %-9.1f%% | %-10d\n", l, total, passed, acc, errs)
+		t.Logf("%-12s | %-12d | %-15d | %-9.1f%% | %-10d", l, total, passed, acc, errs)
 	}
-	fmt.Println("=============================================================")
+	t.Log("=============================================================")
 }
 
 func TestStress_1MB_10MB_CRLF_BOM_Unicode_Comments(t *testing.T) {
