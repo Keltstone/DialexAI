@@ -49,6 +49,7 @@ jobs:
         uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           go-version-file: scribex-ai/go.mod
+          cache: false
 
       - name: Verify dist is not tracked
         run: |
@@ -75,12 +76,18 @@ jobs:
         run: go vet ./...
 
       - name: Run tests with race detector
+        env:
+          GITHUB_EVENT_NAME: ''
+          CI_PIPELINE_SOURCE: ''
         run: go test -race -count=1 ./...
 
       - name: Run shellcheck
         run: shellcheck scripts/*.sh
 
       - name: Test tool independence (reduced PATH)
+        env:
+          GITHUB_EVENT_NAME: ''
+          CI_PIPELINE_SOURCE: ''
         run: |
           GO_DIR="$(dirname "$(command -v go)")"
           GIT_DIR="$(dirname "$(command -v git)")"
@@ -165,6 +172,7 @@ jobs:
         uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           go-version-file: scribex-ai/go.mod
+          cache: false
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
@@ -173,7 +181,7 @@ jobs:
         env:
           RUNNER_TMP: ${{ runner.temp }}
         run: |
-          govulncheck ./... | tee "$RUNNER_TMP/govulncheck.txt"
+          PATH="$(go env GOPATH)/bin:$PATH" govulncheck ./... | tee "$RUNNER_TMP/govulncheck.txt"
 
       - name: Upload govulncheck report
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
@@ -185,7 +193,7 @@ jobs:
         run: go install github.com/google/osv-scanner/cmd/osv-scanner@v1.9.2
 
       - name: Run osv-scanner
-        run: osv-scanner --lockfile=go.mod
+        run: PATH="$(go env GOPATH)/bin:$PATH" osv-scanner --lockfile=go.mod
 
   fuzz:
     name: Fuzz (${{ matrix.target }})
@@ -207,6 +215,7 @@ jobs:
         uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           go-version-file: scribex-ai/go.mod
+          cache: false
 
       - name: Run fuzz test (120s)
         env:
@@ -233,9 +242,10 @@ jobs:
         uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           go-version-file: scribex-ai/go.mod
+          cache: false
 
       - name: Install cyclonedx-gomod
-        run: go install github.com/CycloneDX/cyclonedx-gomod@v1.9.0
+        run: go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.0
 
       - name: Generate CycloneDX SBOM
         env:
@@ -410,6 +420,7 @@ jobs:
         uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           go-version-file: scribex-ai/go.mod
+          cache: false
 
       - name: Build target
         run: |
@@ -434,6 +445,7 @@ jobs:
         uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           go-version-file: scribex-ai/go.mod
+          cache: false
 
       - name: Build target
         run: |
@@ -458,6 +470,7 @@ jobs:
         uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           go-version-file: scribex-ai/go.mod
+          cache: false
 
       - name: Build target
         run: |
@@ -474,6 +487,8 @@ jobs:
     needs: [repro-ubuntu-1, repro-ubuntu-2, repro-macos]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Download Ubuntu 1 digest
         uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
         with:
