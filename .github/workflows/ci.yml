@@ -66,7 +66,7 @@ jobs:
           java-version: "21"
 
       - name: Accept Android SDK Licenses
-        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -100,4 +100,40 @@ jobs:
       - name: Run Engine Tests with Race Detector
         working-directory: socratix-engine
         run: go test -v -race -timeout 5m ./pkg/...
+
+  scribex-verification:
+    name: Scribex AI Verification (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'scribex-ai/go.mod'
+
+      - name: Verify Go Modules & Vet
+        working-directory: scribex-ai
+        run: |
+          go mod download
+          go mod verify
+          go vet ./...
+
+      - name: Run Scribex Test Suite with Race Detector
+        working-directory: scribex-ai
+        run: go test -v -race -timeout 10m ./...
+
+      - name: Verify Reproducible Multi-Platform Build
+        working-directory: scribex-ai
+        run: |
+          ./scripts/repro-check.sh 1.0.1
+          ./scripts/build.sh 1.0.1
+
+      - name: Generate CycloneDX SBOM & Smoke Test Linux CLI
+        working-directory: scribex-ai
+        run: |
+          ./scripts/sbom.sh
+          ./dist/scribex_linux_amd64 -h
+
 

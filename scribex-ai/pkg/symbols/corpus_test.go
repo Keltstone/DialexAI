@@ -387,9 +387,13 @@ export function realFunc(param: string): void {
 		if len(syms1MB) == 0 {
 			t.Fatalf("expected symbols in 1 MB file")
 		}
-		t.Logf("1 MB Kotlin parse time: %v", dur1MB)
-		if dur1MB > 2*time.Second {
-			t.Errorf("1 MB parse too slow: %v", dur1MB)
+		t.Logf("1 MB Kotlin parse time: %v (race=%v)", dur1MB, isRaceDetector)
+		max1MB := 2 * time.Second
+		if isRaceDetector {
+			max1MB = 6 * time.Second
+		}
+		if dur1MB > max1MB {
+			t.Errorf("1 MB parse too slow: %v (limit: %v)", dur1MB, max1MB)
 		}
 
 		// 10 MB TypeScript
@@ -406,9 +410,13 @@ export function realFunc(param: string): void {
 		if len(syms10MB) == 0 {
 			t.Fatalf("expected symbols in 10 MB file")
 		}
-		t.Logf("10 MB TypeScript parse time: %v", dur10MB)
-		if dur10MB > 5*time.Second {
-			t.Errorf("10 MB parse too slow: %v", dur10MB)
+		t.Logf("10 MB TypeScript parse time: %v (race=%v)", dur10MB, isRaceDetector)
+		max10MB := 5 * time.Second
+		if isRaceDetector {
+			max10MB = 15 * time.Second // race detector adds 3-5x memory and instruction overhead on 10MB lexical scans
+		}
+		if dur10MB > max10MB {
+			t.Errorf("10 MB parse too slow: %v (limit: %v)", dur10MB, max10MB)
 		}
 	})
 }
