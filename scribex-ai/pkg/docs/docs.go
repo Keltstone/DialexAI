@@ -57,6 +57,9 @@ func FilesWithSkips(root string) (files, skipped []string) {
 		}
 	}
 
+	files = make([]string, 0, 512)
+	skipped = make([]string, 0, 64)
+
 	filepath.WalkDir(walkRoot, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -82,9 +85,18 @@ func FilesWithSkips(root string) (files, skipped []string) {
 			return nil
 		}
 		if !d.IsDir() && strings.HasSuffix(p, ".md") {
-			rel, err := filepath.Rel(walkRoot, p)
-			if err != nil {
-				return nil
+			var rel string
+			if walkRoot == root {
+				rel = p[len(walkRoot):]
+				if len(rel) > 0 && rel[0] == filepath.Separator {
+					rel = rel[1:]
+				}
+			} else {
+				var err error
+				rel, err = filepath.Rel(walkRoot, p)
+				if err != nil {
+					return nil
+				}
 			}
 			if _, err := safepath.Join(root, rel); err != nil {
 				return nil
