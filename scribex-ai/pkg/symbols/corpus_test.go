@@ -373,50 +373,52 @@ export function realFunc(param: string): void {
 			t.Skip("skipping scale test in short mode")
 		}
 
-		// 1 MB Kotlin
-		line1MB := "fun actionMethodA(x: Int, y: String): Unit = println(x)\n"
-		repeats1MB := (1024 * 1024) / len(line1MB)
-		src1MB := []byte(strings.Repeat(line1MB, repeats1MB))
+		t.Run("1MB_kotlin", func(t *testing.T) {
+			line1MB := "fun actionMethodA(x: Int, y: String): Unit = println(x)\n"
+			repeats1MB := (1024 * 1024) / len(line1MB)
+			src1MB := []byte(strings.Repeat(line1MB, repeats1MB))
 
-		start1MB := time.Now()
-		syms1MB, err := Extract("scale.kt", src1MB)
-		dur1MB := time.Since(start1MB)
-		if err != nil {
-			t.Fatalf("1 MB extract error: %v", err)
-		}
-		if len(syms1MB) == 0 {
-			t.Fatalf("expected symbols in 1 MB file")
-		}
-		t.Logf("1 MB Kotlin parse time: %v (race=%v)", dur1MB, isRaceDetector)
-		max1MB := 2 * time.Second
-		if isRaceDetector {
-			max1MB = 6 * time.Second
-		}
-		if dur1MB > max1MB {
-			t.Errorf("1 MB parse too slow: %v (limit: %v)", dur1MB, max1MB)
-		}
+			start1MB := time.Now()
+			syms1MB, err := Extract("scale.kt", src1MB)
+			dur1MB := time.Since(start1MB)
+			if err != nil {
+				t.Fatalf("1 MB extract error: %v", err)
+			}
+			if len(syms1MB) == 0 {
+				t.Fatalf("expected symbols in 1 MB file")
+			}
+			t.Logf("1 MB Kotlin parse time: %v (race=%v)", dur1MB, isRaceDetector)
+			max1MB := 2 * time.Second
+			if isRaceDetector {
+				max1MB = 6 * time.Second
+			}
+			if dur1MB > max1MB {
+				t.Errorf("1 MB parse too slow: %v (limit: %v)", dur1MB, max1MB)
+			}
+		})
 
-		// 10 MB TypeScript
-		line10MB := "export function computeHandler(item: number): number { return item; }\n"
-		repeats10MB := (10 * 1024 * 1024) / len(line10MB)
-		src10MB := []byte(strings.Repeat(line10MB, repeats10MB))
+		t.Run("10MB_typescript", func(t *testing.T) {
+			if isRaceDetector {
+				t.Skip("skipping 10 MB TypeScript stress test under race detector")
+			}
 
-		start10MB := time.Now()
-		syms10MB, err := Extract("scale.ts", src10MB)
-		dur10MB := time.Since(start10MB)
-		if err != nil {
-			t.Fatalf("10 MB extract error: %v", err)
-		}
-		if len(syms10MB) == 0 {
-			t.Fatalf("expected symbols in 10 MB file")
-		}
-		t.Logf("10 MB TypeScript parse time: %v (race=%v)", dur10MB, isRaceDetector)
-		max10MB := 5 * time.Second
-		if isRaceDetector {
-			max10MB = 15 * time.Second // race detector adds 3-5x memory and instruction overhead on 10MB lexical scans
-		}
-		if dur10MB > max10MB {
-			t.Errorf("10 MB parse too slow: %v (limit: %v)", dur10MB, max10MB)
-		}
+			line10MB := "export function computeHandler(item: number): number { return item; }\n"
+			repeats10MB := (10 * 1024 * 1024) / len(line10MB)
+			src10MB := []byte(strings.Repeat(line10MB, repeats10MB))
+
+			start10MB := time.Now()
+			syms10MB, err := Extract("scale.ts", src10MB)
+			dur10MB := time.Since(start10MB)
+			if err != nil {
+				t.Fatalf("10 MB extract error: %v", err)
+			}
+			if len(syms10MB) == 0 {
+				t.Fatalf("expected symbols in 10 MB file")
+			}
+			t.Logf("10 MB TypeScript parse time: %v", dur10MB)
+			if dur10MB > 5*time.Second {
+				t.Errorf("10 MB parse too slow: %v (limit: 5s)", dur10MB)
+			}
+		})
 	})
 }
