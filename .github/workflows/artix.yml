@@ -24,10 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Setup Go
-        uses: actions/setup-go@3041fe5600347cf03b8494f8f54362a379559924 # v5.2.0
+        uses: actions/setup-go@v5
         with:
           go-version-file: 'artix-ai/go.mod'
 
@@ -78,7 +78,7 @@ jobs:
           ./bin/artix help
 
       - name: Upload CLI Binaries and Checksums
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        uses: actions/upload-artifact@v4
         with:
           name: artix-binaries-linux
           path: artix-ai/bin/
@@ -89,10 +89,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Setup Go
-        uses: actions/setup-go@3041fe5600347cf03b8494f8f54362a379559924 # v5.2.0
+        uses: actions/setup-go@v5
         with:
           go-version-file: 'artix-ai/go.mod'
 
@@ -105,10 +105,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
 
@@ -120,7 +120,7 @@ jobs:
           npx @vscode/vsce package --no-git-tag-version -o artix-ai.vsix
 
       - name: Upload VS Code Extension (.vsix)
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        uses: actions/upload-artifact@v4
         with:
           name: artix-vscode-extension
           path: artix-ai/plugins/vscode/artix-ai.vsix
@@ -131,16 +131,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Setup Java JDK 21
-        uses: actions/setup-java@8df103950263300803644b188b1fcc6195c74294 # v4.6.1
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@0db8c66838a3250da321d234182834929f277635 # v4.1.0
+        uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: false
 
@@ -151,7 +151,7 @@ jobs:
           ./gradlew buildPlugin --no-daemon --stacktrace
 
       - name: Upload IntelliJ Plugin (.zip)
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        uses: actions/upload-artifact@v4
         with:
           name: artix-intellij-plugin
           path: artix-ai/plugins/intellij/build/distributions/*.zip
@@ -163,16 +163,16 @@ jobs:
     if: "!contains(github.ref, '-enterprise')"
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Setup Java JDK 21
-        uses: actions/setup-java@8df103950263300803644b188b1fcc6195c74294 # v4.6.1
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@0db8c66838a3250da321d234182834929f277635 # v4.1.0
+        uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: false
 
@@ -187,12 +187,12 @@ jobs:
     needs: [go-verification]
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@3041fe5600347cf03b8494f8f54362a379559924 # v5.2.0
+        uses: actions/setup-go@v5
         with:
           go-version-file: 'artix-ai/go.mod'
 
@@ -224,15 +224,15 @@ jobs:
       contents: write
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
 
       - name: Setup Go
-        uses: actions/setup-go@3041fe5600347cf03b8494f8f54362a379559924 # v5.2.0
+        uses: actions/setup-go@v5
         with:
           go-version-file: 'artix-ai/go.mod'
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        uses: actions/download-artifact@v4
         with:
           path: release-assets
           merge-multiple: true
@@ -267,7 +267,7 @@ jobs:
           rm -f release_key
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@c062e4a36f6d628860b73c73489849206b02a9eb # v2.0.8
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Artix Enterprise ${{ github.ref_name }}

@@ -112,6 +112,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'scribex-ai/go.mod'
+          cache: false
 
       - name: Verify Go Modules & Vet
         working-directory: scribex-ai
@@ -134,6 +135,7 @@ jobs:
         working-directory: scribex-ai
         run: |
           ./scripts/sbom.sh
-          ./dist/scribex_linux_amd64 -h
+          ./dist/scribex_linux_amd64 version
+          ./dist/scribex_linux_amd64 -h || [ $? -eq 2 ]
 
 
