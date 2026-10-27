@@ -1,0 +1,7 @@
+def process(items: list) -> bool:
+    """Processes items in batch.
+
+    Each item is validated and transformed.
+    Returns True on success.
+    """
+    return len(items) > 0

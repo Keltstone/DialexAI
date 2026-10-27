@@ -1,0 +1,5 @@
+package test
+
+// Doc above annotation
+@Deprecated("use bar")
+fun foo() {}

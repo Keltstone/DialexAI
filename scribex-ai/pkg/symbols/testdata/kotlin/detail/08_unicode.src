@@ -1,0 +1,4 @@
+package test
+
+// Unicode function
+fun `prüfe Wert`(wert: String): Boolean = wert.isNotEmpty()

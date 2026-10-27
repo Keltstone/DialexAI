@@ -1,0 +1,10 @@
+package test;
+
+// Outer class
+public class Outer {
+    // Inner class
+    public static class Inner {
+        // Inner method
+        public void action() {}
+    }
+}

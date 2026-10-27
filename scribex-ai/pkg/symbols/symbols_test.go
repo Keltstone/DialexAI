@@ -357,6 +357,86 @@ func TestGoldenCorpus(t *testing.T) {
 	}
 }
 
+func TestDetailedGoldens(t *testing.T) {
+	langs := []struct {
+		dir  string
+		ext  string
+		name string
+	}{
+		{"go", ".go", "Go"},
+		{"kotlin", ".kt", "Kotlin"},
+		{"java", ".java", "Java"},
+		{"ts", ".ts", "TS/JS"},
+		{"python", ".py", "Python"},
+	}
+
+	for _, lang := range langs {
+		detailDir := filepath.Join("testdata", lang.dir, "detail")
+		files, err := filepath.Glob(filepath.Join(detailDir, "*.src"))
+		if err != nil {
+			t.Fatalf("glob error for %s detail: %v", lang.name, err)
+		}
+		if len(files) < 8 {
+			t.Fatalf("%s detail golden corpus has only %d files, require >= 8", lang.name, len(files))
+		}
+
+		for _, srcPath := range files {
+			testName := filepath.Base(srcPath)
+			t.Run(lang.name+"/"+testName, func(t *testing.T) {
+				data, err := os.ReadFile(srcPath)
+				if err != nil {
+					t.Fatalf("read file error: %v", err)
+				}
+
+				fakePath := "file" + lang.ext
+				if strings.HasSuffix(testName, ".kts.src") {
+					fakePath = "file.kts"
+				} else if strings.HasSuffix(testName, ".tsx.src") {
+					fakePath = "file.tsx"
+				} else if strings.HasSuffix(testName, ".js.src") {
+					fakePath = "file.js"
+				}
+
+				syms, err := ExtractDetailed(fakePath, data)
+				if err != nil {
+					t.Fatalf("ExtractDetailed error: %v", err)
+				}
+
+				// Format golden output: Key|Kind|Line|Doc one per line (source order)
+				var lines []string
+				for _, s := range syms {
+					docEsc := strings.ReplaceAll(s.Doc, "\n", `\n`)
+					lines = append(lines, fmt.Sprintf("%s|%s|%d|%s", s.Key, s.Kind, s.Line, docEsc))
+				}
+				actual := strings.Join(lines, "\n")
+				if len(lines) > 0 {
+					actual += "\n"
+				}
+
+				goldenPath := strings.TrimSuffix(srcPath, ".src") + ".golden"
+				if *update {
+					err := os.WriteFile(goldenPath, []byte(actual), 0644)
+					if err != nil {
+						t.Fatalf("failed to write golden file: %v", err)
+					}
+					return
+				}
+
+				goldenData, err := os.ReadFile(goldenPath)
+				if err != nil {
+					t.Fatalf("failed to read golden file %s: %v", goldenPath, err)
+				}
+
+				expected := string(goldenData)
+				if actual != expected {
+					t.Fatalf("golden mismatch for %s:\n=== EXPECTED ===\n%s\n=== ACTUAL ===\n%s",
+						goldenPath, expected, actual)
+				}
+			})
+		}
+	}
+}
+
 func TestDeltaPairs(t *testing.T) {
 	langs := []struct {
 		dir  string
@@ -547,5 +627,89 @@ func TestPerformanceThresholds(t *testing.T) {
 	_, err = Extract("deep.kt", []byte(sb.String()))
 	if err == nil {
 		t.Fatalf("expected depth limit error, got nil")
+	}
+}
+
+func TestExtractEquivalenceWithDetailed(t *testing.T) {
+	langs := []struct {
+		dir  string
+		ext  string
+		name string
+	}{
+		{"go", ".go", "Go"},
+		{"kotlin", ".kt", "Kotlin"},
+		{"java", ".java", "Java"},
+		{"ts", ".ts", "TS/JS"},
+		{"python", ".py", "Python"},
+	}
+
+	for _, lang := range langs {
+		corpusDir := filepath.Join("testdata", lang.dir)
+		files, err := filepath.Glob(filepath.Join(corpusDir, "*.src"))
+		if err != nil {
+			t.Fatalf("glob error for %s: %v", lang.name, err)
+		}
+		if len(files) == 0 {
+			t.Fatalf("no files found for %s", lang.name)
+		}
+
+		for _, srcPath := range files {
+			testName := filepath.Base(srcPath)
+			t.Run(lang.name+"/"+testName, func(t *testing.T) {
+				data, err := os.ReadFile(srcPath)
+				if err != nil {
+					t.Fatalf("read file error: %v", err)
+				}
+
+				fakePath := "file" + lang.ext
+				if strings.HasSuffix(testName, ".kts.src") {
+					fakePath = "file.kts"
+				} else if strings.HasSuffix(testName, ".tsx.src") {
+					fakePath = "file.tsx"
+				} else if strings.HasSuffix(testName, ".js.src") {
+					fakePath = "file.js"
+				}
+
+				extracted, err1 := Extract(fakePath, data)
+				if err1 != nil {
+					t.Fatalf("Extract failed: %v", err1)
+				}
+
+				detailed, err2 := ExtractDetailed(fakePath, data)
+				if err2 != nil {
+					t.Fatalf("ExtractDetailed failed: %v", err2)
+				}
+
+				// Build mapFrom(ExtractDetailed(x)) for plain keys
+				mapFromDetailed := make(map[string]string, len(detailed))
+				for _, sym := range detailed {
+					if _, exists := mapFromDetailed[sym.Key]; exists {
+						t.Errorf("ExtractDetailed produced duplicate plain key: %q", sym.Key)
+					}
+					mapFromDetailed[sym.Key] = sym.Sig
+				}
+
+				// Assert that for every plain key in ExtractDetailed, Extract has the exact same signature
+				for k, sig := range mapFromDetailed {
+					extSig, ok := extracted[k]
+					if !ok {
+						t.Errorf("Extract is missing plain key %q present in ExtractDetailed", k)
+						continue
+					}
+					if extSig != sig {
+						t.Errorf("signature mismatch for plain key %q:\nExtract:          %q\nExtractDetailed:  %q", k, extSig, sig)
+					}
+				}
+
+				// Assert that all plain keys in Extract are present in ExtractDetailed
+				for k := range extracted {
+					if _, ok := mapFromDetailed[k]; !ok {
+						if !strings.Contains(k, "(") {
+							t.Errorf("Extract has plain key %q not present in ExtractDetailed", k)
+						}
+					}
+				}
+			})
+		}
 	}
 }

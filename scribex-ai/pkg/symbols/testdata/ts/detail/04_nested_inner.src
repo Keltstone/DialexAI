@@ -1,0 +1,8 @@
+// Worker class
+export class Worker {
+    // Constructor
+    constructor(public id: number) {}
+
+    // Run method
+    run(): void {}
+}

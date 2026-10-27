@@ -135,6 +135,43 @@ func assertFuzzInvariants(t *testing.T, filename string, data []byte) {
 				t.Fatalf("BOM mismatch map length")
 			}
 		}
+
+		// 4. ExtractDetailed invariants
+		det1, errDet1 := ExtractDetailed(filename, data)
+		if errDet1 != nil {
+			t.Fatalf("Extract succeeded but ExtractDetailed failed: %v", errDet1)
+		}
+
+		det2, errDet2 := ExtractDetailed(filename, data)
+		if errDet2 != nil || len(det1) != len(det2) {
+			t.Fatalf("ExtractDetailed non-deterministic: %v vs %v, lengths %d vs %d", errDet1, errDet2, len(det1), len(det2))
+		}
+
+		totalLines := bytes.Count(data, []byte("\n")) + 1
+		for i, s := range det1 {
+			if s != det2[i] {
+				t.Fatalf("ExtractDetailed non-deterministic symbol %d:\nfirst:  %+v\nsecond: %+v", i, s, det2[i])
+			}
+			if s.Line < 1 || s.Line > totalLines {
+				t.Fatalf("symbol %q Line %d out of bounds [1, %d]", s.Key, s.Line, totalLines)
+			}
+			if s.Key == "" {
+				t.Fatalf("empty symbol Key at line %d", s.Line)
+			}
+			if s.Kind == "" {
+				t.Fatalf("empty symbol Kind for %q", s.Key)
+			}
+			if extSig, ok := res1[s.Key]; ok {
+				if extSig != s.Sig {
+					t.Fatalf("signature mismatch for %q between Extract (%q) and ExtractDetailed (%q)", s.Key, extSig, s.Sig)
+				}
+			}
+		}
+	} else {
+		_, errDet := ExtractDetailed(filename, data)
+		if errDet == nil {
+			t.Fatalf("Extract failed with %v but ExtractDetailed succeeded", err1)
+		}
 	}
 	_ = bytes.Equal
 }

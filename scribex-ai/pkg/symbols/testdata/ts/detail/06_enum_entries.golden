@@ -1,0 +1,3 @@
+Direction|enum|2|Direction enum
+Direction.Up|enum_entry|4|Up direction
+Direction.Down|enum_entry|6|Down direction

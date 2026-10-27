@@ -1,0 +1,4 @@
+// Unicode function
+export function prüfe(wert: string): boolean {
+    return wert.length > 0;
+}

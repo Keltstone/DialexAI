@@ -1,0 +1,1 @@
+process|func|1|Processes items in batch.\n\nEach item is validated and transformed.\nReturns True on success.

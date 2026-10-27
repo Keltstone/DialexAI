@@ -1,0 +1,11 @@
+package test
+
+// Box contains items.
+type Box struct {
+	Count int
+}
+
+// Get retrieves count.
+func (b *Box) Get() int {
+	return b.Count
+}

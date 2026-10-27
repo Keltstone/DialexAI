@@ -1,0 +1,9 @@
+﻿# First func
+def first():
+    """First doc."""
+    pass
+
+# Second func
+def second():
+    """Second doc."""
+    pass

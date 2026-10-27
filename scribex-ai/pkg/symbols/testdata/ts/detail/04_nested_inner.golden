@@ -1,0 +1,4 @@
+Worker|class|2|Worker class
+Worker.constructor|constructor|4|Constructor
+Worker.id|property|4|
+Worker.run|method|7|Run method

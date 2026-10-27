@@ -14,6 +14,15 @@ func ScanTS(src []byte) (map[string]string, error) {
 	return ScanTSSource(s)
 }
 
+// ScanTSDetailed extracts detailed public API symbols from TypeScript and JavaScript sources.
+func ScanTSDetailed(src []byte) ([]Symbol, error) {
+	s, err := Lex(TS, src)
+	if err != nil {
+		return nil, err
+	}
+	return ScanTSSourceDetailed(s)
+}
+
 // ScanTSSource extracts symbols from a lexed TS Source.
 func ScanTSSource(s *Source) (res map[string]string, retErr error) {
 	defer func() {
@@ -29,6 +38,23 @@ func ScanTSSource(s *Source) (res map[string]string, retErr error) {
 		return nil, err
 	}
 	return c.Finalize(), nil
+}
+
+// ScanTSSourceDetailed extracts detailed symbols from a lexed TS Source.
+func ScanTSSourceDetailed(s *Source) (res []Symbol, retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("symbols: panic during TS scanning: %v", r)
+		}
+	}()
+
+	c := &Collector{}
+	w := &tsWalker{s: s, col: c}
+	err := w.scanScope(0, len(s.B), "")
+	if err != nil {
+		return nil, err
+	}
+	return c.FinalizeDetailed(s, TS), nil
 }
 
 type tsWalker struct {
@@ -88,6 +114,7 @@ func (w *tsWalker) scanScope(scopeStart, scopeEnd int, prefix string) error {
 					return err
 				}
 				sigToks := Tokenize(s, stmtStart, headerEnd)
+				w.col.At(stmtStart)
 				w.col.Add("default", Join(sigToks))
 				if headerEnd < n && s.CodeAt(headerEnd) == '{' {
 					cl, err := s.MatchClose(headerEnd)
@@ -107,6 +134,7 @@ func (w *tsWalker) scanScope(scopeStart, scopeEnd int, prefix string) error {
 			if len(toks) > 200 {
 				toks = toks[:200]
 			}
+			w.col.At(stmtStart)
 			w.col.Add("default", "default "+Join(toks))
 			i = exprEnd
 			continue
@@ -126,6 +154,7 @@ func (w *tsWalker) scanScope(scopeStart, scopeEnd int, prefix string) error {
 			insideToks := Tokenize(s, i+1, cl)
 			names := w.extractReexportedNames(insideToks)
 			for _, name := range names {
+				w.col.At(stmtStart)
 				w.col.Add(name, reexportClause)
 			}
 			i = stmtEnd
@@ -147,9 +176,11 @@ func (w *tsWalker) scanScope(scopeStart, scopeEnd int, prefix string) error {
 			}
 			if asIdx >= 0 && asIdx+1 < len(toks) {
 				nsName := toks[asIdx+1].Text
+				w.col.At(stmtStart)
 				w.col.Add(nsName, Join(toks))
 			} else if fromIdx >= 0 && fromIdx+1 < len(toks) {
 				modName := strings.Trim(toks[fromIdx+1].Text, `"'`)
+				w.col.At(stmtStart)
 				w.col.Add("*:"+modName, Join(toks))
 			}
 			i = stmtEnd
@@ -200,6 +231,7 @@ func (w *tsWalker) scanScope(scopeStart, scopeEnd int, prefix string) error {
 			paramTypes := ExtractParamTypes(s, paramStart, paramEnd)
 
 			sigToks := Tokenize(s, stmtStart, headerEnd)
+			w.col.At(stmtStart)
 			w.col.Add(key, Join(sigToks), paramTypes...)
 
 			if headerEnd < n && s.CodeAt(headerEnd) == '{' {
@@ -226,6 +258,7 @@ func (w *tsWalker) scanScope(scopeStart, scopeEnd int, prefix string) error {
 			}
 
 			sigToks := Tokenize(s, stmtStart, headerEnd)
+			w.col.At(stmtStart)
 			w.col.Add(fullKey, Join(sigToks))
 
 			if headerEnd < n && s.CodeAt(headerEnd) == '{' {
@@ -256,6 +289,7 @@ func (w *tsWalker) scanScope(scopeStart, scopeEnd int, prefix string) error {
 			}
 
 			sigToks := Tokenize(s, stmtStart, headerEnd)
+			w.col.At(stmtStart)
 			w.col.Add(fullKey, Join(sigToks))
 
 			if headerEnd < n && s.CodeAt(headerEnd) == '{' {
@@ -283,6 +317,7 @@ func (w *tsWalker) scanScope(scopeStart, scopeEnd int, prefix string) error {
 			}
 
 			sigToks := Tokenize(s, stmtStart, stmtEnd)
+			w.col.At(stmtStart)
 			w.col.Add(fullKey, Join(sigToks))
 			i = stmtEnd
 			continue
@@ -300,6 +335,7 @@ func (w *tsWalker) scanScope(scopeStart, scopeEnd int, prefix string) error {
 			}
 
 			sigToks := Tokenize(s, stmtStart, headerEnd)
+			w.col.At(stmtStart)
 			w.col.Add(fullKey, Join(sigToks))
 
 			if headerEnd < n && s.CodeAt(headerEnd) == '{' {
@@ -417,6 +453,7 @@ func (w *tsWalker) scanClassMembers(start, end int, classPrefix string) error {
 		if i < n && s.B[i] == '[' {
 			if isPublic {
 				sigToks := Tokenize(s, memberStart, headerEnd)
+				w.col.At(memberStart)
 				w.col.Add(classPrefix+".[]", Join(sigToks))
 			}
 			i = headerEnd + 1
@@ -447,6 +484,7 @@ func (w *tsWalker) scanClassMembers(start, end int, classPrefix string) error {
 
 			if isPublic {
 				sigToks := Tokenize(s, memberStart, headerEnd)
+				w.col.At(memberStart)
 				w.col.Add(key, Join(sigToks), paramTypes...)
 			}
 
@@ -480,6 +518,7 @@ func (w *tsWalker) scanClassMembers(start, end int, classPrefix string) error {
 				}
 				sigToks = Tokenize(s, memberStart, cutEnd)
 			}
+			w.col.At(memberStart)
 			w.col.Add(classPrefix+"."+propName, Join(sigToks))
 		}
 
@@ -509,6 +548,7 @@ func (w *tsWalker) scanInterfaceMembers(start, end int, ifacePrefix string) erro
 			}
 			stmtEnd := w.findStatementEnd(cl+1, n)
 			sigToks := Tokenize(s, memberStart, stmtEnd)
+			w.col.At(memberStart)
 			w.col.Add(ifacePrefix+".()", Join(sigToks))
 			i = stmtEnd
 			continue
@@ -517,6 +557,7 @@ func (w *tsWalker) scanInterfaceMembers(start, end int, ifacePrefix string) erro
 		if word == "new" {
 			stmtEnd := w.findStatementEnd(wordEnd, n)
 			sigToks := Tokenize(s, memberStart, stmtEnd)
+			w.col.At(memberStart)
 			w.col.Add(ifacePrefix+".new", Join(sigToks))
 			i = stmtEnd
 			continue
@@ -526,6 +567,7 @@ func (w *tsWalker) scanInterfaceMembers(start, end int, ifacePrefix string) erro
 		if s.B[i] == '[' {
 			stmtEnd := w.findStatementEnd(i, n)
 			sigToks := Tokenize(s, memberStart, stmtEnd)
+			w.col.At(memberStart)
 			w.col.Add(ifacePrefix+".[]", Join(sigToks))
 			i = stmtEnd
 			continue
@@ -535,6 +577,7 @@ func (w *tsWalker) scanInterfaceMembers(start, end int, ifacePrefix string) erro
 		name := word
 		if name != "" {
 			sigToks := Tokenize(s, memberStart, stmtEnd)
+			w.col.At(memberStart)
 			w.col.Add(ifacePrefix+"."+name, Join(sigToks))
 		}
 		i = stmtEnd
@@ -574,6 +617,7 @@ func (w *tsWalker) scanEnumMembers(start, end int, enumPrefix string) error {
 		}
 
 		sigToks := Tokenize(s, memberStart, mEnd)
+		w.col.At(memberStart)
 		w.col.Add(enumPrefix+"."+name, Join(sigToks))
 
 		i = mEnd
@@ -650,6 +694,7 @@ func (w *tsWalker) scanVariableDeclarators(exportStart int, declKw string, start
 			sigToks = append(sigToks, dtoks[:cut]...)
 		}
 
+		w.col.At(start)
 		w.col.Add(key, Join(sigToks))
 	}
 
@@ -669,6 +714,7 @@ func (w *tsWalker) checkCommonJS(start, end int) (bool, int, error) {
 		name := toks[2].Text
 		stmtEnd := w.findStatementEnd(start, end)
 		sig := w.buildCJSMethodSig(toks)
+		w.col.At(start)
 		w.col.Add(name, sig)
 		return true, stmtEnd, nil
 	}
@@ -678,6 +724,7 @@ func (w *tsWalker) checkCommonJS(start, end int) (bool, int, error) {
 		name := toks[4].Text
 		stmtEnd := w.findStatementEnd(start, end)
 		sig := w.buildCJSMethodSig(toks)
+		w.col.At(start)
 		w.col.Add(name, sig)
 		return true, stmtEnd, nil
 	}
@@ -690,10 +737,12 @@ func (w *tsWalker) checkCommonJS(start, end int) (bool, int, error) {
 			inside := toks[5:]
 			for _, t := range inside {
 				if t.Type == TokIdent && t.Text != "}" {
+					w.col.At(start)
 					w.col.Add(t.Text, "exports."+t.Text)
 				}
 			}
 		} else {
+			w.col.At(start)
 			w.col.Add("module.exports", Join(toks))
 		}
 		return true, stmtEnd, nil
@@ -735,6 +784,7 @@ func (w *tsWalker) extractParameterProperties(paramStart, paramEnd int, classPre
 					}
 				}
 				sig := Join(paramToks[i:propEnd])
+				w.col.At(paramStart)
 				w.col.Add(classPrefix+"."+propName, sig)
 			}
 		}

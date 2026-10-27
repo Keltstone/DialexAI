@@ -14,6 +14,15 @@ func ScanKotlin(src []byte) (map[string]string, error) {
 	return ScanKotlinSource(s)
 }
 
+// ScanKotlinDetailed extracts detailed public API symbols from a Kotlin source file.
+func ScanKotlinDetailed(src []byte) ([]Symbol, error) {
+	s, err := Lex(Kotlin, src)
+	if err != nil {
+		return nil, err
+	}
+	return ScanKotlinSourceDetailed(s)
+}
+
 // ScanKotlinSource extracts symbols from a lexed Kotlin Source.
 func ScanKotlinSource(s *Source) (res map[string]string, retErr error) {
 	defer func() {
@@ -29,6 +38,23 @@ func ScanKotlinSource(s *Source) (res map[string]string, retErr error) {
 		return nil, err
 	}
 	return c.Finalize(), nil
+}
+
+// ScanKotlinSourceDetailed extracts detailed symbols from a lexed Kotlin Source.
+func ScanKotlinSourceDetailed(s *Source) (res []Symbol, retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("symbols: panic during Kotlin scanning: %v", r)
+		}
+	}()
+
+	c := &Collector{}
+	w := &kotlinWalker{s: s, col: c}
+	err := w.scanScope(0, len(s.B), "")
+	if err != nil {
+		return nil, err
+	}
+	return c.FinalizeDetailed(s, Kotlin), nil
 }
 
 type kotlinWalker struct {
@@ -167,6 +193,7 @@ func (w *kotlinWalker) scanScope(scopeStart, scopeEnd int, prefix string) error 
 				sigToks := Tokenize(s, declStart, headerEnd)
 				paramStart, paramEnd := w.findParenRange(declStart, headerEnd)
 				paramTypes := ExtractParamTypes(s, paramStart, paramEnd)
+				w.col.At(declStart)
 				w.col.Add(key, Join(sigToks), paramTypes...)
 			}
 			// Skip ctor body if present
@@ -223,6 +250,7 @@ func (w *kotlinWalker) scanScope(scopeStart, scopeEnd int, prefix string) error 
 						}
 					}
 				} else {
+					w.col.At(declStart)
 					w.col.Add(fullKey, sig)
 					if hasBody {
 						// Check if enum class
@@ -281,6 +309,7 @@ func (w *kotlinWalker) scanScope(scopeStart, scopeEnd int, prefix string) error 
 
 			if isPublic {
 				sigToks := Tokenize(s, declStart, headerEnd)
+				w.col.At(declStart)
 				w.col.Add(key, Join(sigToks), paramTypes...)
 			}
 
@@ -318,6 +347,7 @@ func (w *kotlinWalker) scanScope(scopeStart, scopeEnd int, prefix string) error 
 
 			if isPublic {
 				sigToks := Tokenize(s, declStart, headerEnd)
+				w.col.At(declStart)
 				w.col.Add(key, Join(sigToks))
 			}
 
@@ -344,6 +374,7 @@ func (w *kotlinWalker) scanScope(scopeStart, scopeEnd int, prefix string) error 
 			}
 			if isPublic {
 				sigToks := Tokenize(s, declStart, headerEnd)
+				w.col.At(declStart)
 				w.col.Add(key, Join(sigToks))
 			}
 			i = headerEnd
@@ -404,6 +435,7 @@ func (w *kotlinWalker) scanEnumBody(bodyStart, bodyEnd int, enumKey string) erro
 		entryToks := Tokenize(s, i, entryEnd)
 		// Clean entry sig: only entry name and optional (args), exclude { body }
 		cleanToks := w.cleanEnumEntryTokens(entryToks)
+		w.col.At(i)
 		w.col.Add(enumKey+"."+name, Join(cleanToks))
 
 		i = entryEnd

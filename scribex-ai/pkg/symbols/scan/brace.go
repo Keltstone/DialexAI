@@ -6,16 +6,40 @@ import (
 	"strings"
 )
 
+// Symbol represents an extracted declaration with rich detail.
+type Symbol struct {
+	Key  string
+	Kind string
+	Sig  string
+	Line int
+	Doc  string
+}
+
 // Decl represents an extracted declaration.
 type Decl struct {
 	Key        string
 	Sig        string
 	ParamTypes []string // canonical parameter types for overload keys
+	Offset     int      // byte offset of the declaration header start
+	Doc        string   // optional pre-extracted doc (e.g. Python docstring)
 }
 
 // Collector collects declarations and builds the canonical public contract map.
 type Collector struct {
-	decls []Decl
+	decls     []Decl
+	curOffset int
+	curDoc    string
+}
+
+// At records the byte offset of the header start for the next Add.
+func (c *Collector) At(offset int) {
+	c.curOffset = offset
+	c.curDoc = ""
+}
+
+// WithDoc sets the doc comment for the next Add.
+func (c *Collector) WithDoc(doc string) {
+	c.curDoc = doc
 }
 
 // Add appends a declaration to the collector.
@@ -24,7 +48,10 @@ func (c *Collector) Add(key, sig string, paramTypes ...string) {
 		Key:        key,
 		Sig:        sig,
 		ParamTypes: paramTypes,
+		Offset:     c.curOffset,
+		Doc:        c.curDoc,
 	})
+	c.curDoc = ""
 }
 
 // Finalize produces the public contract map:
@@ -75,6 +102,66 @@ func (c *Collector) Finalize() map[string]string {
 	}
 
 	return out
+}
+
+// FinalizeDetailed produces the list of detailed Symbols:
+//   - One entry per plain key in source order
+//   - Overload typed keys (Class.name(T1)) are not repeated; overload signatures are joined with \n
+//   - Line is 1-based start line of the declaration header
+//   - Doc is extracted from preceding comments or python docstrings
+func (c *Collector) FinalizeDetailed(s *Source, lang Lang) []Symbol {
+	if len(c.decls) == 0 {
+		return nil
+	}
+
+	keyGroups := make(map[string][]Decl)
+	var orderedKeys []string
+
+	for _, d := range c.decls {
+		if _, exists := keyGroups[d.Key]; !exists {
+			orderedKeys = append(orderedKeys, d.Key)
+		}
+		keyGroups[d.Key] = append(keyGroups[d.Key], d)
+	}
+
+	res := make([]Symbol, 0, len(orderedKeys))
+	for _, k := range orderedKeys {
+		decls := keyGroups[k]
+		first := decls[0]
+
+		var sig string
+		if len(decls) == 1 {
+			sig = first.Sig
+		} else {
+			sigs := make([]string, len(decls))
+			for i, d := range decls {
+				sigs[i] = d.Sig
+			}
+			sig = strings.Join(sigs, "\n")
+		}
+
+		line := 1
+		if s != nil {
+			line = s.LineOf(first.Offset) + 1
+		}
+
+		doc := first.Doc
+		if doc == "" && s != nil {
+			doc = PrecedingDoc(s, first.Offset)
+		}
+
+		kind := DeriveKind(lang, k, first.Sig)
+
+		res = append(res, Symbol{
+			Key:  k,
+			Kind: kind,
+			Sig:  sig,
+			Line: line,
+			Doc:  doc,
+		})
+	}
+
+	return res
 }
 
 const maxHeaderSize = 64 * 1024 // 64 KB
