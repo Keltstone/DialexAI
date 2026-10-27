@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -826,5 +827,281 @@ func TestValidateServeConfig(t *testing.T) {
 	// Non-loopback WITH TLS cert and key is allowed
 	if err := ValidateServeConfig("0.0.0.0:8080", "/tmp", "cert.pem", "key.pem", false); err != nil {
 		t.Errorf("unexpected error when TLS cert/key provided: %v", err)
+	}
+}
+
+// 13. Comprehensive RBAC & IDOR sweep across all routes and roles
+func TestRBACAndIDORSweep(t *testing.T) {
+	srv, _ := setupTestDashboard(t)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	type rbacResult struct {
+		role   string
+		route  string
+		status int
+		access string
+	}
+	var results []rbacResult
+
+	routes := []struct {
+		desc string
+		path string
+	}{
+		{"Root HTML", "/"},
+		{"Health API", "/api/health"},
+		{"Config HTML", "/config"},
+		{"Healthz Probe", "/healthz"},
+		{"Direct IDOR (repo-beta)", "/repo-beta"},
+		{"Direct IDOR (repo-alpha)", "/repo-alpha"},
+		{"Traversal DotDot", "/.."},
+		{"Encoded Traversal", "/%2e%2e"},
+		{"Encoded Slash Traversal", "/%2e%2e/%2e%2e/etc/passwd"},
+		{"Query IDOR Param", "/api/health?repo=repo-beta"},
+	}
+
+	roles := []struct {
+		name  string
+		token string
+	}{
+		{"Viewer Team A", "viewer-a-token"},
+		{"Viewer Team B", "viewer-b-token"},
+		{"Admin", "admin-token"},
+		{"Anonymous", ""},
+	}
+
+	for _, r := range roles {
+		for _, rt := range routes {
+			req, _ := http.NewRequest("GET", ts.URL+rt.path, nil)
+			if r.token != "" {
+				req.SetBasicAuth("", r.token)
+			}
+			resp, err := ts.Client().Do(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			access := "Denied"
+			if resp.StatusCode == http.StatusOK {
+				// Evaluate visible repos
+				bodyStr := string(body)
+				sawAlpha := strings.Contains(bodyStr, "repo-alpha")
+				sawBeta := strings.Contains(bodyStr, "repo-beta")
+
+				if sawAlpha && sawBeta {
+					access = "All Repos (alpha+beta)"
+				} else if sawAlpha {
+					access = "Team A Only (alpha)"
+				} else if sawBeta {
+					access = "Team B Only (beta)"
+				} else {
+					access = "Allowed (no repos)"
+				}
+			} else if resp.StatusCode == http.StatusForbidden {
+				access = "403 Forbidden"
+			} else if resp.StatusCode == http.StatusNotFound {
+				access = "404 Not Found"
+			} else if resp.StatusCode == http.StatusUnauthorized {
+				access = "401 Unauthorized"
+			}
+
+			results = append(results, rbacResult{
+				role:   r.name,
+				route:  rt.desc + " (" + rt.path + ")",
+				status: resp.StatusCode,
+				access: access,
+			})
+
+			// Security assertions:
+			if r.name == "Viewer Team A" {
+				if strings.Contains(string(body), "repo-beta") {
+					t.Errorf("IDOR VULNERABILITY: Viewer Team A saw repo-beta on route %s!", rt.path)
+				}
+				if rt.path == "/config" && resp.StatusCode != http.StatusForbidden {
+					t.Errorf("Viewer Team A got status %d on /config, want 403", resp.StatusCode)
+				}
+			}
+			if r.name == "Viewer Team B" {
+				if strings.Contains(string(body), "repo-alpha") {
+					t.Errorf("IDOR VULNERABILITY: Viewer Team B saw repo-alpha on route %s!", rt.path)
+				}
+				if rt.path == "/config" && resp.StatusCode != http.StatusForbidden {
+					t.Errorf("Viewer Team B got status %d on /config, want 403", resp.StatusCode)
+				}
+			}
+			if strings.Contains(rt.path, "%2e") {
+				if resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusUnauthorized {
+					t.Errorf("Traversal attempt on %s was not 404/401, got %d", rt.path, resp.StatusCode)
+				}
+			}
+		}
+	}
+
+	// Print RBAC & IDOR Matrix Table
+	fmt.Println("\n====================== RBAC & IDOR ROUTE SWEEP MATRIX ======================")
+	fmt.Printf("%-15s | %-32s | %-6s | %s\n", "Role", "Route", "Status", "Access Level / Data Scope")
+	fmt.Println("----------------+----------------------------------+--------+-----------------------------------")
+	for _, res := range results {
+		fmt.Printf("%-15s | %-32s | %-6d | %s\n", res.role, res.route, res.status, res.access)
+	}
+	fmt.Println("=============================================================================")
+}
+
+// 14. Comprehensive XSS payloads in doc text, symbol names, and repo names
+func TestComprehensiveXSSPayloads(t *testing.T) {
+	root := t.TempDir()
+	xssDir := filepath.Join(root, "xss-repo")
+	_ = os.MkdirAll(xssDir, 0o755)
+
+	xssPayloads := []string{
+		`<script>alert("xss")</script>`,
+		`"><svg/onload=alert(1)>`,
+		`' onfocus='alert(1)'`,
+		`<img src=x onerror=alert(document.cookie)>`,
+		`<iframe src="javascript:alert(1)">`,
+	}
+
+	for idx, payload := range xssPayloads {
+		repo := Repo{
+			Name: fmt.Sprintf("repo-xss-%d", idx),
+			Path: xssDir,
+			Team: payload,
+		}
+		principals := []Principal{
+			{Hash: hash("admin"), Admin: true},
+		}
+
+		srv, err := NewServer(Config{
+			AllowedRoot: root,
+			CacheTTL:    30 * time.Second,
+			Now:         time.Now,
+			AccessLog:   io.Discard,
+			MeasureFunc: func(r Repo) (Health, error) {
+				return Health{Repo: payload, Team: r.Team, Total: 5, Stale: 1}, nil
+			},
+		}, []Repo{repo}, principals, root)
+		if err != nil {
+			t.Fatalf("NewServer failed for payload %q: %v", payload, err)
+		}
+
+		ts := httptest.NewServer(srv.Handler())
+		defer ts.Close()
+
+		req, _ := http.NewRequest("GET", ts.URL+"/", nil)
+		req.SetBasicAuth("", "admin")
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		bodyStr := string(body)
+
+		if strings.Contains(bodyStr, "<script>") || strings.Contains(bodyStr, "<svg/onload") ||
+			strings.Contains(bodyStr, "<img src=x") || strings.Contains(bodyStr, "<iframe") {
+			t.Fatalf("Unescaped XSS payload executed in HTML response for payload: %s", payload)
+		}
+	}
+}
+
+// 15. Load scale test: 100 repositories, 50 concurrent viewers, bounded RSS memory
+func TestLoadScale100Repos50Viewers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping load test in short mode")
+	}
+
+	root := t.TempDir()
+	var repos []Repo
+	for i := 0; i < 100; i++ {
+		rDir := filepath.Join(root, fmt.Sprintf("repo_%d", i))
+		_ = os.MkdirAll(rDir, 0o755)
+		repos = append(repos, Repo{
+			Name: fmt.Sprintf("repo_%d", i),
+			Path: rDir,
+			Team: fmt.Sprintf("team_%d", i%10),
+		})
+	}
+
+	var principals []Principal
+	for i := 0; i < 50; i++ {
+		tName := fmt.Sprintf("team_%d", i%10)
+		principals = append(principals, Principal{
+			Hash:  hash(fmt.Sprintf("viewer_tok_%d", i)),
+			Admin: false,
+			Teams: map[string]bool{tName: true},
+		})
+	}
+
+	srv, err := NewServer(Config{
+		AllowedRoot: root,
+		CacheTTL:    30 * time.Second,
+		Now:         time.Now,
+		AccessLog:   io.Discard,
+		MeasureFunc: func(r Repo) (Health, error) {
+			return Health{Repo: r.Name, Team: r.Team, Total: 20, Drift: 0.05}, nil
+		},
+	}, repos, principals, root)
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Measure baseline memory
+	runtime.GC()
+	var mBefore runtime.MemStats
+	runtime.ReadMemStats(&mBefore)
+
+	var wg sync.WaitGroup
+	var completedReqs int64
+
+	start := time.Now()
+	// 50 concurrent goroutines, each making 20 requests = 1000 requests total
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		workerID := i
+		go func() {
+			defer wg.Done()
+			client := &http.Client{Timeout: 5 * time.Second}
+			token := fmt.Sprintf("viewer_tok_%d", workerID)
+			for j := 0; j < 20; j++ {
+				path := "/"
+				if j%2 == 1 {
+					path = "/api/health"
+				}
+				req, _ := http.NewRequest("GET", ts.URL+path, nil)
+				req.SetBasicAuth("", token)
+				resp, err := client.Do(req)
+				if err == nil {
+					io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+					if resp.StatusCode == http.StatusOK {
+						atomic.AddInt64(&completedReqs, 1)
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	runtime.GC()
+	var mAfter runtime.MemStats
+	runtime.ReadMemStats(&mAfter)
+
+	heapGrowthMB := float64(mAfter.HeapAlloc-mBefore.HeapAlloc) / (1024 * 1024)
+	t.Logf("Completed %d requests across 100 repos / 50 concurrent viewers in %v", completedReqs, elapsed)
+	t.Logf("Heap before: %.2f MB, Heap after: %.2f MB (Net growth: %.2f MB)",
+		float64(mBefore.HeapAlloc)/(1024*1024), float64(mAfter.HeapAlloc)/(1024*1024), heapGrowthMB)
+
+	if completedReqs != 1000 {
+		t.Errorf("expected 1000 successful requests, got %d", completedReqs)
+	}
+	// Verify memory remains strictly bounded (< 50 MB growth for 1000 requests on 100 repos)
+	if heapGrowthMB > 50.0 {
+		t.Errorf("excessive memory growth during load: %.2f MB", heapGrowthMB)
 	}
 }

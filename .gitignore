@@ -112,6 +112,9 @@ sentinix-ai/bin/
 sentinix-ai/dist/
 sentinix-ai/sentinix
 sentinix-ai/sentinixd
+scribex-ai/bin/
+scribex-ai/dist/
+scribex-ai/scribex
 
 # Rust target builds
 **/target/
