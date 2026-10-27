@@ -43,24 +43,17 @@ func Load(dir string) (*Wiki, error) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() && strings.HasPrefix(d.Name(), ".") && p != dir {
-			return filepath.SkipDir
-		}
-		fi, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		if fi.Mode()&os.ModeSymlink != 0 {
-			if d.IsDir() {
+		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), ".") && p != dir {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if d.IsDir() || !strings.HasSuffix(p, ".md") {
+		if !strings.HasSuffix(p, ".md") {
 			return nil
 		}
-		if fi.Size() > 2<<20 {
-			return fmt.Errorf("wiki page %s exceeds 2 MiB limit (%d bytes)", p, fi.Size())
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
 		}
 		count++
 		if count > 100000 {
