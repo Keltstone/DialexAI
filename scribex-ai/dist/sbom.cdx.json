@@ -1,0 +1,79 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:99431630-3a44-4ffe-9c31-f6ad3c1e2856",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-10-27T18:22:43+05:30",
+    "tools": [
+      {
+        "vendor": "CycloneDX",
+        "name": "cyclonedx-gomod",
+        "version": "v1.9.0",
+        "hashes": [
+          {
+            "alg": "MD5",
+            "content": "dd9fc8d4098654527f2250c821249982"
+          },
+          {
+            "alg": "SHA-1",
+            "content": "d31f7bfff204dcc88b275cd0b9e34e65f53ad6f3"
+          },
+          {
+            "alg": "SHA-256",
+            "content": "7aa612f5310cdbe89ea5358ddc7d14e21a4b1964219579591dc273335947ad00"
+          },
+          {
+            "alg": "SHA-384",
+            "content": "37448665a29264c25a10890a43aece0986027cc474e56963bfa0493d853528c9a3541e4e8fed9728bb502e58cbcf82c7"
+          },
+          {
+            "alg": "SHA-512",
+            "content": "25cde2d5ac8839e7843eccb147e583212c43a77d52ff6595dd47ff45744ccbc588525ca99d5a849ca62ab8874a81b21d45861437736fe87ee9719000aa8fc267"
+          }
+        ],
+        "externalReferences": [
+          {
+            "url": "https://github.com/CycloneDX/cyclonedx-gomod",
+            "type": "vcs"
+          },
+          {
+            "url": "https://cyclonedx.org",
+            "type": "website"
+          }
+        ]
+      }
+    ],
+    "component": {
+      "bom-ref": "pkg:golang/scribex@v1.0.1-0.20261024191942-841e605b00be?type=module#cmd/scribex",
+      "type": "application",
+      "name": "scribex",
+      "version": "v1.0.1-0.20261024191942-841e605b00be",
+      "purl": "pkg:golang/scribex@v1.0.1-0.20261024191942-841e605b00be?type=module\u0026goos=darwin\u0026goarch=arm64#cmd/scribex",
+      "properties": [
+        {
+          "name": "cdx:gomod:build:env:CGO_ENABLED",
+          "value": "1"
+        },
+        {
+          "name": "cdx:gomod:build:env:GOARCH",
+          "value": "arm64"
+        },
+        {
+          "name": "cdx:gomod:build:env:GOOS",
+          "value": "darwin"
+        },
+        {
+          "name": "cdx:gomod:build:env:GOVERSION",
+          "value": "go1.27.3"
+        }
+      ]
+    }
+  },
+  "dependencies": [
+    {
+      "ref": "pkg:golang/scribex@v1.0.1-0.20261024191942-841e605b00be?type=module#cmd/scribex"
+    }
+  ]
+}
