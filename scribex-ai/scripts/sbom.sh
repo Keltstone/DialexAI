@@ -47,8 +47,16 @@ if command -v cyclonedx-gomod >/dev/null 2>&1; then
     cd "$ROOT_DIR"
     cyclonedx-gomod app -main cmd/scribex -output "$DIST_DIR/sbom.cdx.json" -json .
   )
+  if [ ! -s "$DIST_DIR/sbom.cdx.json" ]; then
+    echo "ERROR: dist/sbom.cdx.json is missing or empty" >&2
+    exit 1
+  fi
   echo "CycloneDX SBOM written to dist/sbom.cdx.json"
 else
+  if [ "${CI:-}" = "true" ]; then
+    echo "ERROR: cyclonedx-gomod is required when CI=true but was not found" >&2
+    exit 1
+  fi
   echo "cyclonedx-gomod not found, generating fallback text SBOM into dist/sbom.txt..."
   (
     cd "$ROOT_DIR"
@@ -63,6 +71,10 @@ else
       go list -m all
     } > "$DIST_DIR/sbom.txt"
   )
+  if [ ! -s "$DIST_DIR/sbom.txt" ]; then
+    echo "ERROR: dist/sbom.txt is missing or empty" >&2
+    exit 1
+  fi
   echo "Fallback text SBOM written to dist/sbom.txt"
 
   if [ "$WANT_CYCLONEDX" = true ]; then

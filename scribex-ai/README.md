@@ -25,6 +25,7 @@ Repos file: `name path team`. RBAC file: `sha256(token) admin|viewer team,team`;
 
 Languages: Go (AST), Kotlin, Java, TS/JS, Python (lexical scanner; see [accuracy table](docs/user/language-support.md)). Spec: `spec/SPEC.md`.
 CI: `action/action.yml`. Prose is never LLM-rewritten; mismatches are flagged, signatures synced deterministically.
+Verified by CI: automated testing (Ubuntu/macOS), actionlint, govulncheck, osv-scanner, 4-parser fuzzing, CycloneDX SBOM, synthetic performance benchmarks, and bit-for-bit reproducible builds are executed via [.github/workflows/scribex.yml](../.github/workflows/scribex.yml); see [Supply Chain Security & Evidence](docs/user/supply-chain.md).
 
 ## Configure the AI, secrets, CI
 
