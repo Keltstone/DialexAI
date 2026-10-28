@@ -248,7 +248,7 @@ private fun mainApplication() = application {
 
             if (showAboutDialog) {
                 com.dialex.ui.AboutDialog(
-                    companyName = "Kolta Labs",
+                    companyName = "Keltstone Systems",
                     onDismiss = { showAboutDialog = false }
                 )
             }

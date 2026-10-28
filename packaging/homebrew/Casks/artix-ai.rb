@@ -14,7 +14,7 @@ cask "artix-ai" do
   zap trash: [
     "~/.artix",
     "~/Library/Application Support/Artix",
-    "~/Library/Preferences/com.koltalabs.artix.plist",
-    "~/Library/Saved Application State/com.koltalabs.artix.savedState",
+    "~/Library/Preferences/com.keltstone.artix.plist",
+    "~/Library/Saved Application State/com.keltstone.artix.savedState",
   ]
 end

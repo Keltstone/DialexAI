@@ -268,21 +268,21 @@ Want to dive deeper into the design, mathematics, or technical guides? Explore t
 We welcome contributions from researchers, software developers, writers, and designers:
 * **Report Bugs & Suggest Features**: Open an issue on our GitHub repository.
 * **Contribute Code**: Check out our [Developer Guide](docs/DEVELOPER_GUIDE.md) and submit a pull request.
-* **Support Our Work**: If Dialex AI helps you make better decisions, consider starring the repository ⭐ or [sponsoring on GitHub](https://github.com/sponsors/Kolta-Labs).
+* **Support Our Work**: If Dialex AI helps you make better decisions, consider starring the repository ⭐ or [sponsoring on GitHub](https://github.com/sponsors/Keltstone).
 
 ---
 
 ## License & Usage
 
-Dialex AI is **source-available and dual-licensed** by Kolta Labs. It is not OSI open source.
+Dialex AI is **source-available and dual-licensed** by Keltstone Systems. It is not OSI open source.
 
 * ✅ **Noncommercial use (free)**: personal, academic, educational, research and non-profit use under the **PolyForm Noncommercial License 1.0.0**.
-* 💼 **Commercial use**: using it in or for a business, or offering it to customers, requires a commercial license. See [COMMERCIAL_LICENSE.md](../COMMERCIAL_LICENSE.md) or email `licensing@koltalabs.com`.
+* 💼 **Commercial use**: using it in or for a business, or offering it to customers, requires a commercial license. See [COMMERCIAL_LICENSE.md](../COMMERCIAL_LICENSE.md) or email `licensing@keltstone.com`.
 
 *For full legal terms, see the [LICENSE](LICENSE) file.*
 
 ---
 
 <div align="center">
-  <sub>Copyright &copy; 2026 <strong>Kolta Labs</strong> · Empowering thoughtful, sovereign decisions.</sub>
+  <sub>Copyright &copy; 2026 <strong>Keltstone Systems</strong> · Empowering thoughtful, sovereign decisions.</sub>
 </div>

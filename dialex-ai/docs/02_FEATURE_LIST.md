@@ -219,4 +219,4 @@ The following advanced capabilities have been implemented or are planned:
 ## 📄 License
 
 Dialex AI is licensed under the [PolyForm Noncommercial License 1.0.0](file:///LICENSE).  
-Copyright (c) 2026 Kolta Labs. Free for personal, academic, and noncommercial research. Commercial deployments require an enterprise license from Kolta Labs.
+Copyright (c) 2026 Keltstone Systems. Free for personal, academic, and noncommercial research. Commercial deployments require an enterprise license from Keltstone Systems.

@@ -28,7 +28,7 @@ cask "kritix-ai-bundled" do
   zap trash: [
     "~/.kritix",
     "~/Library/Application Support/Kritix",
-    "~/Library/Preferences/com.koltalabs.kritix.plist",
-    "~/Library/Saved Application State/com.koltalabs.kritix.savedState",
+    "~/Library/Preferences/com.keltstone.kritix.plist",
+    "~/Library/Saved Application State/com.keltstone.kritix.savedState",
   ]
 end

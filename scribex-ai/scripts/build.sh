@@ -32,19 +32,25 @@ DIST_DIR="$ROOT_DIR/dist"
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
-# Honour SOURCE_DATE_EPOCH if set for reproducibility
-if [ -n "${SOURCE_DATE_EPOCH:-}" ]; then
-  export SOURCE_DATE_EPOCH
+# Honour SOURCE_DATE_EPOCH if set for reproducibility, or default to latest git commit time
+if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
+  SOURCE_DATE_EPOCH="$(git log -1 --format=%ct 2>/dev/null || echo 1700000000)"
 fi
+export SOURCE_DATE_EPOCH
 
-TARGETS=(
-  "linux/amd64"
-  "linux/arm64"
-  "darwin/amd64"
-  "darwin/arm64"
-  "windows/amd64"
-  "windows/arm64"
-)
+if [ -n "${BUILD_TARGETS:-}" ]; then
+  # shellcheck disable=SC2206
+  TARGETS=($BUILD_TARGETS)
+else
+  TARGETS=(
+    "linux/amd64"
+    "linux/arm64"
+    "darwin/amd64"
+    "darwin/arm64"
+    "windows/amd64"
+    "windows/arm64"
+  )
+fi
 
 echo "Building Scribex AI release ${VERSION}..."
 

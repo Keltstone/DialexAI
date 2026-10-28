@@ -1,6 +1,6 @@
 # Dialex AI Documentation Hub
 
-Welcome to the official technical and user documentation suite for **Dialex AI** — the sovereign cross-platform multi-agent adversarial deliberation and synthetic advisory platform developed by **Kolta Labs**.
+Welcome to the official technical and user documentation suite for **Dialex AI** — the sovereign cross-platform multi-agent adversarial deliberation and synthetic advisory platform developed by **Keltstone Systems**.
 
 ---
 
@@ -115,8 +115,8 @@ See [Developer Guide: Kolt Ecosystem Setup](DEVELOPER_GUIDE.md#2-kolt-ecosystem-
 Dialex AI is licensed under the [PolyForm Noncommercial License 1.0.0](file:///LICENSE).
 
 - **Free for Individuals & Noncommercial Use**: You are free to use, modify, test, and distribute the software for personal study, research, education, hobby, or noncommercial pursuits.
-- **Commercial Use**: Any use to run a commercial business or provide services for a fee requires a commercial agreement from **Kolta Labs**. For commercial inquiries, contact `licensing@koltalabs.com`.
+- **Commercial Use**: Any use to run a commercial business or provide services for a fee requires a commercial agreement from **Keltstone Systems**. For commercial inquiries, contact `licensing@keltstone.com`.
 
 ---
 
-*Copyright (c) 2026 Kolta Labs. All rights reserved.*
+*Copyright (c) 2026 Keltstone Systems. All rights reserved.*

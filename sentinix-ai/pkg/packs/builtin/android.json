@@ -4,7 +4,7 @@
  "stacks": [
   "android"
  ],
- "author": "Kolta Labs",
+ "author": "Keltstone Systems",
  "rules": [
   {
    "id": "exported-component",

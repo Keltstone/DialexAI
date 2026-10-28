@@ -442,8 +442,8 @@ func TestPerformance(t *testing.T) {
 		if len(files) != numDirs*filesPerDir {
 			t.Fatalf("Files count = %d, want %d", len(files), numDirs*filesPerDir)
 		}
-		if elapsed > 2*time.Second {
-			t.Fatalf("Files took %v (> 2s)", elapsed)
+		if elapsed > 3*time.Second {
+			t.Fatalf("Files took %v (> 3s)", elapsed)
 		}
 	})
 

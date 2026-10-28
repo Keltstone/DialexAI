@@ -1,7 +1,7 @@
 # Dialex AI Client: Developer Guide & Build Pipeline
 
 **Client:** `dialex-ai` (Kotlin Multiplatform / Compose Multiplatform)  
-**Author:** Kolta Labs Core Mobile & Desktop Architecture  
+**Author:** Keltstone Systems Core Mobile & Desktop Architecture  
 **Audience:** Mobile Engineers, Desktop Developers, KMP Contributors  
 **Scope:** Gradle multi-project setup, Kolt composite builds, building native distributables, and writing tests.
 

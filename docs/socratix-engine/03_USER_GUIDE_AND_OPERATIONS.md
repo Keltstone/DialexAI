@@ -1,7 +1,7 @@
 # Socratix Engine: User Guide & Operations Manual
 
 **Engine:** `socratix-engine` (Go 1.27)  
-**Author:** Kolta Labs Operations & Site Reliability Engineering  
+**Author:** Keltstone Systems Operations & Site Reliability Engineering  
 **Audience:** Platform Engineers, System Administrators, Power Users  
 **Scope:** Installation, daemon configuration, CLI flags, Socratic interactive sessions, benchmarking, and troubleshooting.
 

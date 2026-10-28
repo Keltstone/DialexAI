@@ -1,5 +1,5 @@
 class Socratix < Formula
-  desc "Socratix — Multi-agent consensus & deliberation engine by Kolta Labs"
+  desc "Socratix — Multi-agent consensus & deliberation engine by Keltstone Systems"
   homepage "https://dialex.ai"
   url "https://github.com/Keltstone/DialexAI/archive/refs/tags/v1.0.0.tar.gz"
   version "1.0.0"

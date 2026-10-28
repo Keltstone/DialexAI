@@ -13,7 +13,7 @@
 # PART I: GLOBAL DATA PROCESSING ADDENDUM (DPA)
 *(Pursuant to EU GDPR Article 28, UK GDPR, India DPDP Act 2023 § 8, and US CCPA/CPRA § 1798.140(ag))*
 
-This Data Processing Addendum ("**DPA**") supplements and forms an integral part of the Master Software Licence, Subscription, or Service Agreement entered into by and between the **Customer / Adopting Institution** ("**Customer**" or "**Data Controller**" / "**Data Fiduciary**") and **Sentinix AI / Keltstone Technologies** ("**Vendor**" or "**Data Processor**" / "**Service Provider**").
+This Data Processing Addendum ("**DPA**") supplements and forms an integral part of the Master Software Licence, Subscription, or Service Agreement entered into by and between the **Customer / Adopting Institution** ("**Customer**" or "**Data Controller**" / "**Data Fiduciary**") and **Sentinix AI / Keltstone Systems** ("**Vendor**" or "**Data Processor**" / "**Service Provider**").
 
 ### 1. Definitions and Interpretation
 

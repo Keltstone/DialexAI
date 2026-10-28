@@ -2,6 +2,9 @@
 
 Scribex integrates with GitHub, Jira, and Confluence to cross-reference changes, post status comments, and sync technical documentation.
 
+> [!NOTE]
+> For step-by-step setup guides across all supported platforms (Confluence, Jira, GitHub, GitLab, Notion, In-Repo Wikis, Compliance & Dashboard), consult the [Master Platform Integration & Setup Guide](../scribex-ai/04_SETUP_SCENARIOS_AND_PLATFORMS_GUIDE.md) and [Platform Setup Sub-Pages](../scribex-ai/platforms/).
+
 ## HTTP Transport & Network Security
 
 All network calls to integration endpoints (GitHub API, Jira REST API, Confluence REST API) go through the hardened `httpx` transport.

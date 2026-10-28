@@ -1,7 +1,7 @@
 # Kritix AI Platform: User Guide & Testing Workflows
 
 **Platform:** `kritix-ai` (CLI, Web Studio & Desktop Cockpit)  
-**Author:** Kolta Labs Quality Engineering & Developer Experience  
+**Author:** Keltstone Systems Quality Engineering & Developer Experience  
 **Audience:** QA Engineers, SDETs, Developers, DevOps Leads  
 **Scope:** CLI usage, Web Studio demonstration recorder, Compose Desktop Cockpit, OWASP DAST audits, and Playwright repro exports.
 

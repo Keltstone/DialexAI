@@ -27,16 +27,16 @@ import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
 /**
- * Official Kolta Labs logo component across Android and Desktop.
+ * Official Keltstone Systems logo component across Android and Desktop.
  * Renders the official Kolt arrow-K monogram mark.
  */
 @OptIn(ExperimentalEncodingApi::class)
 @Composable
-fun KoltaLabsLogoView(
+fun KeltstoneLogoView(
     modifier: Modifier = Modifier,
     size: Dp = 28.dp,
     shape: Shape? = null,
-    contentDescription: String? = "Kolta Labs"
+    contentDescription: String? = "Keltstone Systems"
 ) {
     val cc = LocalCcColors.current
     val imageBitmap: ImageBitmap? = remember {
@@ -73,23 +73,23 @@ fun KoltaLabsLogoView(
 }
 
 /**
- * Backward-compatible alias for [KoltaLabsLogoView].
+ * Backward-compatible alias for [KeltstoneLogoView].
  */
 @Composable
 fun KoltSystemsLogoView(
     modifier: Modifier = Modifier,
     size: Dp = 28.dp,
     shape: Shape? = null,
-    contentDescription: String? = "Kolta Labs"
+    contentDescription: String? = "Keltstone Systems"
 ) {
-    KoltaLabsLogoView(modifier = modifier, size = size, shape = shape, contentDescription = contentDescription)
+    KeltstoneLogoView(modifier = modifier, size = size, shape = shape, contentDescription = contentDescription)
 }
 
 /**
- * Full Brand Lockup with Logo and Typography for Kolta Labs.
+ * Full Brand Lockup with Logo and Typography for Keltstone Systems.
  */
 @Composable
-fun KoltaLabsBrandLockup(
+fun KeltstoneBrandLockup(
     modifier: Modifier = Modifier,
     logoSize: Dp = 28.dp,
     showSubtitle: Boolean = true
@@ -100,10 +100,10 @@ fun KoltaLabsBrandLockup(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        KoltaLabsLogoView(size = logoSize)
+        KeltstoneLogoView(size = logoSize)
         Column(verticalArrangement = Arrangement.Center) {
             Text(
-                "KOLTA LABS",
+                "KELTSTONE SYSTEMS",
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 13.5.sp,
@@ -127,7 +127,7 @@ fun KoltaLabsBrandLockup(
 }
 
 /**
- * Backward-compatible alias for [KoltaLabsBrandLockup].
+ * Backward-compatible alias for [KeltstoneBrandLockup].
  */
 @Composable
 fun KoltSystemsBrandLockup(
@@ -135,5 +135,5 @@ fun KoltSystemsBrandLockup(
     logoSize: Dp = 28.dp,
     showSubtitle: Boolean = true
 ) {
-    KoltaLabsBrandLockup(modifier = modifier, logoSize = logoSize, showSubtitle = showSubtitle)
+    KeltstoneBrandLockup(modifier = modifier, logoSize = logoSize, showSubtitle = showSubtitle)
 }

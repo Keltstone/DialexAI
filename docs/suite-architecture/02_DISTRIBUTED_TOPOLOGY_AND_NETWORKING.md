@@ -1,6 +1,6 @@
 # Dialex Suite: Distributed Topology & Mesh Networking
 
-**Author:** Kolta Labs Core Architecture Group  
+**Author:** Keltstone Systems Core Architecture Group  
 **Audience:** Site Reliability Engineers, Enterprise Network Architects, DevOps Engineers  
 **Scope:** Distributed deployment modes, network protocols, streaming event architectures, and zero-trust mesh integration.
 

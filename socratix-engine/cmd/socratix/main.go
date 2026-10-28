@@ -42,7 +42,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`socratix — the Socratix consensus & deliberation engine by Kolta Labs
+	fmt.Println(`socratix — the Socratix consensus & deliberation engine by Keltstone Systems
 
 Usage:
   socratix serve [flags]        Run the HTTP/SSE daemon

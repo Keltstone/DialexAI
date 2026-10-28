@@ -1,7 +1,7 @@
 # Socratix Engine: Conceptual Foundation & Epistemology
 
 **Engine:** `socratix-engine` (Go 1.27)  
-**Author:** Kolta Labs Research Group  
+**Author:** Keltstone Systems Research Group  
 **Audience:** AI Researchers, Systems Architects, Epistemic Logicians, Prospective Developers  
 **Scope:** Epistemology of multi-agent debate, Hegelian dialectics, anti-sycophancy theory, and paraconsistent logic.
 

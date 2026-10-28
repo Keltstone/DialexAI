@@ -315,7 +315,7 @@ private fun PrimaryDedicationView(
                                 color = cc.textPrimary
                             )
                             Text(
-                                "PolyForm Noncommercial License 1.0.0 • Kolta Labs & Contributors",
+                                "PolyForm Noncommercial License 1.0.0 • Keltstone Systems & Contributors",
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
                                 color = cc.textMuted
                             )

@@ -1,7 +1,7 @@
 # Artix AI Platform: Conceptual Foundation & Architecture
 
 **Platform:** `artix-ai` (Go 1.27 & Compose Desktop)  
-**Author:** Kolta Labs Autonomous Software Engineering Group  
+**Author:** Keltstone Systems Autonomous Software Engineering Group  
 **Audience:** Software Engineers, Tech Leads, Engineering Managers  
 **Scope:** The Solo Sycophant Problem, two-chamber checks-and-balances, Taboo Spaces, and zero-disruption coding.
 

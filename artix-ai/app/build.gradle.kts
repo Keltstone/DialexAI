@@ -42,18 +42,18 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Exe, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "ArtixAI"
             packageVersion = project.findProperty("app.version") as? String ?: "1.0.0"
-            vendor = "Kolta Labs"
+            vendor = "Keltstone Systems"
             description = "Artix AI - Dialectic Software Engineering & Autonomous Coding Cockpit"
             val engineResourcesDir = project.findProperty("engine.resources.dir") as? String
             if (!engineResourcesDir.isNullOrBlank()) {
                 appResourcesRootDir.set(project.file(engineResourcesDir))
             }
             macOS {
-                bundleID = "com.koltalabs.artix"
+                bundleID = "com.keltstone.artix"
                 dockName = "Artix AI"
             }
             windows {
-                menuGroup = "Kolta Labs"
+                menuGroup = "Keltstone Systems"
                 upgradeUuid = "D38E3120-1A8E-4A7B-8B33-25A932E49E01"
                 shortcut = true
                 menu = true

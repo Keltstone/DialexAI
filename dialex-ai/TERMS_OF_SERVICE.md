@@ -2,8 +2,8 @@
 
 **Effective Date:** January 1, 2026  
 **Version:** 1.0.0  
-**Maintained by:** Kolta Labs (<https://github.com/Keltstone/DialexAI>)  
-**Licensing Inquiries:** `licensing@koltalabs.com`
+**Maintained by:** Keltstone Systems (<https://github.com/Keltstone/DialexAI>)  
+**Licensing Inquiries:** `licensing@keltstone.com`
 
 ---
 
@@ -17,7 +17,7 @@ By downloading, installing, compiling, executing, accessing, or using **Dialex A
 
 ## 2. Description of the Software & Synthetic Multi-Agent AI Deliberation
 
-Dialex AI is an analytical orchestration framework and synthetic decision-intelligence council developed by Kolta Labs. It facilitates structured, multi-agent dialectic debates among competing frontier artificial intelligence models (such as Anthropic Claude, OpenAI ChatGPT/Codex, Google Gemini/Antigravity, xAI Grok, DeepSeek, Mistral, and local runtimes via Ollama or custom local command-line interfaces).
+Dialex AI is an analytical orchestration framework and synthetic decision-intelligence council developed by Keltstone Systems. It facilitates structured, multi-agent dialectic debates among competing frontier artificial intelligence models (such as Anthropic Claude, OpenAI ChatGPT/Codex, Google Gemini/Antigravity, xAI Grok, DeepSeek, Mistral, and local runtimes via Ollama or custom local command-line interfaces).
 
 You acknowledge and agree to the following foundational technical characteristics of the Software:
 
@@ -38,8 +38,8 @@ Dialex AI operates under a sovereign, direct-to-provider architecture. When you 
    - Google Generative AI Prohibited Use Policy;
    - xAI Terms of Service;
    - Any applicable terms for local model weights and open-weight license agreements.
-3. **Billing and API Rate Limits:** You are solely responsible for all API consumption fees, token costs, infrastructure expenses, and rate-limit management incurred through your API keys or subscriptions. Kolta Labs does not resell tokens, mark up API pricing, or arbitrate billing disputes with model providers.
-4. **Third-Party Service Availability:** Kolta Labs is not responsible for upstream provider outages, model deprecations, API format changes, latency, account suspensions, or token pricing alterations.
+3. **Billing and API Rate Limits:** You are solely responsible for all API consumption fees, token costs, infrastructure expenses, and rate-limit management incurred through your API keys or subscriptions. Keltstone Systems does not resell tokens, mark up API pricing, or arbitrate billing disputes with model providers.
+4. **Third-Party Service Availability:** Keltstone Systems is not responsible for upstream provider outages, model deprecations, API format changes, latency, account suspensions, or token pricing alterations.
 
 ---
 
@@ -51,7 +51,7 @@ You agree not to use Dialex AI for any purpose that is prohibited by these Terms
 2. Develop, refine, coordinate, or propagate malware, ransomware, exploit payloads, cyberattack vectors, or weapons of mass destruction (chemical, biological, radiological, or nuclear).
 3. Generate synthetic content intended for unlawful fraud, identity theft, financial impersonation, deceptive manipulation, or automated disinformation campaigns.
 4. Process, transmit, or deliberatively expose unencrypted Protected Health Information (PHI) or classified government data unless operating in a fully verified, air-gapped environment compliant with statutory mandates (e.g., HIPAA, ITAR, FedRAMP).
-5. Attempt to reverse engineer, decompile, or compromise the integrity of any non-public backend services maintained by Kolta Labs.
+5. Attempt to reverse engineer, decompile, or compromise the integrity of any non-public backend services maintained by Keltstone Systems.
 
 ---
 
@@ -59,16 +59,16 @@ You agree not to use Dialex AI for any purpose that is prohibited by these Terms
 
 1. **PolyForm Noncommercial License 1.0.0:** Dialex AI source code and distributed binaries are governed by the [PolyForm Noncommercial License 1.0.0](LICENSE) (dual-licensed: see [COMMERCIAL_LICENSE.md](../COMMERCIAL_LICENSE.md)).
 2. **Permitted Noncommercial Use:** You may freely download, execute, modify, and redistribute Dialex AI for personal study, academic research, education, non-profit community activities, or noncommercial development.
-3. **Commercial License Requirement:** Any use of Dialex AI to operate a commercial business, provide paid consulting or advisory services, charge subscription fees, or conduct internal for-profit commercial activities **requires a separate commercial enterprise license** issued in writing by Kolta Labs. For commercial licensing terms, contact `licensing@koltalabs.com`.
+3. **Commercial License Requirement:** Any use of Dialex AI to operate a commercial business, provide paid consulting or advisory services, charge subscription fees, or conduct internal for-profit commercial activities **requires a separate commercial enterprise license** issued in writing by Keltstone Systems. For commercial licensing terms, contact `licensing@keltstone.com`.
 4. **Attribution:** You must preserve all copyright notices, license headers, and trademark references in all copies or derivative works of the Software.
 
 ---
 
 ## 6. Intellectual Property & Ownership of Work Product
 
-1. **User Ownership of Inputs and Deliverables:** As between you and Kolta Labs, **YOU RETAIN SOLE AND EXCLUSIVE OWNERSHIP OF ALL INPUTS, PROMPTS, ATTACHMENTS, CUSTOM PERSONA DEFINITIONS, AND DELIBERATION WORK PRODUCTS (TRANSCRIPTS, ADRs, MATRICES, CODE, DELIVERABLES) GENERATED THROUGH YOUR USE OF DIALEX AI.**
-2. **Zero Claim by Kolta Labs:** Kolta Labs makes no claim of ownership, copyright, or licensing rights over the prompts you submit or the deliverables you produce using Dialex AI.
-3. **No Training on User Data:** Kolta Labs does not harvest, store, transmit to centralized servers, or train AI models on your discussions, prompts, or deliverables.
+1. **User Ownership of Inputs and Deliverables:** As between you and Keltstone Systems, **YOU RETAIN SOLE AND EXCLUSIVE OWNERSHIP OF ALL INPUTS, PROMPTS, ATTACHMENTS, CUSTOM PERSONA DEFINITIONS, AND DELIBERATION WORK PRODUCTS (TRANSCRIPTS, ADRs, MATRICES, CODE, DELIVERABLES) GENERATED THROUGH YOUR USE OF DIALEX AI.**
+2. **Zero Claim by Keltstone Systems:** Keltstone Systems makes no claim of ownership, copyright, or licensing rights over the prompts you submit or the deliverables you produce using Dialex AI.
+3. **No Training on User Data:** Keltstone Systems does not harvest, store, transmit to centralized servers, or train AI models on your discussions, prompts, or deliverables.
 4. **Third-Party Rights:** You warrant that you have all necessary rights, permissions, and licenses to submit any proprietary source code, documentation, or data into Dialex AI and its connected third-party providers.
 
 ---
@@ -78,7 +78,7 @@ You agree not to use Dialex AI for any purpose that is prohibited by these Terms
 **TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW:**
 
 1. **"AS IS" AND "AS AVAILABLE":** THE SOFTWARE IS PROVIDED ON AN "AS IS" AND "AS AVAILABLE" BASIS, WITH ALL FAULTS, DEFECTS, AND ERRORS.
-2. **NO EXPRESS OR IMPLIED WARRANTIES:** KOLTA LABS, ITS FOUNDERS, CONTRIBUTORS, LICENSORS, AND AFFILIATES EXPRESSLY DISCLAIM ALL WARRANTIES OF ANY KIND, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING WITHOUT LIMITATION THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, ACCURACY, RELIABILITY, SECURITY, FREEDOM FROM MALWARE OR VIRUSES, AND UNINTERRUPTED OPERATION.
+2. **NO EXPRESS OR IMPLIED WARRANTIES:** KELTSTONE SYSTEMS, ITS FOUNDERS, CONTRIBUTORS, LICENSORS, AND AFFILIATES EXPRESSLY DISCLAIM ALL WARRANTIES OF ANY KIND, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING WITHOUT LIMITATION THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, ACCURACY, RELIABILITY, SECURITY, FREEDOM FROM MALWARE OR VIRUSES, AND UNINTERRUPTED OPERATION.
 3. **ASSUMPTION OF RISK:** YOU ACKNOWLEDGE AND AGREE THAT YOUR ENTIRE RISK ARISING OUT OF YOUR USE OF THE SOFTWARE, AND ANY RESULTS, CODE, OR ADVICE DERIVED THEREFROM, REMAINS SOLELY AND ENTIRELY WITH YOU.
 
 ---
@@ -87,14 +87,14 @@ You agree not to use Dialex AI for any purpose that is prohibited by these Terms
 
 **TO THE FULLEST EXTENT PERMITTED UNDER APPLICABLE LAW:**
 
-1. **EXCLUSION OF CONSEQUENTIAL AND INDIRECT DAMAGES:** IN NO EVENT SHALL KOLTA LABS, ITS MAINTAINERS, CONTRIBUTORS, OFFICERS, DIRECTORS, EMPLOYEES, AGENTS, OR LICENSORS BE LIABLE TO YOU OR ANY THIRD PARTY FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, PUNITIVE, OR CONSEQUENTIAL DAMAGES (INCLUDING BUT NOT LIMITED TO LOSS OF PROFITS, LOSS OF REVENUE, LOSS OF DATA OR ANTICIPATED SAVINGS, BUSINESS INTERRUPTION, LOSS OF GOODWILL, WORK STOPPAGE, COMPUTER FAILURE OR MALFUNCTION, PRODUCTION INCIDENTS, SECURITY BREACHES, OR COSTS OF SUBSTITUTE GOODS OR SERVICES) ARISING OUT OF OR IN CONNECTION WITH THESE TERMS, THE SOFTWARE, OR THE INABILITY TO USE THE SOFTWARE, UNDER ANY THEORY OF LIABILITY (WHETHER IN CONTRACT, TORT, STRICT LIABILITY, NEGLIGENCE, OR OTHERWISE), EVEN IF INFORMED OF THE POSSIBILITY OF SUCH DAMAGES.
-2. **AGGREGATE LIABILITY CAP:** IN NO EVENT SHALL THE TOTAL AGGREGATE LIABILITY OF KOLTA LABS AND ITS CONTRIBUTORS ARISING OUT OF OR RELATING TO THESE TERMS OR THE SOFTWARE EXCEED THE GREATER OF: (A) THE TOTAL AMOUNT ACTUALLY PAID BY YOU TO KOLTA LABS FOR THE SPECIFIC LICENSE GIVING RISE TO THE CLAIM IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM, OR (B) ZERO UNITED STATES DOLLARS ($0.00 USD).
+1. **EXCLUSION OF CONSEQUENTIAL AND INDIRECT DAMAGES:** IN NO EVENT SHALL KELTSTONE SYSTEMS, ITS MAINTAINERS, CONTRIBUTORS, OFFICERS, DIRECTORS, EMPLOYEES, AGENTS, OR LICENSORS BE LIABLE TO YOU OR ANY THIRD PARTY FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, PUNITIVE, OR CONSEQUENTIAL DAMAGES (INCLUDING BUT NOT LIMITED TO LOSS OF PROFITS, LOSS OF REVENUE, LOSS OF DATA OR ANTICIPATED SAVINGS, BUSINESS INTERRUPTION, LOSS OF GOODWILL, WORK STOPPAGE, COMPUTER FAILURE OR MALFUNCTION, PRODUCTION INCIDENTS, SECURITY BREACHES, OR COSTS OF SUBSTITUTE GOODS OR SERVICES) ARISING OUT OF OR IN CONNECTION WITH THESE TERMS, THE SOFTWARE, OR THE INABILITY TO USE THE SOFTWARE, UNDER ANY THEORY OF LIABILITY (WHETHER IN CONTRACT, TORT, STRICT LIABILITY, NEGLIGENCE, OR OTHERWISE), EVEN IF INFORMED OF THE POSSIBILITY OF SUCH DAMAGES.
+2. **AGGREGATE LIABILITY CAP:** IN NO EVENT SHALL THE TOTAL AGGREGATE LIABILITY OF KELTSTONE SYSTEMS AND ITS CONTRIBUTORS ARISING OUT OF OR RELATING TO THESE TERMS OR THE SOFTWARE EXCEED THE GREATER OF: (A) THE TOTAL AMOUNT ACTUALLY PAID BY YOU TO KELTSTONE SYSTEMS FOR THE SPECIFIC LICENSE GIVING RISE TO THE CLAIM IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM, OR (B) ZERO UNITED STATES DOLLARS ($0.00 USD).
 
 ---
 
 ## 9. Indemnification
 
-You agree to defend, indemnify, and hold harmless Kolta Labs, its maintainers, contributors, affiliates, licensors, and each of their respective officers, directors, employees, and agents from and against any and all claims, liabilities, damages, losses, judgments, awards, penalties, fines, costs, and expenses (including reasonable attorneys' fees and legal costs) arising out of or relating to:
+You agree to defend, indemnify, and hold harmless Keltstone Systems, its maintainers, contributors, affiliates, licensors, and each of their respective officers, directors, employees, and agents from and against any and all claims, liabilities, damages, losses, judgments, awards, penalties, fines, costs, and expenses (including reasonable attorneys' fees and legal costs) arising out of or relating to:
 
 1. Your breach or alleged breach of these Terms or the PolyForm Noncommercial License;
 2. Your violation of any third-party right, including intellectual property rights, trade secrets, privacy rights, or terms of connected AI providers;
@@ -113,20 +113,20 @@ You agree to defend, indemnify, and hold harmless Kolta Labs, its maintainers, c
 ## 11. Governing Law & Dispute Resolution
 
 1. **Governing Law:** These Terms and any dispute arising out of or related to the Software shall be governed by and construed in accordance with the laws of the State of Delaware, United States, without regard to its conflict of law principles. The United Nations Convention on Contracts for the International Sale of Goods shall not apply.
-2. **Binding Arbitration & Class Action Waiver:** Any dispute, claim, or controversy arising out of or relating to these Terms or the breach, termination, enforcement, interpretation, or validity thereof shall be resolved exclusively through final and binding individual arbitration. **YOU AND KOLTA LABS AGREE THAT EACH MAY BRING CLAIMS AGAINST THE OTHER ONLY IN YOUR OR ITS INDIVIDUAL CAPACITY, AND NOT AS A PLAINTIFF OR CLASS MEMBER IN ANY PURPORTED CLASS, COLLECTIVE, OR REPRESENTATIVE PROCEEDING.**
+2. **Binding Arbitration & Class Action Waiver:** Any dispute, claim, or controversy arising out of or relating to these Terms or the breach, termination, enforcement, interpretation, or validity thereof shall be resolved exclusively through final and binding individual arbitration. **YOU AND KELTSTONE SYSTEMS AGREE THAT EACH MAY BRING CLAIMS AGAINST THE OTHER ONLY IN YOUR OR ITS INDIVIDUAL CAPACITY, AND NOT AS A PLAINTIFF OR CLASS MEMBER IN ANY PURPORTED CLASS, COLLECTIVE, OR REPRESENTATIVE PROCEEDING.**
 
 ---
 
 ## 12. Modifications to Terms
 
-Kolta Labs reserves the right, at its sole discretion, to modify or replace these Terms at any time. When modifications are made, the "Version" and "Effective Date" at the top will be updated. In the event of material revisions, Dialex AI may require you to review and re-accept the updated Terms upon launching the application before continuing use.
+Keltstone Systems reserves the right, at its sole discretion, to modify or replace these Terms at any time. When modifications are made, the "Version" and "Effective Date" at the top will be updated. In the event of material revisions, Dialex AI may require you to review and re-accept the updated Terms upon launching the application before continuing use.
 
 ---
 
 ## 13. Severability & Entire Agreement
 
-If any provision of these Terms is found to be unlawful, void, or unenforceable, that provision shall be deemed severable and shall not affect the validity and enforceability of any remaining provisions. These Terms, together with the PolyForm Noncommercial License and the Privacy Policy, constitute the entire agreement between you and Kolta Labs concerning the Software.
+If any provision of these Terms is found to be unlawful, void, or unenforceable, that provision shall be deemed severable and shall not affect the validity and enforceability of any remaining provisions. These Terms, together with the PolyForm Noncommercial License and the Privacy Policy, constitute the entire agreement between you and Keltstone Systems concerning the Software.
 
 ---
 
-*For inquiries regarding commercial licensing or legal permissions, contact: `licensing@koltalabs.com`.*
+*For inquiries regarding commercial licensing or legal permissions, contact: `licensing@keltstone.com`.*

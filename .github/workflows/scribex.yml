@@ -1,0 +1,602 @@
+name: Scribex CI & Supply Chain Evidence
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scribex-ai/**'
+      - 'go.work'
+      - '.github/workflows/scribex.yml'
+    tags:
+      - 'scribex-v*'
+  pull_request:
+    paths:
+      - 'scribex-ai/**'
+      - 'go.work'
+      - '.github/workflows/scribex.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scribex-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+    working-directory: scribex-ai
+
+env:
+  GOWORK: 'off'
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version-file: scribex-ai/go.mod
+          cache: false
+
+      - name: Verify dist is not tracked
+        run: |
+          tracked="$(git ls-files dist/)"
+          if [ -n "$tracked" ]; then
+            echo "ERROR: Tracked files found under dist/:" >&2
+            echo "$tracked" >&2
+            exit 1
+          fi
+
+      - name: Verify formatting (gofmt)
+        run: |
+          diffs="$(gofmt -l .)"
+          if [ -n "$diffs" ]; then
+            echo "ERROR: Unformatted Go files found:" >&2
+            echo "$diffs" >&2
+            exit 1
+          fi
+
+      - name: Build all packages
+        run: go build ./...
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Run tests with race detector
+        run: env -u GITHUB_EVENT_NAME -u CI_PIPELINE_SOURCE go test -race -count=1 ./...
+
+      - name: Run shellcheck
+        run: shellcheck scripts/*.sh
+
+      - name: Test tool independence (reduced PATH)
+        run: |
+          GO_DIR="$(dirname "$(command -v go)")"
+          GIT_DIR="$(dirname "$(command -v git)")"
+          RESTRICTED_PATH="$GO_DIR:$GIT_DIR"
+          echo "Running with restricted PATH: $RESTRICTED_PATH"
+          PATH="$RESTRICTED_PATH" go build ./...
+          PATH="$RESTRICTED_PATH" env -u GITHUB_EVENT_NAME -u CI_PIPELINE_SOURCE go test -count=1 ./pkg/safepath ./pkg/fsx ./pkg/gitx ./pkg/symbols
+
+  actionlint:
+    name: Actionlint Workflow Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version-file: scribex-ai/go.mod
+          cache: false
+
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+      - name: Lint workflow files
+        env:
+          WORKFLOW_PATH: ../.github/workflows/scribex.yml
+        run: |
+          actionlint "$WORKFLOW_PATH"
+
+      - name: Lint action usage and CI init templates
+        env:
+          RUNNER_TMP: ${{ runner.temp }}
+        run: |
+          # 1. Lint workflow usage of scribex-ai/action
+          TMP_ACTION_DIR="$RUNNER_TMP/action-test"
+          mkdir -p "$TMP_ACTION_DIR/.github/workflows"
+          cat << 'EOF' > "$TMP_ACTION_DIR/.github/workflows/test.yml"
+          name: Test Action
+          on: [pull_request]
+          jobs:
+            test:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+                - uses: ./action
+                  with:
+                    base: origin/main
+          EOF
+          actionlint "$TMP_ACTION_DIR/.github/workflows/test.yml"
+
+          # 2. Build scribex binary
+          SCRIBEX_BIN="$RUNNER_TMP/bin/scribex"
+          mkdir -p "$RUNNER_TMP/bin"
+          go build -trimpath -buildvcs=false -o "$SCRIBEX_BIN" ./cmd/scribex
+
+          # 3. Test ci init github and lint generated workflows
+          TMP_GH_DIR="$RUNNER_TMP/ci-gh-test"
+          mkdir -p "$TMP_GH_DIR"
+          (
+            cd "$TMP_GH_DIR"
+            "$SCRIBEX_BIN" ci init github
+            actionlint .github/workflows/*.yml
+          )
+
+          # 4. Test ci init gitlab
+          TMP_GL_DIR="$RUNNER_TMP/ci-gl-test"
+          mkdir -p "$TMP_GL_DIR"
+          (
+            cd "$TMP_GL_DIR"
+            "$SCRIBEX_BIN" ci init gitlab
+            test -s .gitlab-ci.scribex.yml
+          )
+
+  vuln:
+    name: Vulnerability Scan & OSV Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version-file: scribex-ai/go.mod
+          cache: false
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+
+      - name: Run govulncheck
+        env:
+          RUNNER_TMP: ${{ runner.temp }}
+        run: |
+          PATH="$(go env GOPATH)/bin:$PATH" govulncheck ./... | tee "$RUNNER_TMP/govulncheck.txt"
+
+      - name: Upload govulncheck report
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: govulncheck
+          path: ${{ runner.temp }}/govulncheck.txt
+
+      - name: Install osv-scanner
+        run: go install github.com/google/osv-scanner/cmd/osv-scanner@v1.9.2
+
+      - name: Run osv-scanner
+        run: PATH="$(go env GOPATH)/bin:$PATH" osv-scanner --lockfile=go.mod
+
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - FuzzExtractTS
+          - FuzzExtractPython
+          - FuzzExtractKotlin
+          - FuzzExtractJava
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version-file: scribex-ai/go.mod
+          cache: false
+
+      - name: Run fuzz test (120s)
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          go test -run '^$' -fuzz "^${TARGET}$" -fuzztime 120s ./pkg/symbols
+
+      - name: Upload crashers if found
+        if: failure()
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: fuzz-crashers-${{ matrix.target }}
+          path: scribex-ai/pkg/symbols/testdata/fuzz
+          if-no-files-found: ignore
+
+  sbom:
+    name: CycloneDX SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version-file: scribex-ai/go.mod
+          cache: false
+
+      - name: Install cyclonedx-gomod
+        run: go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.0
+
+      - name: Generate CycloneDX SBOM
+        env:
+          CI: 'true'
+        run: ./scripts/sbom.sh --cyclonedx
+
+      - name: Validate SBOM format and Go toolchain version
+        run: |
+          if [ ! -s dist/sbom.cdx.json ]; then
+            echo "ERROR: dist/sbom.cdx.json is missing or empty" >&2
+            exit 1
+          fi
+          # Validate bomFormat is CycloneDX
+          bom_format="$(python3 -c 'import json; d=json.load(open("dist/sbom.cdx.json")); print(d.get("bomFormat", ""))')"
+          if [ "$bom_format" != "CycloneDX" ]; then
+            echo "ERROR: bomFormat is '$bom_format', expected 'CycloneDX'" >&2
+            exit 1
+          fi
+          # Validate lists Go toolchain version
+          go_ver="$(python3 -c '
+          import json
+          d = json.load(open("dist/sbom.cdx.json"))
+          props = d.get("metadata", {}).get("component", {}).get("properties", [])
+          ver = [p["value"] for p in props if "GOVERSION" in p.get("name", "")]
+          print(ver[0] if ver else "")
+          ')"
+          if [ -z "$go_ver" ]; then
+            echo "ERROR: SBOM does not list Go toolchain version" >&2
+            exit 1
+          fi
+          echo "Validated CycloneDX SBOM (Go version: $go_ver)"
+
+      - name: Verify dist is not tracked
+        run: |
+          tracked="$(git ls-files dist/)"
+          if [ -n "$tracked" ]; then
+            echo "ERROR: Tracked files found under dist/:" >&2
+            echo "$tracked" >&2
+            exit 1
+          fi
+
+      - name: Upload sbom.cdx.json
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: sbom.cdx.json
+          path: scribex-ai/dist/sbom.cdx.json
+
+  perf:
+    name: Synthetic Performance Benchmarks (1k, 10k, 100k)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version-file: scribex-ai/go.mod
+
+      - name: Build scribex binary
+        env:
+          RUNNER_TMP: ${{ runner.temp }}
+        run: |
+          mkdir -p "$RUNNER_TMP/bin"
+          go build -trimpath -buildvcs=false -o "$RUNNER_TMP/bin/scribex" ./cmd/scribex
+          echo "$RUNNER_TMP/bin" >> "$GITHUB_PATH"
+
+      - name: Run synthetic benchmarks
+        env:
+          RUNNER_TMP: ${{ runner.temp }}
+          STEP_SUMMARY: ${{ github.step_summary }}
+        run: |
+          # 1. Setup git invocation counting wrapper
+          WRAPPER_DIR="$RUNNER_TMP/git-wrapper"
+          mkdir -p "$WRAPPER_DIR"
+          cat << 'EOF' > "$WRAPPER_DIR/git"
+          #!/usr/bin/env bash
+          if [ -n "${GIT_CALL_LOG:-}" ]; then
+            echo "$*" >> "$GIT_CALL_LOG"
+          fi
+          exec /usr/bin/git "$@"
+          EOF
+          chmod +x "$WRAPPER_DIR/git"
+
+          TABLE_FILE="$RUNNER_TMP/perf.md"
+          {
+            echo "| Repository Size | Run 1 Wall | Run 2 Wall | Run 3 Wall | Median Wall | Peak RSS | Git Calls | Zero-Token Gate Status |"
+            echo "|---|---|---|---|---|---|---|---|"
+          } > "$TABLE_FILE"
+
+          for spec in "1k:1000" "10k:10000" "100k:100000"; do
+            size="${spec%%:*}"
+            count="${spec##*:}"
+            target_repo="$RUNNER_TMP/repo_$size"
+
+            echo "=== Benchmarking $size repository ($count files) ==="
+            ./scripts/perf-gen.sh "$count" "$target_repo"
+
+            cd "$target_repo"
+            scribex sync
+            /usr/bin/git add .
+            /usr/bin/git commit -m "sync docs"
+
+            # Edit one source file body (no public signature change)
+            printf "\n// modified body\n" >> src/go/file_1.go
+
+            runs=()
+            rss_val="N/A"
+            git_calls="N/A"
+
+            for r in 1 2 3; do
+              time_log="$RUNNER_TMP/time_${size}_${r}.log"
+              call_log="$RUNNER_TMP/calls_${size}_${r}.log"
+              rm -f "$time_log" "$call_log"
+
+              # Run under git-counting wrapper and /usr/bin/time -v
+              GIT_CALL_LOG="$call_log" PATH="$WRAPPER_DIR:$PATH" \
+                /usr/bin/time -v -o "$time_log" scribex check -base HEAD~1
+
+              # Extract wall time
+              wall_sec="$(grep 'Elapsed (wall clock) time' "$time_log" | awk '{print $NF}' | tr -d 'm' | awk -F: '{if (NF==2) print ($1*60)+$2; else print $1}')"
+              runs+=("$wall_sec")
+
+              if [ "$r" -eq 1 ]; then
+                rss_kbytes="$(grep 'Maximum resident set size' "$time_log" | awk '{print $NF}')"
+                rss_val="${rss_kbytes} KB"
+                if [ -f "$call_log" ]; then
+                  git_calls="$(wc -l < "$call_log" | tr -d ' ')"
+                else
+                  git_calls="0"
+                fi
+              fi
+            done
+
+            # Compute median wall time using python
+            median="$(python3 -c "import statistics; r=[float(x) for x in ['${runs[0]}', '${runs[1]}', '${runs[2]}']]; print(statistics.median(r))")"
+            echo "Results for $size: run1=${runs[0]}s, run2=${runs[1]}s, run3=${runs[2]}s, median=${median}s, peak_rss=$rss_val, git_calls=$git_calls"
+
+            status="PASS"
+            if [ "$size" = "10k" ]; then
+              is_over="$(python3 -c "print(1 if float('$median') > 2.0 else 0)")"
+              if [ "$is_over" -eq 1 ]; then
+                echo "FAIL: 10k file median wall time ${median}s exceeds 2s limit!" >&2
+                exit 1
+              fi
+              status="PASS (< 2s)"
+            fi
+
+            echo "| $size ($count files) | ${runs[0]}s | ${runs[1]}s | ${runs[2]}s | **${median}s** | $rss_val | $git_calls | $status |" >> "$TABLE_FILE"
+            cd "$OLDPWD"
+          done
+
+          cat "$TABLE_FILE" >> "$STEP_SUMMARY"
+          cat "$TABLE_FILE"
+
+      - name: Upload perf.md
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: perf.md
+          path: ${{ runner.temp }}/perf.md
+
+  repro-ubuntu-1:
+    name: Reproducible Build (Ubuntu 1)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version-file: scribex-ai/go.mod
+          cache: false
+
+      - name: Build target
+        run: |
+          BUILD_TARGETS="linux/amd64" ./scripts/build.sh 1.0.0
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: digest-ubuntu-1
+          path: scribex-ai/dist/SHA256SUMS
+
+  repro-ubuntu-2:
+    name: Reproducible Build (Ubuntu 2)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version-file: scribex-ai/go.mod
+          cache: false
+
+      - name: Build target
+        run: |
+          BUILD_TARGETS="linux/amd64" ./scripts/build.sh 1.0.0
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: digest-ubuntu-2
+          path: scribex-ai/dist/SHA256SUMS
+
+  repro-macos:
+    name: Reproducible Build (macOS cross-compile)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version-file: scribex-ai/go.mod
+          cache: false
+
+      - name: Build target
+        run: |
+          BUILD_TARGETS="linux/amd64" ./scripts/build.sh 1.0.0
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: digest-macos
+          path: scribex-ai/dist/SHA256SUMS
+
+  repro-compare:
+    name: Compare Reproducible Digests
+    needs: [repro-ubuntu-1, repro-ubuntu-2, repro-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Download Ubuntu 1 digest
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: digest-ubuntu-1
+          path: ${{ runner.temp }}/u1
+
+      - name: Download Ubuntu 2 digest
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: digest-ubuntu-2
+          path: ${{ runner.temp }}/u2
+
+      - name: Download macOS cross-compile digest
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: digest-macos
+          path: ${{ runner.temp }}/mac
+
+      - name: Compare SHA-256 digests
+        env:
+          RUNNER_TMP: ${{ runner.temp }}
+        run: |
+          hash_u1="$(grep 'scribex_linux_amd64' "$RUNNER_TMP/u1/SHA256SUMS" | awk '{print $1}')"
+          hash_u2="$(grep 'scribex_linux_amd64' "$RUNNER_TMP/u2/SHA256SUMS" | awk '{print $1}')"
+          hash_mac="$(grep 'scribex_linux_amd64' "$RUNNER_TMP/mac/SHA256SUMS" | awk '{print $1}')"
+
+          echo "Ubuntu 1 digest:       $hash_u1"
+          echo "Ubuntu 2 digest:       $hash_u2"
+          echo "macOS cross digest:    $hash_mac"
+
+          if [ "$hash_u1" != "$hash_u2" ] || [ "$hash_u1" != "$hash_mac" ]; then
+            echo "FAIL: Reproducible build digests differ!" >&2
+            exit 1
+          fi
+
+          echo "PASS: Identical SHA-256 digest across 3 independent environments: $hash_u1"
+
+  release:
+    name: Release & Supply-Chain Signing
+    if: startsWith(github.ref, 'refs/tags/scribex-v') && github.repository == 'Keltstone/DialexAI'
+    needs: [test, actionlint, vuln, sbom, perf, repro-compare]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version-file: scribex-ai/go.mod
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@053f9b74638557590800a301da1ba82351507e2c # v3.8.1
+
+      - name: Download govulncheck artifact
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: govulncheck
+          path: scribex-ai/dist
+
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: sbom.cdx.json
+          path: scribex-ai/dist
+
+      - name: Download perf benchmark artifact
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: perf.md
+          path: scribex-ai/dist
+
+      - name: Build release binaries (4 targets)
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${REF_NAME#scribex-v}"
+          BUILD_TARGETS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64" ./scripts/build.sh "$VERSION"
+
+      - name: Generate full SHA256SUMS for all release artifacts
+        run: |
+          (
+            cd dist
+            rm -f SHA256SUMS
+            sha256sum scribex_* sbom.cdx.json govulncheck.txt perf.md > SHA256SUMS
+          )
+
+      - name: Sign release assets with keyless Cosign (GitHub OIDC)
+        run: |
+          (
+            cd dist
+            for asset in scribex_* sbom.cdx.json govulncheck.txt perf.md SHA256SUMS; do
+              [ -f "$asset" ] || continue
+              echo "Signing $asset with keyless Cosign..."
+              cosign sign-blob --yes --bundle "${asset}.bundle" "$asset" > "${asset}.sig"
+              jq -r '.verificationMaterial.certificate.rawBytes' "${asset}.bundle" | base64 -d > "${asset}.cert"
+            done
+          )
+
+      - name: Generate GitHub SLSA build provenance attestation
+        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v2.2.3
+        with:
+          subject-path: |
+            scribex-ai/dist/scribex_*
+            scribex-ai/dist/SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        with:
+          files: scribex-ai/dist/*

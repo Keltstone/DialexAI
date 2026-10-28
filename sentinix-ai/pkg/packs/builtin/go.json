@@ -4,7 +4,7 @@
   "stacks": [
     "go"
   ],
-  "author": "Kolta Labs",
+  "author": "Keltstone Systems",
   "rules": [
     {
       "id": "go/sql-injection",

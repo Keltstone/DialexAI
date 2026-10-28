@@ -1,7 +1,7 @@
 # Artix AI Platform: User Guide & Cockpit Manual
 
 **Platform:** `artix-ai` (CLI & Desktop Cockpit)  
-**Author:** Kolta Labs Developer Experience Group  
+**Author:** Keltstone Systems Developer Experience Group  
 **Audience:** Software Engineers, Tech Leads, Product Owners  
 **Scope:** CLI operations, TUI REPL, Compose Desktop Cockpit, IDE setup, and workflow playbooks.
 

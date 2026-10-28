@@ -941,7 +941,7 @@ private fun AppearanceTab(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text("Publisher", style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp), color = cc.textMuted)
-                                Text("Kolta Labs", style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp, fontWeight = FontWeight.Medium), color = cc.textPrimary)
+                                Text("Keltstone Systems", style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp, fontWeight = FontWeight.Medium), color = cc.textPrimary)
                             }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -995,7 +995,7 @@ private fun AppearanceTab(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                "Copyright © 2026 Kolta Labs. All rights reserved.",
+                                "Copyright © 2026 Keltstone Systems. All rights reserved.",
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
                                 color = cc.textMuted.copy(alpha = 0.7f)
                             )

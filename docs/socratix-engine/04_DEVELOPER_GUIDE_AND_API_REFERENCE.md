@@ -1,7 +1,7 @@
 # Socratix Engine: Developer Guide & API Reference
 
 **Engine:** `socratix-engine` (Go 1.27)  
-**Author:** Kolta Labs Core Systems Architecture  
+**Author:** Keltstone Systems Core Systems Architecture  
 **Audience:** Backend Developers, Integrators, Custom Runner Authors  
 **Scope:** REST endpoints, SSE payloads, custom runner development, persona compilation, and testing.
 

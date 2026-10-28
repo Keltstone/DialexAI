@@ -1,7 +1,7 @@
 # Kritix AI Platform: Conceptual Foundation & Architecture
 
 **Platform:** `kritix-ai` (Go 1.27, Web Studio, Compose Desktop)  
-**Author:** Kolta Labs Autonomous Testing & Quality Engineering Group  
+**Author:** Keltstone Systems Autonomous Testing & Quality Engineering Group  
 **Audience:** QA Architects, SDET Leads, CISOs, Performance Engineers  
 **Scope:** Deterministic-first token optimization, structural DOM pruning, self-healing locators, and enterprise QA reliability.
 

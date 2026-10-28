@@ -1,7 +1,7 @@
 # Socratix Engine: Core Technical Architecture & Internals
 
 **Engine:** `socratix-engine` (Go 1.27)  
-**Author:** Kolta Labs Core Systems Architecture  
+**Author:** Keltstone Systems Core Systems Architecture  
 **Audience:** Core Engine Contributors, Systems Engineers, Evaluators  
 **Scope:** Concurrency models, state machine transitions, mathematical formulas, algorithms, and package-by-package analysis.
 

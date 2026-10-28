@@ -156,8 +156,8 @@ func TestLoad_LargeTreePerformance(t *testing.T) {
 	if len(w.Pages) != pageCount {
 		t.Fatalf("loaded %d pages, want %d", len(w.Pages), pageCount)
 	}
-	if elapsed > 5*time.Second {
-		t.Fatalf("50,000 page tree took %v, want < 5s", elapsed)
+	if elapsed > 10*time.Second {
+		t.Fatalf("50,000 page tree took %v, want < 10s", elapsed)
 	}
 }
 

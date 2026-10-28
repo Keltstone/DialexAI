@@ -32,7 +32,7 @@ services:
     restart: unless-stopped
 
   dialex:
-    image: ghcr.io/koltalabs/dialex:latest
+    image: ghcr.io/keltstone/dialex:latest
     build:
       context: ..
       dockerfile: selfhosting/Dockerfile

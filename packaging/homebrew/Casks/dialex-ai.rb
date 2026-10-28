@@ -11,7 +11,7 @@ cask "dialex-ai" do
 
   zap trash: [
     "~/Library/Application Support/Dialex",
-    "~/Library/Preferences/com.koltalabs.dialex.plist",
-    "~/Library/Saved Application State/com.koltalabs.dialex.savedState",
+    "~/Library/Preferences/com.keltstone.dialex.plist",
+    "~/Library/Saved Application State/com.keltstone.dialex.savedState",
   ]
 end

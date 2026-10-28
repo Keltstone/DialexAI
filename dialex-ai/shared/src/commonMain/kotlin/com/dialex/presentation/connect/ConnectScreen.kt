@@ -39,7 +39,7 @@ fun ConnectScreen(
             DialexLogoView(size = 56.dp, shape = RoundedCornerShape(12.dp))
             Spacer(Modifier.height(12.dp))
             Text("Dialex", style = MaterialTheme.typography.headlineSmall, color = cc.textPrimary)
-            Text("Kolta Labs", style = MaterialTheme.typography.bodySmall, color = cc.textMuted)
+            Text("Keltstone Systems", style = MaterialTheme.typography.bodySmall, color = cc.textMuted)
             Spacer(Modifier.height(24.dp))
 
             if (state.supportsLocalEngine) {

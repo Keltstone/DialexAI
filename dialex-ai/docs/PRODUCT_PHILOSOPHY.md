@@ -134,4 +134,4 @@ To ensure reliability in mission-critical environments, Dialex AI implements str
 
 ---
 
-*Dialex AI is designed and maintained by Kolta Labs as a sovereign foundation for synthetic deliberation and collective machine intelligence.*
+*Dialex AI is designed and maintained by Keltstone Systems as a sovereign foundation for synthetic deliberation and collective machine intelligence.*

@@ -1,7 +1,7 @@
 # <img src="../../logos/sentinix/logo_sentinix.png" width="32" height="32" style="vertical-align:middle; margin-right:8px;" /> Sentinix AI: Conceptual Foundation & Defensive Principles
 
 **Module:** `sentinix-ai`  
-**Author:** Kolta Labs Security & Systems Engineering Group  
+**Author:** Keltstone Systems Security & Systems Engineering Group  
 **Audience:** Security Architects, Engineering Directors, DevSecOps Engineers, Compliance Auditors  
 **Scope:** Core philosophy, delta verification, content fingerprinting, separation of duties, and coverage transparency.
 

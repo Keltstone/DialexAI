@@ -1,7 +1,7 @@
 # Artix AI Platform: Developer Guide & Extensibility
 
 **Platform:** `artix-ai` (Go 1.27 & Compose Desktop)  
-**Author:** Kolta Labs Core Systems Architecture  
+**Author:** Keltstone Systems Core Systems Architecture  
 **Audience:** Core Engine Contributors, Language Driver Authors, DevSecOps Leads  
 **Scope:** Go package extension points, custom build drivers, taboo rule definitions, and running adversarial security test suites.
 
