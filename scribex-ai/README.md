@@ -27,6 +27,27 @@ Languages: Go (AST), Kotlin, Java, TS/JS, Python (lexical scanner; see [accuracy
 CI: `action/action.yml`. Prose is never LLM-rewritten; mismatches are flagged, signatures synced deterministically.
 Verified by CI: automated testing (Ubuntu/macOS), actionlint, govulncheck, osv-scanner, 4-parser fuzzing, CycloneDX SBOM, synthetic performance benchmarks, and bit-for-bit reproducible builds are executed via [.github/workflows/scribex.yml](../.github/workflows/scribex.yml); see [Supply Chain Security & Evidence](docs/user/supply-chain.md).
 
+---
+
+## 📚 Comprehensive Technical Documentation & Platform Guides
+
+Complete technical documentation for Scribex AI lives in the Dialex Suite knowledge base:
+
+- **[01. Conceptual Foundation & Epistemology](../docs/scribex-ai/01_CONCEPTUAL_FOUNDATION.md)**: Solving doc decay ("documentation graveyards"), AST grounding, zero-token impact gate, surgical skeletons (<40 tokens), and epistemic safety.
+- **[02. Core Technical Architecture & Engine Internals](../docs/scribex-ai/02_CORE_TECHNICAL_ARCHITECTURE.md)**: Polyglot symbol scanners (Go, Kotlin, Java, TS, Python), 16-hex anchor engine, living Mermaid diagrams, hardened HTTPX transport, RBAC daemon, and MCP protocol.
+- **[03. Complete User Guide & CLI Reference Manual](../docs/scribex-ai/03_USER_GUIDE_AND_CLI_REFERENCE.md)**: Exhaustive CLI reference, configuration schemas (`config.yaml`, `manifest.yaml`, `secrets.env`), and operational playbooks.
+- **[04. Master Platform Integration & Setup Guide](../docs/scribex-ai/04_SETUP_SCENARIOS_AND_PLATFORMS_GUIDE.md)**: Overview matrix and step-by-step guides for all supported documentation platforms:
+  - 📘 **[Atlassian Confluence Setup Guide](../docs/scribex-ai/platforms/confluence.md)**: Draft-only sync, API tokens, manifest mapping, storage-format XHTML rendering.
+  - 📋 **[Atlassian Jira Setup Guide](../docs/scribex-ai/platforms/jira.md)**: Acceptance criteria reality-check, undeclared breaking changes, and scope creep alerts.
+  - 🐙 **[GitHub Actions & PR Bot Guide](../docs/scribex-ai/platforms/github.md)**: PR check workflows, comment bot, post-merge docs sync PRs, and weekly scavenge.
+  - 🦊 **[GitLab CI/CD Integration Guide](../docs/scribex-ai/platforms/gitlab.md)**: Merge request gating, protected/masked variables, and self-hosted GitLab.
+  - 📝 **[In-Repo Markdown & Wikis Guide](../docs/scribex-ai/platforms/markdown_and_wikis.md)**: Anchor syntax, Mermaid diagrams, [[Wikilinks]], backlinks, and GitHub Wiki.
+  - 🧠 **[Notion Workspace via MCP Guide](../docs/scribex-ai/platforms/notion.md)**: Notion internal integration, `@notionhq/notion-mcp-server`, and agentic workflows.
+  - 🛡️ **[Compliance & Audit Evidence Guide](../docs/scribex-ai/platforms/compliance_and_audit.md)**: SOC2 / ISO 27001 trace matrices (`scribex trace`), formula-injection defense, and JSON sidecars.
+  - 🖥️ **[Central Governance Dashboard Guide](../docs/scribex-ai/platforms/governance_dashboard.md)**: Multi-repo `scribex serve` daemon, SHA-256 RBAC, and Caddy/Nginx TLS setup.
+
+---
+
 ## Configure the AI, secrets, CI
 
 ```bash

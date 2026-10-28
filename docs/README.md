@@ -20,6 +20,8 @@ graph TD
         SocratixEngine["Socratix Engine<br/>• Turn State Machine<br/>• Hegelian Consensus<br/>• Bayesian Credence<br/>• Knowledge Graph"]
         ArtixEngine["Artix AI Engine<br/>• Stakeholder Chamber<br/>• Shadow Worktrees<br/>• AST Taboo Reviewer<br/>• Sandboxed Execution"]
         KritixEngine["Kritix AI Engine<br/>• DOM Pruning Engine<br/>• Self-Healing SDET<br/>• OWASP DAST Fuzzer<br/>• Flaky Quarantine SLA"]
+        SentinixEngine["Sentinix AI Engine<br/>• Delta Vulnerability Gate<br/>• HMAC-SHA256 Fingerprint<br/>• Baseline Tracking<br/>• Ed25519 Signing"]
+        ScribexEngine["Scribex AI Engine<br/>• AST Symbol Anchoring<br/>• Zero-Token Impact Gate<br/>• Living Mermaid Diagrams<br/>• Enterprise Wiki Sync"]
     end
 
     subgraph Substrate ["Execution & Intelligence Substrate"]
@@ -33,11 +35,15 @@ graph TD
     KritixStudio -->|CDP / SSE / REST| KritixEngine
     ArtixEngine -.->|Deliberation Delegation| SocratixEngine
     KritixEngine -.->|Consensus Quality Audits| SocratixEngine
+    SentinixEngine -.->|Security Audits| SocratixEngine
+    ScribexEngine -.->|Contract Verification| SocratixEngine
 
     SocratixEngine --> LocalCLI
     SocratixEngine --> CloudAPI
     ArtixEngine --> LocalOS
     KritixEngine --> LocalOS
+    SentinixEngine --> LocalOS
+    ScribexEngine --> LocalOS
 ```
 
 ---
@@ -118,6 +124,27 @@ graph TD
 
 ---
 
+### 7. [Scribex AI Platform Wiki](scribex-ai/01_CONCEPTUAL_FOUNDATION.md)
+*Living documentation, AST-grounded code synchronization, enterprise wiki federation, and compliance evidence engine.*
+- [01. Conceptual Foundation & Epistemology](scribex-ai/01_CONCEPTUAL_FOUNDATION.md)  
+  *Documentation decay dynamics ("documentation graveyards"), AST grounding, zero-token impact gate, surgical skeletons (<40 tokens), and epistemic safety.*
+- [02. Core Technical Architecture & Engine Internals](scribex-ai/02_CORE_TECHNICAL_ARCHITECTURE.md)  
+  *Polyglot symbol scanners (Go AST, Kotlin, Java, TS, Python), 16-hex anchor engine, living Mermaid diagram synthesis, hardened HTTPX transport, RBAC daemon, and MCP protocol.*
+- [03. User Guide & CLI Reference Manual](scribex-ai/03_USER_GUIDE_AND_CLI_REFERENCE.md)  
+  *Exhaustive CLI reference (`init`, `check`, `sync`, `diagram`, `scavenge`, `comment`, `confluence`, `jira`, `trace`, `serve`, `config`, `secrets`, `ci`, `mcp`, `wiki`), configuration schemas, and daily playbooks.*
+- [04. Master Platform Integration & Setup Guide](scribex-ai/04_SETUP_SCENARIOS_AND_PLATFORMS_GUIDE.md)  
+  *Overview integration matrix and links to dedicated platform deep-dive guides:*
+  - [Atlassian Confluence Setup Guide](scribex-ai/platforms/confluence.md) *(Draft-only sync, API tokens, manifest mapping, storage-format XHTML)*
+  - [Atlassian Jira Setup Guide](scribex-ai/platforms/jira.md) *(Automated acceptance criteria reality-check, breaking changes / scope creep detection)*
+  - [GitHub Actions & PR Bot Guide](scribex-ai/platforms/github.md) *(Scaffolded PR check, comment bot, post-merge docs sync PR, weekly scavenge, GHES)*
+  - [GitLab CI/CD Integration Guide](scribex-ai/platforms/gitlab.md) *(Merge request gating, protected/masked variables, self-hosted GitLab)*
+  - [In-Repo Markdown & Wikis Guide](scribex-ai/platforms/markdown_and_wikis.md) *(Anchors syntax, Mermaid diagrams, [[Wikilinks]], backlinks, GitHub Wiki)*
+  - [Notion Workspaces via MCP Guide](scribex-ai/platforms/notion.md) *(Notion internal integration, `@notionhq/notion-mcp-server`, agentic workflows)*
+  - [Compliance & Audit Evidence Guide](scribex-ai/platforms/compliance_and_audit.md) *(SOC2 / ISO 27001 trace matrix, formula-injection defense, JSON sidecar)*
+  - [Central Governance Dashboard Guide](scribex-ai/platforms/governance_dashboard.md) *(Multi-repo `scribex serve` daemon, SHA-256 RBAC, Caddy/Nginx TLS)*
+
+---
+
 ## 🚀 Quick Navigation by Persona
 
 | If You Are A... | Start Here | Primary Documents to Consult |
@@ -127,7 +154,8 @@ graph TD
 | **Software Engineer / Contributor** | [Artix Cockpit Manual](artix-ai/03_USER_GUIDE_AND_COCKPIT.md) | [Artix Dev Guide](artix-ai/04_DEVELOPER_GUIDE_AND_EXTENSIBILITY.md), [Dialex Dev Guide](dialex-ai/04_DEVELOPER_GUIDE_AND_BUILD_PIPELINE.md) |
 | **QA Lead / SDET Architect** | [Kritix Overview](kritix-ai/01_CONCEPTUAL_FOUNDATION.md) | [Kritix Architecture](kritix-ai/02_CORE_TECHNICAL_ARCHITECTURE.md), [Kritix User Guide](kritix-ai/03_USER_GUIDE_AND_STUDIO.md) |
 | **DevSecOps / AppSec Lead** | [Sentinix Conceptual Foundation](sentinix-ai/01_CONCEPTUAL_FOUNDATION.md) | [Sentinix Setup Scenarios](sentinix-ai/04_SETUP_SCENARIOS_AND_DEPLOYMENT_GUIDE.md), [Sentinix Architecture](sentinix-ai/02_CORE_TECHNICAL_ARCHITECTURE.md) |
-| **Security & Compliance Auditor** | [Security Vault](suite-architecture/03_SECURITY_VAULT_AND_SOVEREIGNTY.md) | [Sentinix User Guide](sentinix-ai/03_USER_GUIDE_AND_OPERATIONS.md), [Kritix Enterprise Guide](kritix-ai/04_DEVELOPER_GUIDE_AND_ENTERPRISE.md) |
+| **Technical Writer / Doc Lead** | [Scribex Conceptual Foundation](scribex-ai/01_CONCEPTUAL_FOUNDATION.md) | [Scribex CLI Reference](scribex-ai/03_USER_GUIDE_AND_CLI_REFERENCE.md), [Platform Guides](scribex-ai/04_SETUP_SCENARIOS_AND_PLATFORMS_GUIDE.md) |
+| **Security & Compliance Auditor** | [Security Vault](suite-architecture/03_SECURITY_VAULT_AND_SOVEREIGNTY.md) | [Compliance Evidence Guide](scribex-ai/platforms/compliance_and_audit.md), [Sentinix User Guide](sentinix-ai/03_USER_GUIDE_AND_OPERATIONS.md) |
 
 ---
 *Maintained by Keltstone Systems. Licensed under the PolyForm Noncommercial License 1.0.0.*
