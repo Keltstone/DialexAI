@@ -100,3 +100,66 @@ Done when: `scribex doctypes validate` is green on a repo with no file and red w
 
 ---
 Cards 4+ (generate plan/apply/publish, derived provenance, dashboard, CI job, acceptance) are written after 1-3 land and are reviewed, so they use the real APIs.
+
+---
+## Card 4 - `pkg/generate` plan phase (no model calls)
+
+Depends on cards 1-3 landed. Reuse, do not re-implement: `docs.Files` / `docs.FilesWithSkips` (file walk + skips), `docs.Symbols(root, file)` and `symbols.ExtractDetailed` (public symbols + parser kind), `anchors.Process` / `docs.Check` (existing anchors, stale/dead state), `doctypes.Load/Resolve`, `safepath`/`fsx` for every path.
+
+Behaviour:
+- `generate.Plan(root string, opts Options) (Plan, error)`; `Options`: doc type ids (default = enabled types), include/exclude globs, `RunID` (default `YYYYMMDD-HHMMSS-<6hex>`).
+- For each enabled doc type produce `Items`: `{TypeID, Unit (module|package|feature|file|symbol key), Sources []path@sha256, Output path, Action (create|update|skip), Reason, ParserKind (ast|lexical), EstCalls, EstTokens}`.
+  - `symbol` types: one item per source file with public symbols; `update` if the output file exists with `@scribex:anchor` blocks for them (list new/changed/dead), `create` if absent, `skip` if every symbol is anchored and `sig=` current.
+  - `derived` types: one item per unit; `skip` if the output exists and all recorded `sources=` hashes still match; `update` otherwise.
+  - `human` types: skeleton `create` only when the output is absent; EstCalls 0.
+  - Never plan to touch an output file whose non-`@scribex:ai` content would change.
+- Token estimate: `ceil(bytes/4)` of the content that would be sent plus a fixed per-call overhead const; documented as an estimate, never billing-accurate.
+- Totals + `WouldSend []path` (unique files whose content leaves the machine for non-local backends; empty for `ollama` on loopback).
+- Writes ONLY `.scribex/runs/<RunID>/plan.json` (schema version field `"v":1`, stable ordering, no timestamps inside items so two plans on an unchanged repo are byte-identical) and `plan.md` (human table per doc type with coverage numbers and a "parser kind" column). `.scribex/runs/` is added to the auto-generated `.gitignore` entry the way `secrets.env` is today.
+- No network, no exec of model CLIs, no repo file outside `.scribex/runs/` is written.
+
+CLI: `scribex generate [-C dir] [--types a,b] [--include g] [--exclude g] [--json]` (no `--apply` yet: prints plan.md path and totals; exit 0; exit 2 on bad flags/doctypes; exit 1 only if the repo is dirty in a way that blocks a later apply, reported as a warning line).
+
+Failing tests first (`pkg/generate/plan_test.go`, fixtures under `testdata/` with a tiny Go+Kotlin+TS repo):
+- `TestPlanDeterministic`: two runs byte-identical `plan.json`.
+- `TestPlanSymbolCreateUpdateSkip`: table of (no doc | doc with stale sig | doc fully current) -> create|update|skip with correct symbol lists.
+- `TestPlanDerivedSourceHash`: unchanged sources -> skip; modify one source -> update.
+- `TestPlanNeverTouchesHandWritten`: output file with hand prose + one ai section -> item Action update limited to the ai section, reason recorded.
+- `TestPlanWritesOnlyRunsDir`: snapshot repo tree before/after.
+- `TestPlanWouldSendEmptyForLoopbackOllama` / `TestPlanWouldSendListsFilesForCloud`.
+- `TestPlanParserKind`: `.go` = ast, `.kt/.ts/.py/.java` = lexical.
+- `TestPlanRespectsExcludeAndSymlinks`: symlinked file/dir skipped and listed in skips.
+- CLI e2e: `generate` on fixture repo prints totals; `--json` is valid JSON matching schema.
+
+Done when: plan on this repo (`scribex-ai` itself) runs in under 5s, creates nothing but `.scribex/runs/<id>/`, and a second run is byte-identical.
+
+---
+## Card 5 - Apply phase for `symbol` grounding (tech-reference, api-reference)
+
+Depends on card 4, card 2 (`llm.New` returning `Completer`), card 3.
+
+Behaviour: `generate.Apply(root, runID, opts)`; CLI `scribex generate --resume <runID> --apply [--confirm-send] [--max-calls N]`.
+- Loads `plan.json`, REFUSES if repo HEAD or any recorded source hash differs from the plan ("plan is stale; re-run plan"), if doc files are dirty, HEAD is detached, or (non-local backend) `--confirm-send` is absent. Same precondition helpers as `sync -commit` (`gitx`); do not duplicate them, extract a shared function if needed.
+- For each `create`/`update` item, in plan order, until `ai.max_calls` or `ai.max_tokens` is reached:
+  1. Create/refresh `<!-- @scribex:anchor(file#Symbol) -->` blocks for each public symbol. Placeholder prose for `create` is a single line `<!-- @scribex:ai --> TODO` style marker per existing convention; do NOT call the model for anchor/signature generation (deterministic via `anchors.Process(sync=true)`).
+  2. Prose only for symbols whose signature is new/changed, by calling the model through the existing `prose` path: output must pass `prose.Validate(old, new, secrets...)` and `prose.StripAIMark`/`Clean`; invalid output is dropped and the item marked `failed:invalid-output` (prose left as the placeholder), run continues.
+  3. Prompts: system prompt (+ `ai.style_guide`) and the doc type `template` skeleton; user prompt = symbol signature + the symbol's source excerpt (capped), wrapped as untrusted data with the same delimiter helper `prose`/`mdsafe` use today.
+- Per-item state recorded in `.scribex/runs/<id>/state.json` (`pending|done|failed|skipped`, calls used, error text redacted); a crash then `--resume` continues, never redoing `done` items and never exceeding totals across resumes.
+- Ceiling hit: stop cleanly, exit 1, remaining items stay `pending`, print counts.
+- After all writes run `docs.Check(root, false, nil)`; if it reports any issue for files this run touched, exit 1 and list them (a green `check` is the contract).
+- Writes only through `fsx.WriteFileIn`, only to `Output` paths from the plan, never hand-written regions; a second `--apply` of the same plan on an unchanged repo makes zero writes and zero model calls.
+
+Failing tests first (`pkg/generate/apply_test.go`, fake `Completer` returning canned text and counting calls):
+- `TestApplyCreatesAnchoredDocAndCheckPasses`.
+- `TestApplyIdempotent`: second apply = 0 calls, 0 file changes (compare tree hash).
+- `TestApplyRefusesStalePlan`, `...DirtyDocs`, `...DetachedHead`, `...CloudWithoutConfirmSend`.
+- `TestApplyHonoursMaxCallsAndResumes`: ceiling 2 of 5 items -> exit 1 -> resume with new budget finishes without redoing items; total calls == items.
+- `TestApplyDropsInvalidModelOutput`: output with a secret-shaped string, with markdown/HTML injection, with a forged `@scribex:anchor` marker -> rejected, placeholder kept, `check` still green.
+- `TestApplyPromptTreatsSourceAsData`: source excerpt containing "ignore previous instructions" is delimited; fake asserts it appears only inside the data block.
+- `TestApplyNeverWritesOutsideOutputs`: tree diff limited to plan outputs + `.scribex/runs/`.
+- CLI e2e with a fake `claude` on PATH (card 2 fake executable): full `generate --apply` on the fixture repo yields a PR-ready tree and `scribex check` exits 0.
+
+Done when: on the `scribex-ai` repo itself with a fake completer, apply then `check` is green and a second apply is a no-op.
+
+---
+Cards 6+ (derived provenance, Socratix review, publish, dashboard, CI job, acceptance) follow after 4-5 are reviewed.

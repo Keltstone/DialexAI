@@ -47,6 +47,15 @@ Rules:
 - Plan output is per doc type: files, calls, tokens, coverage; user approves per type.
 - Existing hand-written docs at an `output` path are never overwritten; generate appends/refreshes only `@scribex:ai` sections.
 
+## Socratix council review (optional, derived docs only)
+Decision: Socratix is an optional reviewer, not Scribex's LLM transport. Bulk `symbol` docs use one direct model call; the council would multiply cost for no gain.
+- Applies only to `grounding: derived` sections, per feature (bounded cost), after the draft is written. Off by default; enabled per doc type (`"review": "socratix"`) and globally by `ai.review` config.
+- Integration is exec of `socratix ask` added to the allowlisted CLI table (no daemon, no login, no Go dependency; Scribex stays stdlib-only and fully works without Socratix). Verified surface: `socratix ask -mode premortem|redteam|tenthman -provider <p> -model <m> -rounds N -out <file>`; it uses Socratix's own provider keys or Ollama, not vendor CLI logins. Scribex input = draft + the listed source excerpts, wrapped as untrusted data; output = memo file read back and size-capped.
+- Result is stored on the section: `review=socratix mode=redteam sources=[...] verdict=clean|disputed` plus the memo's unsupported-claim list. `disputed` sections render a visible banner and never auto-merge-quietly; humans decide.
+- Same privacy gate as any model call (`--confirm-send`); counts against `ai.max_calls`.
+- If `socratix` is missing: skip review and record `review=skipped` (never pretend it ran).
+- Measure before trusting: acceptance card runs generation with and without review on a real repo and hand-counts caught unsupported claims; results go in docs. No claim that review improves quality until that exists.
+
 ## Invariants (each needs a failing test first)
 - Hand-written prose is never modified; only sections marked `<!-- @scribex:ai -->` are regenerated.
 - Idempotent: second `generate --apply` on an unchanged repo produces zero diff; `scribex check` exits 0 afterwards.
@@ -82,6 +91,7 @@ Scheduler/cron, queue, database, websockets, auto-merge, multi-user job concurre
 4. `pkg/generate` plan phase + plan.json schema + coverage report, per doc type; feature discovery.
 5. Apply phase (insert/update, sync, idempotence, ceilings, resume); `symbol` grounding first (tech-reference, api-reference).
 6. Derived grounding: `sources=[path@hash]` provenance, stale-by-source in `check`, AI-draft banner; then `human` skeletons.
+6b. Socratix council review of derived sections (`ai.review`, `"review": "socratix"`, `review=` provenance, `disputed` banner).
 7. Publish phase (branch, commit, PR).
 8. CLI wiring + e2e tests (`--types tech-reference,feature-design`).
 9. Dashboard AI settings + Doc types editor (enable/disable, templates, scope).
