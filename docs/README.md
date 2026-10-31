@@ -6,7 +6,7 @@ Welcome to the comprehensive technical documentation wiki for the **Dialex Suite
 
 ## 🏛️ Architecture Map & Wiki Navigation
 
-The Dialex Suite comprises four specialized, sovereign engines that can run independently or interoperate through zero-trust RPC and streaming event meshes:
+The Dialex Suite comprises six specialized engines and clients that can run independently or interoperate through zero-trust RPC and streaming event meshes:
 
 ```mermaid
 graph TD

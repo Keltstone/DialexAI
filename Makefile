@@ -51,6 +51,8 @@ test:
 	@(cd socratix-engine && go test ./pkg/...)
 	@(cd artix-ai && go test ./pkg/...)
 	@(cd kritix-ai && go test ./pkg/...)
+	@(cd sentinix-ai && go test ./pkg/...)
+	@(cd scribex-ai && go test ./...)
 	@echo "▶ Running Kotlin tests..."
 	@(cd dialex-ai && ./gradlew :desktopApp:compileKotlinJvm)
 	@echo "✓ All tests compiled and passed."

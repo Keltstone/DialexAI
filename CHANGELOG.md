@@ -2,12 +2,13 @@
 
 All notable changes across the **DialexAI Suite** will be documented in this file.
 
-The suite comprises five sovereign software systems:
+The suite comprises six software systems:
 1. **Dialex AI**: Sovereign Multi-Agent Deliberation Platform & Persona Studio (Compose Desktop, Android, & Server)
 2. **Artix AI**: Autonomous Dialectic Software Engineering & Spec-to-Patch Cockpit (Compose Desktop & Go CLI/Daemon)
 3. **Kritix AI**: Autonomous QA Testing Studio & Enterprise Verification Engine (Compose Desktop & Go CLI/Server)
 4. **Socratix Engine**: Multi-Agent Consensus, Credence Tracking & Socratic Deliberation Daemon (Go CLI & Daemon)
 5. **Sentinix AI**: Continuous Security Review, PR Gate & Vulnerability Posture Engine (Go CLI & Server)
+6. **Scribex AI**: Documentation-Sync CLI that anchors docs to code symbols and flags drift (Go CLI, CI & dashboard server)
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and [Conventional Commits](https://www.conventionalcommits.org/).
@@ -19,6 +20,20 @@ Each product in the DialexAI monorepo maintains its own dedicated, detailed vers
 - [**Artix AI Changelog**](artix-ai/CHANGELOG.md) — Current: `v0.11.0-enterprise` 🔵
 - [**Kritix AI Changelog**](kritix-ai/CHANGELOG.md) — Current: `v0.3.0-enterprise` 🔵
 - [**Socratix Engine Changelog**](socratix-engine/CHANGELOG.md) — Current: `v1.0.0` 🟢
+- **Scribex AI** — Current: `v1.0.0` 🟡 *(no dedicated changelog yet; entries live in this file)*
+
+---
+
+## [Scribex AI v1.0.0] - 2026-10-29
+
+### Early Release
+Scribex AI joins the suite as a documentation-drift checker:
+- **Symbol anchors**: markdown sections are bound to code symbols (`<!-- @scribex:anchor(path#Symbol) -->`); `check` fails on stale or dead anchors, and `sync` refreshes the signature block without touching prose.
+- **Impact gate**: `check -base <ref>` exits early when no anchored public signature changed.
+- **Languages**: Go via the standard AST; Kotlin, Java, TypeScript/JS and Python via lexical scanners (see `scribex-ai/docs/user/language-support.md`; accuracy is measured on a tracked corpus only).
+- **Integrations**: GitHub PR comments, Confluence draft sync, Jira scope checks, a SOC2/ISO-style trace matrix, and a team-scoped dashboard (`scribex serve`).
+- **CI**: tests, actionlint, govulncheck, osv-scanner, parser fuzzing, SBOM and reproducibility checks run in `.github/workflows/scribex.yml`.
+- **Known gaps**: not packaged in Homebrew or `scripts/install.sh`; release binaries are not yet signed; Windows is untested.
 
 ---
 

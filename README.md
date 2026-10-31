@@ -2,7 +2,7 @@
 
 **By Keltstone Systems.** Tools that make AI disagree with itself before you trust it.
 
-Dialex Suite comprises six software systems (Scribex AI, the documentation-sync tool, is documented under `scribex-ai/`) built on local-first engineering and deliberation principles:
+Dialex Suite comprises six software systems built on local-first engineering and deliberation principles:
 
 ---
 
@@ -17,6 +17,7 @@ Each software system in the DialexAI monorepo is versioned and released independ
 | **Artix AI** | 🔵 **Enterprise Track** | **`v0.11.0-enterprise`** | [`artix-ai/CHANGELOG.md`](./artix-ai/CHANGELOG.md) | [`artix-ai/README.md`](./artix-ai/README.md) | `brew install keltstone/tap/artix` |
 | **Kritix AI** | 🔵 **Enterprise Track** | **`v0.3.0-enterprise`** | [`kritix-ai/CHANGELOG.md`](./kritix-ai/CHANGELOG.md) | [`kritix-ai/README.md`](./kritix-ai/README.md) | `brew install keltstone/tap/kritix` |
 | **Socratix Engine** | 🟢 **Engine GA** | **`v1.0.0`** | [`socratix-engine/CHANGELOG.md`](./socratix-engine/CHANGELOG.md) | [`socratix-engine/README.md`](./socratix-engine/README.md) | `brew install keltstone/tap/socratix` |
+| **Scribex AI** | 🟡 **Early Release** | **`v1.0.0`** | *(no changelog yet; see [suite changelog](./CHANGELOG.md))* | [`scribex-ai/README.md`](./scribex-ai/README.md) | Build from source (`go build ./cmd/scribex`) or tagged CI release (`scribex-v*`); not yet in Homebrew or the installer |
 
 👉 **[Explore the Complete Technical Wiki Documentation Suite](docs/README.md)** — In-depth architectural guides, user manuals, and developer documentation for every engine.
 
@@ -52,6 +53,11 @@ DialexAI/
 │   ├── cmd/               # sentinix (CLI) & sentinixd (review server daemon)
 │   ├── pkg/               # rule packs, secrets scanner, advisories, AI council
 │   └── deploy/            # Dockerfile, docker-compose, Helm chart, CI templates
+│
+├── scribex-ai/            # Scribex Documentation-Sync CLI (anchors docs to code symbols)
+│   ├── cmd/               # scribex CLI (check, sync, scavenge, comment, serve, ...)
+│   ├── pkg/               # symbol scanners, anchors, platform integrations
+│   └── action/            # GitHub Action definition
 │
 ├── go.work                # Go Workspace uniting Go engines
 └── .github/workflows/     # Unified CI/CD pipelines
@@ -140,7 +146,16 @@ go build -o bin/artix ./cli/main.go
 ./gradlew :app:run
 ```
 
-### 4. Kritix AI (CLI & Testing Studio)
+### 4. Scribex AI (Docs-vs-Code Drift Checker)
+```bash
+cd scribex-ai
+go build -o bin/scribex ./cmd/scribex
+./bin/scribex check -C /path/to/repo -base origin/main
+```
+
+Scribex is a dev-time CLI/CI tool, not a runtime dependency of the apps it checks. Go uses the standard AST; Kotlin, Java, TypeScript and Python use lexical scanners validated against a small tracked corpus, so real-world accuracy varies by construct. It has no model dependency unless you opt into `sync -ai`.
+
+### 5. Kritix AI (CLI & Testing Studio)
 ```bash
 cd kritix-ai
 # Build CLI binary
@@ -160,6 +175,7 @@ Run the tests yourself:
 ```bash
 (cd socratix-engine && go test ./pkg/...)
 (cd artix-ai        && go test ./pkg/...)
+(cd scribex-ai      && go test ./...)
 (cd dialex-ai       && ./gradlew :shared:allTests)   # includes real-engine integration tests
 ```
 
