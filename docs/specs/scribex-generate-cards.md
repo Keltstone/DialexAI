@@ -1,4 +1,4 @@
-# scribex-generate: implementation cards 1-3
+# scribex-generate: implementation cards 1-12
 
 Parent spec: scribex-generate.md. Rules for every card: write the failing test first, stdlib only (go.mod has zero deps and CI ships an SBOM; do not add one), keep existing tests green, `go vet ./... && go test -race ./...` in `scribex-ai/`, no unrelated refactors, smallest diff.
 
@@ -162,4 +162,119 @@ Failing tests first (`pkg/generate/apply_test.go`, fake `Completer` returning ca
 Done when: on the `scribex-ai` repo itself with a fake completer, apply then `check` is green and a second apply is a no-op.
 
 ---
-Cards 6+ (derived provenance, Socratix review, publish, dashboard, CI job, acceptance) follow after 4-5 are reviewed.
+
+## Card 6 - Derived and human grounding, provenance, stale-by-source
+
+Depends on 4, 5. Extends apply and `check`.
+
+Behaviour:
+- Section format for `derived` output (inside the generated doc, one block per unit):
+  `<!-- @scribex:derived(id=<typeID>:<unit>) sources=<path>@<sha256-12>,<path>@<sha256-12> -->` ... prose ... `<!-- @scribex:end -->`, prose begins with the fixed banner line `> AI draft from code and specs. Confirm before relying on it.` Parser lives next to `pkg/anchors` (new file, same safety rules: no nested/forged markers inside prose, size caps, canonical form so output is stable).
+- Apply for `derived`: build prompt from the doc type `template` skeleton + `inputs` + source excerpts (caps per file and per unit, all wrapped as untrusted data); model output passes `prose.Validate`, `mdsafe` sanitising, and a required-sections check against the template headings (missing heading = reject, keep previous/placeholder).
+- Must not invent facts it cannot see: the system prompt instructs "use only the provided material; write `Unknown: <what>` when information is absent"; a test asserts that instruction is present. Requirement IDs: when `id_policy: preserve`, post-validate that the output contains no ID matching the repo's ID regex (config `id_pattern` on the doc type, e.g. `REQ-[A-Z]+-\d{3}`) that is absent from `inputs`; violation = reject.
+- `human` types: apply writes the skeleton only (`<!-- @scribex:human(id=...) -->` with headings and `TODO(owner)` lines); never calls the model; never overwrites existing content.
+- `scribex check`: new finding kind `stale-source` for a derived block whose recorded source hash no longer matches the file on disk (and `dead-source` if a source file is gone). Deterministic, zero tokens, exit 1 like other findings, listed in the PR report; its message says "regenerate or confirm", never "incorrect".
+- `scribex confirm <doc>#<id>` (new, small): a human re-stamps `sources=` to current hashes and removes the banner after review, adding `confirmed=<YYYY-MM-DD>`; refuses if the working tree has other changes to that file.
+
+Failing tests first: `TestDerivedBlockRoundTrip` (parse/render canonical), `TestDerivedRejectsForgedMarkers`, `TestStaleSourceDetected` / `TestDeadSourceDetected` / `TestUnchangedSourcesClean`, `TestApplyDerivedRejectsMissingRequiredSection`, `TestApplyDerivedPreserveIDsRejectsInventedID`, `TestApplyHumanNeverCallsModel`, `TestApplyHumanNeverOverwrites`, `TestCheckReportsStaleSourceInPRReport`, `TestConfirmRestampsAndRefusesDirty`, prompt test for the "Unknown:" instruction.
+
+Done when: generating a feature-design doc on the fixture repo, editing one source file, then `check` exits 1 with `stale-source`, and `confirm` after a human edit makes it green.
+
+---
+## Card 7 - Socratix council review (optional)
+
+Depends on 2 (CLI table), 6. Parent spec section "Socratix council review".
+
+Behaviour:
+- Add `socratix` to the allowlisted CLI table as a **reviewer-only** entry (`Reviewer: true`: cannot be selected as `ai.cli_command`). Invocation: `socratix ask -mode <premortem|redteam|tenthman> [-provider p] [-model m] [-rounds n] -out <tmpfile>` with the review prompt on stdin if `ask` accepts it, otherwise as the single positional argument (implementer verifies with `socratix ask -h`; flags above are confirmed for the current build). Same exec hardening as card 2 (no shell, empty temp cwd, scrubbed env but pass through that provider's key env var name from a table, timeout 300s, 1 MiB memo cap).
+- Config: `ai.review` = `off` (default) | `socratix`; `ai.review_mode` default `redteam`; per doc type `"review": "socratix"` overrides on. Counts against `ai.max_calls` (one call per reviewed unit).
+- Review prompt = the draft section + the same source excerpts (untrusted-data delimited) + instruction to list claims not supported by the sources, one per line prefixed `UNSUPPORTED:`. Scribex parses only lines with that prefix from the memo (everything else ignored, caps: 20 lines, 300 chars each, sanitised through `mdsafe`).
+- Result recorded in the derived block header: `review=socratix mode=redteam verdict=clean|disputed` and, if disputed, an indented `> Disputed claims:` list under the banner. `disputed` also makes `check` print a `disputed` notice (non-failing by default, failing with `--strict`).
+- Missing `socratix` binary or non-zero exit: record `review=skipped` (with reason code, no raw stderr), keep the draft, run continues. Never record `clean` unless a memo was actually parsed.
+- Privacy: reviewing sends the draft + excerpts to whatever provider Socratix uses, so it requires the same `--confirm-send` unless Socratix's provider is `ollama` on loopback (decided by the `-provider` value Scribex passes; if unset Scribex must pass `-provider` explicitly, never let Socratix pick the first key silently).
+
+Failing tests first (fake `socratix` executable on PATH): argv/cwd/env assertions, `TestReviewParsesOnlyPrefixedLines`, `TestReviewCapsAndSanitises`, `TestReviewMissingBinarySkips`, `TestReviewNeverCleanWithoutMemo`, `TestReviewRequiresConfirmSendForCloud`, `TestReviewDisabledByDefault`, `TestReviewerEntryNotSelectableAsBackend`, `TestStrictCheckFailsOnDisputed`.
+
+Done when: with a fake `socratix` returning two `UNSUPPORTED:` lines, a generated feature doc shows `verdict=disputed` with both lines, and with no `socratix` installed the same run completes with `review=skipped`.
+
+---
+## Card 8 - Publish phase (branch, commit, optional push)
+
+Depends on 5, 6. Scribex does not create PRs itself: the existing CI pattern uses `git` + `gh`, which keeps tokens out of the engine.
+
+Behaviour: `scribex generate --resume <id> --apply --branch [--push]`.
+- `--branch`: before the first write, create and switch to `scribex/docs-<shortsha>` (or `ai.branch_prefix` + `<shortsha>`, prefix validated `^[a-z0-9][a-z0-9/_-]{0,40}$`); refuse if it exists with different content. Never commits to the default or current protected branch. Writes only plan outputs, then ONE commit of exactly those paths (`git commit --only -- <paths>`, hooks neutralised exactly like `sync -commit`, identity from git config or `SCRIBEX_GIT_NAME/EMAIL`, refuse if none). Commit message: `docs: scribex generate <runID> (<n> files, types: a,b)` plus trailer lines listing `review=` summary counts; no model text in the message.
+- `--push`: `git push origin HEAD:refs/heads/<branch>`; fails closed on any error, never force. Prints the branch name and, when remote is github.com/GHES/GitLab, the compare/MR URL built from the remote (validated, printed only, never fetched).
+- Without `--branch` the run leaves changes in the working tree (as `sync` does) and prints a one-line summary.
+- `plan.md`/state record the branch and commit sha.
+
+Failing tests first (temp git repos): `TestPublishCreatesBranchAndSingleCommit`, `TestPublishTouchesOnlyPlannedPaths` (unrelated dirty file stays unstaged), `TestPublishRefusesExistingDivergentBranch`, `TestPublishHooksNeutralised`, `TestPublishNoIdentityRefuses`, `TestPushNeverForces` (bare remote), `TestCompareURLBuilders` table (github, ghes, gitlab, ssh remotes, malformed -> empty), `TestBranchPrefixValidation`.
+
+Done when: from a clean checkout, `generate --apply --branch --push` against a bare-remote test repo leaves default branch untouched and the new branch with one commit.
+
+---
+## Card 9 - Dashboard: AI settings and doc-type editor
+
+Depends on 2, 3. Extends `pkg/dashboard` (single file today; add `generate.go` in the package rather than growing `dashboard.go`).
+
+Behaviour (all admin-role only, repo must be under `-allowed-root`, per-repo):
+- `GET /api/settings?repo=<name>` -> non-secret AI settings (provider, model, cli_command, base_url, style_guide, max_tokens, max_calls, review, review_mode, branch_prefix) + `secrets` map of NAME -> set|unset (never values) + `suggestions` from `config models`. `PUT /api/settings?repo=` with a JSON body of allowed keys only; each key goes through `config.Set`-equivalent validation (reuse, do not copy); unknown keys 400; response is the new effective settings. `api_key_env` is editable only as a NAME (existing `ValidateAPIKeyEnv`). There is NO endpoint that accepts a secret value.
+- `GET/PUT /api/doctypes?repo=` -> catalog (effective) / overrides; PUT validates with `doctypes.Validate` and returns all problems (400 with list) or saves via `doctypes.Save`.
+- Pages: extend the existing plain-JS UI with "AI settings" and "Doc types" tabs (checkbox per type, audience, grounding badge, output path, template path, scope globs). No new JS framework; CSP unchanged; any inline script/style follows the existing hash approach in `computeStyleHash`.
+- CSRF: browsers auto-send Basic auth, so every state-changing request requires header `X-Scribex-CSRF` equal to a token from `GET /api/csrf` (HMAC of principal + day + server secret generated at start) AND a same-origin `Origin`/`Sec-Fetch-Site` check; missing = 403. Applies to all PUT/POST added in cards 9-10.
+- Audit: each successful write logs principal, repo, keys changed (names only) via the existing access logger.
+- Existing read-only `/config` page stays and links here.
+
+Failing tests first (`pkg/dashboard/generate_test.go`, `httptest`): `TestSettingsRequireAdmin` (viewer 403, anonymous 401), `TestSettingsNeverReturnsSecretValues` (set a fake key in env, grep response), `TestPutSettingsRejectsUnknownAndInvalid`, `TestPutSettingsRejectsKeyLikeValueInAPIKeyEnv`, `TestRepoOutsideAllowedRootRefused`, `TestCSRFRequired` (no header, wrong header, cross-site Origin), `TestDoctypesPutValidationErrors`, `TestDoctypesRoundTrip`, `TestWritesAreAudited`, `TestCSPUnchanged`.
+
+Done when: an admin can change provider/model and enable `feature-design` from the browser, `.scribex/config.yaml` and `doctypes.json` update, and a viewer or cross-site form post cannot.
+
+---
+## Card 10 - Dashboard: Generate docs page and job runner
+
+Depends on 4, 5, 8, 9.
+
+Behaviour:
+- Disabled unless `scribex serve --enable-generate`. When enabled and the bind address is not loopback, TLS (or `-behind-proxy`) is required (reuse `ValidateServeConfig` rules); otherwise `serve` refuses to start.
+- Endpoints (admin, CSRF, allowed-root): `POST /api/generate/plan` body `{repo, types[], include[], exclude[]}` -> starts job, returns `{runId}`; `POST /api/generate/apply` body `{repo, runId, confirmSend bool, branch bool, push bool}`; `GET /api/runs?repo=` (history from `.scribex/runs/*/state.json`); `GET /api/runs/{id}?repo=` (state + plan summary + log tail); `POST /api/runs/{id}/cancel`.
+- Job runner: re-executes the same binary (`os.Executable()`) as `scribex generate ...` with cwd = repo, env scrubbed to the same allowlist as card 2 plus the configured `api_key_env` NAME's value if set; stdout/stderr captured to `.scribex/runs/<id>/log.txt` with secret redaction and a 1 MiB cap; wall-time limit (default 30 min, `--generate-timeout`); exactly one running job per repo (second request 409); process group killed on cancel/timeout; server restart marks orphaned `running` jobs `interrupted`.
+- `confirmSend` must be explicitly true for non-local backends; the UI shows the plan's `WouldSend` file list and a checkbox next to the Apply button.
+- UI: repo picker, doc-type checkboxes, "Plan" -> table (type, unit, action, est. tokens, parser kind, WouldSend), per-type include toggles, "Apply" with confirm checkbox, progress by polling every 2s, run history with links to branch/compare URL. Reports `disputed` counts and `stale-source` counts.
+- No websockets, no queue, no database.
+
+Failing tests first: `TestGenerateDisabledByDefault`, `TestServeRefusesGenerateOnPublicBindWithoutTLS`, `TestPlanJobRunsAndReportsState` (fake binary via env override `SCRIBEX_SELF` used in tests only), `TestSecondJobSameRepoConflicts`, `TestApplyRequiresConfirmSendForCloud`, `TestCancelKillsProcessGroup`, `TestTimeoutKills`, `TestLogRedactsSecretsAndCaps`, `TestOrphanedRunsMarkedInterrupted`, `TestRunIdPathTraversalRejected` (`../`, absolute, symlink), `TestViewerCannotRun`, `TestEnvScrubbed` (child sees none of `GITHUB_TOKEN`, `ATLASSIAN_TOKEN`).
+
+Done when: from the browser, plan -> review table -> apply (with fake backend) produces a branch commit and the history list shows it; a viewer, a cross-site POST, or a second concurrent run is refused.
+
+---
+## Card 11 - CI generate workflow
+
+Depends on 1, 8.
+
+Behaviour: `scribex ci init github` additionally writes `.github/workflows/scribex-generate.yml`; `ci init gitlab` adds a `scribex-generate` job to `.gitlab-ci.scribex.yml` (manual, `when: manual`).
+- Trigger: `workflow_dispatch` only, with typed inputs `types` (string, default `tech-reference`), `include`, `backend` (choice: cli, ollama, anthropic, openai), `confirm_send` (boolean, default false). No `pull_request`, no `pull_request_target`, no schedule.
+- Same hardening as the existing workflows: SHA-pinned actions, top-level `permissions: {}`, job permissions `contents: write` + `pull-requests: write` only on the generate job, `environment: scribex-ai` for secrets, inputs passed via `env:` and validated by regex in the script (never interpolated in `run:`), card-1 pinned install step, concurrency group per ref.
+- Script: `scribex generate --types "$TYPES" ... ` (plan) -> if `confirm_send` or backend local -> `--apply --branch --push` -> `gh pr create` with title `docs: scribex generate <runID>` and a body built from `plan.md` totals and `disputed`/`stale-source` counts (body from a file generated by scribex, size-capped; no PR-controlled text).
+- `cli` backend is NOT offered in the hosted-runner workflow choices by default (no logged-in vendor CLI on a runner); it is listed only with a comment explaining self-hosted runners.
+- Fails the job if `scribex check` is non-zero after apply.
+
+Failing tests first (extend `ci_templates_test.go`): `TestGenerateWorkflowHardening` (pins, permissions, no PR triggers, inputs only via env, regex validation present, `environment` set), `TestGenerateWorkflowActionlint`, `TestGenerateWorkflowNoCLIBackendChoiceOnHosted`, `TestGitlabGenerateJobManualOnly`, existing hardening tests include the new file automatically.
+
+Done when: actionlint passes and a dry run (`workflow_dispatch` with `confirm_send=false`, backend `ollama` unavailable) fails closed with a clear message instead of publishing.
+
+---
+## Card 12 - Acceptance, docs, release gate
+
+Depends on 1-11.
+
+- Real-repo runs (record results in `scribex-ai/docs/user/generate-acceptance.md`, with commands and counts, no screenshots of private code):
+  1. On `scribex-ai` itself with a fake completer: plan, apply, `check` green, second apply no-op, wall time and call counts noted.
+  2. On a copy of a real Android/Kotlin app repo: types `tech-reference` and `api-reference` first, count symbols the lexical scanner skips or mis-parses (hand-sample 30), report the number honestly in the doc.
+  3. Derived types on the same copy with `ai.review=off` then `socratix`: hand-count unsupported claims per 10 sections each way; publish both numbers, whatever they are. If review shows no benefit, say so and leave it off by default.
+  4. Idempotence and crash-resume run (kill mid-apply, resume).
+- Security review pass before release (checklist doc, tests named): arbitrary-command config attempt, path traversal via doctype `output`/`template`/`inputs`, prompt-injection in source files and in existing docs, secret in model output, forged anchor/derived markers, CSRF, viewer privilege, run-id traversal, env leakage to child processes, symlink swaps between plan and apply.
+- User docs: `docs/user/generate.md` (CLI, dashboard, CI, doc types, grounding meaning, privacy/`--confirm-send`, CLI/model table), update `README.md` command table and `docs/user/ci.md`; suite docs: Scribex entry in root `README.md` and `CHANGELOG.md` (new minor version section) and `docs/scribex-ai/03_USER_GUIDE_AND_CLI_REFERENCE.md`. State limits plainly: lexical scanners, derived docs unverified, review unproven.
+- `go vet ./... && go test -race ./...`, `govulncheck`, fuzz targets for the new parsers (derived block, doctypes JSON, plan JSON) run in `scribex.yml`, SBOM unchanged (no new deps), reproducible-build check still green.
+- Version bump to the next minor in `cmd/scribex/main.go` and release notes listing known gaps (unsigned binaries, Windows untested, Kotlin Compose coverage).
+
+Done when: every item above has a recorded result, the release gate in `scribex.yml` is green, and the numbers from acceptance step 2 and 3 are in the docs as measured, not projected.
