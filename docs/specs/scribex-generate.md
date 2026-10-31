@@ -15,7 +15,7 @@ Status: DESIGN. Implementer: user (Antigravity). Architect: Claude (spec/review 
 Phases, each resumable from `.scribex/runs/<id>/plan.json`:
 1. **Plan** (default, no model call): scan repo via `pkg/symbols`; per file list public symbols, existing anchors, coverage (anchored / unanchored / stale); estimate calls+tokens; list files whose content would be sent to a model. Writes plan.json + `plan.md`.
 2. **Apply** (`--apply`, needs `--confirm-send` when backend is not local): for each approved item either insert a new anchored section (new doc file or appended block) or update an existing `<!-- @scribex:ai -->` section. Then run `sync` to write `sig=` and signature blocks.
-3. **Publish** (`--branch` / `--pr`): commit to `scribex/docs-<shortsha>` using `gitx` (hooks neutralized, as `sync -commit`); open PR via `pkg/github` (GitLab MR later). Never pushes to the default branch.
+3. **Publish** (`--branch` / `--push`): commit to `scribex/docs-<shortsha>` using `gitx` (hooks neutralized, as `sync -commit`); PR is opened by CI (`gh pr create`) or by hand, never by the engine. Never pushes to the default branch.
 
 ## Doc types (what to generate) — `.scribex/doctypes.json`
 User picks which kinds of documentation to produce; each kind is a config entry, built-ins ship as defaults, users add custom ones. Dashboard edits the same file (non-secret).
@@ -67,7 +67,7 @@ Decision: Socratix is an optional reviewer, not Scribex's LLM transport. Bulk `s
 - Per-language honesty: plan reports parser kind (AST vs lexical) per file so coverage claims are not overstated.
 
 ## CLI
-`scribex generate [-C dir] [--types id,id] [--include g] [--exclude g] [--backend cli|ollama|anthropic|openai] [--model m] [--cli claude|codex|agy|<cmd>] [--max-calls N] [--apply] [--confirm-send] [--branch] [--pr] [--resume <id>] [--json]`
+`scribex generate [-C dir] [--types id,id] [--include g] [--exclude g] [--backend cli|ollama|anthropic|openai] [--model m] [--cli claude|codex|gemini|agy] [--max-calls N] [--apply] [--confirm-send] [--branch] [--push] [--resume <id>] [--json]`
 Exit 0 ok/no-op, 1 issues (ceiling hit, refused), 2 usage.
 
 ## Dashboard (extends `pkg/dashboard`, `scribex serve`)
