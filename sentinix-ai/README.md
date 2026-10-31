@@ -23,9 +23,9 @@ It is defensive by design. Sentinix reads code and diffs in repositories you own
 
 ---
 
-## 🚀 Release Details (v1.0.0 — Production GA)
+## 🚀 Release Details (v1.0.0 — GA)
 
-- **Current Version:** `1.0.0` (Production GA)
+- **Current Version:** `1.0.0` (GA)
 - **Release Date:** October 25, 2026
 - **Release Changelog:** [CHANGELOG.md](CHANGELOG.md)
 - **License:** Apache-2.0

@@ -2,7 +2,7 @@
 
 **By Keltstone Systems.** Tools that make AI disagree with itself before you trust it.
 
-Dialex Suite comprises five sovereign software systems built on local-first engineering and deliberation principles:
+Dialex Suite comprises six software systems (Scribex AI, the documentation-sync tool, is documented under `scribex-ai/`) built on local-first engineering and deliberation principles:
 
 ---
 
@@ -12,7 +12,7 @@ Each software system in the DialexAI monorepo is versioned and released independ
 
 | Software | Release Status | Version | Release Log | Documentation | Primary Distribution |
 |---|---|---|---|---|---|
-| <img src="logos/sentinix/logo_sentinix.png" width="20" height="20" style="vertical-align:middle;" /> **Sentinix AI** | 🟢 **Production GA** | **`v1.0.0`** | [`sentinix-ai/CHANGELOG.md`](./sentinix-ai/CHANGELOG.md) | [`sentinix-ai/README.md`](./sentinix-ai/README.md) | `brew install keltstone/tap/sentinix` |
+| <img src="logos/sentinix/logo_sentinix.png" width="20" height="20" style="vertical-align:middle;" /> **Sentinix AI** | 🟢 **GA (start in report-only mode)** | **`v1.0.0`** | [`sentinix-ai/CHANGELOG.md`](./sentinix-ai/CHANGELOG.md) | [`sentinix-ai/README.md`](./sentinix-ai/README.md) | `brew install keltstone/tap/sentinix` |
 | <img src="dialex-ai/logos/logo.png" width="20" height="20" style="vertical-align:middle;" /> **Dialex AI** | 🟡 **Client Release** | **`v1.0.0`** | [`dialex-ai/CHANGELOG.md`](./dialex-ai/CHANGELOG.md) | [`dialex-ai/README.md`](./dialex-ai/README.md) | `brew install --cask dialex-ai-bundled` |
 | **Artix AI** | 🔵 **Enterprise Track** | **`v0.11.0-enterprise`** | [`artix-ai/CHANGELOG.md`](./artix-ai/CHANGELOG.md) | [`artix-ai/README.md`](./artix-ai/README.md) | `brew install keltstone/tap/artix` |
 | **Kritix AI** | 🔵 **Enterprise Track** | **`v0.3.0-enterprise`** | [`kritix-ai/CHANGELOG.md`](./kritix-ai/CHANGELOG.md) | [`kritix-ai/README.md`](./kritix-ai/README.md) | `brew install keltstone/tap/kritix` |

@@ -19,7 +19,7 @@
 
 ## ⚡ The Core Philosophy: Deterministic-First Token Optimization
 
-Most AI testing agents dump full raw HTML DOMs and network event streams into massive LLM context windows, burning millions of tokens per test run ($10–$50 per suite) and causing crippling latency.
+Most AI testing agents dump full raw HTML DOMs and network event streams into massive LLM context windows, burning large numbers of tokens per test run and adding latency.
 
 **Kritix reverses this model:**
 - **Deterministic Native Go Algorithms First**: DOM pruning to semantic interactive trees, state hashing, regex assertions, TOTP MFA calculations, and AST diffing run natively in Go (<1ms, **0 LLM tokens**).
@@ -139,7 +139,7 @@ go build -o bin/kritix ./cmd/kritix
 | `pkg/server` | Embedded HTTP API, SSE live telemetry stream, and embedded Web UI |
 | `pkg/studio` | "Teach the Agent" human demonstration recorder & BDD synthesizer |
 | `pkg/model` | Tri-mode routing (Cloud API, Developer CLI subshells, Local Ollama/vLLM) |
-| `pkg/optimizer` | DOM semantic pruning (95% token compression), state hashing cache, ROI reporting |
+| `pkg/optimizer` | DOM semantic pruning (token compression measured on a synthetic corpus), state hashing cache, ROI reporting |
 | `pkg/workflow` | Composable block DAG pipeline engine with prebuilt blueprints |
 | `pkg/auth` | AES-256-GCM encrypted sessions, ephemeral memory cache, and RFC 6238 TOTP generator |
 | `pkg/sdet` | Multi-factor self-healing locators with strict CI regression gating |

@@ -30,7 +30,7 @@ Most AI testing platforms dump **full raw HTML DOMs** and network event streams 
                      ▼                                               ▼
   ┌─────────────────────────────────────┐         ┌─────────────────────────────────────┐
   │  Non-Deterministic, Flaky Verdict   │         │ Compact Semantic Accessibility Tree │
-  │                                     │         │ (<8,000 tokens) -> 95% SAVINGS!     │
+  │                                     │         │ (<8,000 tokens) -> large reduction (synthetic corpus)     │
   └─────────────────────────────────────┘         └─────────────────────────────────────┘
 ```
 

@@ -140,7 +140,7 @@ Connect multiple frontier models in the same room:
 * **Local Offline Models** (via Ollama for 100% offline work)
 
 ### 🔒 Privacy-First & Data Sovereignty
-Your questions, debate transcripts, and API keys are stored locally on your computer; API keys are encrypted at rest (the key file sits on the same machine; OS keychain support is planned). There is no Dialex cloud server in the path. Content you send to a cloud model provider is governed by that provider's terms.
+Your questions, debate transcripts, and API keys are stored locally on your computer; API keys are encrypted at rest (AES-256-GCM, with the key held in the OS keychain where available and a `0600` key file as fallback). There is no Dialex cloud server in the path. Content you send to a cloud model provider is governed by that provider's terms.
 
 ### 💰 Direct Pricing, Zero Markup
 Dialex AI is not a middleman selling expensive tokens. You can connect your existing free development CLIs (like `claude`, `codex`, or `antigravity`) or bring your own API keys. You only pay provider rates directly, with no hidden subscription markup.

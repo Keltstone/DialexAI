@@ -2,7 +2,7 @@
 
 **High-Performance Multi-Agent Consensus, Credence Tracking & Socratic Deliberation Daemon**
 
-Socratix is the core deliberation and consensus engine powering the DialexAI Ecosystem. Operating locally as a lightweight, zero-latency Go daemon (`socratix`) on port 7890, it orchestrates structured dialectic debates between competing frontier AI models, calculates mathematical consensus convergence, tracks Bayesian credence shifts across debate rounds, and manages encrypted credential vaults on developer workstations.
+Socratix is the core deliberation and consensus engine powering the DialexAI Ecosystem. Operating locally as a lightweight local Go daemon (`socratix`) on port 7890, it orchestrates structured dialectic debates between competing frontier AI models, calculates mathematical consensus convergence, tracks Bayesian credence shifts across debate rounds, and manages encrypted credential vaults on developer workstations.
 
 ---
 

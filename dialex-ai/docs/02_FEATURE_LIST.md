@@ -162,7 +162,7 @@ This document details all user-facing capabilities, unique selling propositions 
 | 👔 **CTOs & Tech Executives** | Roadmap validation, cloud infrastructure spend evaluations. | Executive Memos with decision matrices for board and investor review. |
 | 🛡️ **Cybersecurity Red-Teams** | Adversarial threat modeling and zero-trust auth vulnerability audits. | Exposes attack surfaces before production rollout. |
 | 🔬 **AI / ML Researchers** | Cross-LLM evaluation benchmarks and hallucination elimination. | Direct consensus scoring across competing AI model families. |
-| ⚖️ **Legal & Compliance Officers** | Multi-jurisdiction policy audits (GDPR, HIPAA, SOC2). | 100% on-premise sovereign execution with zero cloud data leaks. |
+| ⚖️ **Legal & Compliance Officers** | Multi-jurisdiction policy audits (GDPR, HIPAA, SOC2). | On-premise execution; no data leaves your network when only local models are used. |
 | 🚀 **Startup Founders & PMs** | Synthetic advisory board for product-market fit and pricing strategy. | Eliminates expensive $1,000/hr external advisory retainers. |
 
 ---

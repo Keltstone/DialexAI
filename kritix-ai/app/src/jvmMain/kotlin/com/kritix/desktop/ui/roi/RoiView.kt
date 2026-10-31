@@ -133,7 +133,7 @@ fun RoiView() {
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(text = "Kritix AI (Pruned Semantic Accessibility Tree)", fontSize = 13.sp, color = TextSecondary)
-                        Text(text = "6,200 Tokens / Run (~95% Cost Reduction)", fontSize = 13.sp, color = AccentEmerald, fontWeight = FontWeight.Bold)
+                        Text(text = "6,200 Tokens / Run (illustrative)", fontSize = 13.sp, color = AccentEmerald, fontWeight = FontWeight.Bold)
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Box(
@@ -151,7 +151,7 @@ fun RoiView() {
 
                 Text(
                     text = "Summary for Solo Developers & Small Teams:\n" +
-                            "Traditional agents burn \$10-\$50 per test suite run. Kritix native Go algorithms prune 150KB DOMs to 6KB interactive trees, making autonomous testing sustainable for independent developers and startups with small budgets.",
+                            "Illustrative example: pruning a 150KB DOM to a ~6KB interactive tree sharply cuts tokens per run. Actual savings depend on your app and model and have not yet been measured end to end.",
                     fontSize = 12.sp,
                     color = TextSecondary,
                     lineHeight = 18.sp

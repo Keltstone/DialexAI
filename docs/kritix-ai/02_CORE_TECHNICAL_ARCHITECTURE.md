@@ -39,7 +39,7 @@ flowchart TD
     ASTParse --> FilterNodes["Strip Non-Interactive Elements<br/>(svg, style, script, decorative divs)"]
     FilterNodes --> ExtractA11y["Extract Accessibility Tree<br/>(roles, aria-labels, test-ids, visible text)"]
     ExtractA11y --> StateHash["State Hashing Cache Check<br/>(SHA-256 DOM Hash)"]
-    StateHash --> CompactTree["Compact Semantic Tree<br/>(<8k Tokens -> 95% Reduction)"]
+    StateHash --> CompactTree["Compact Semantic Tree<br/>(<8k Tokens, synthetic corpus)"]
 ```
 
 ### Pruning Pipeline Steps

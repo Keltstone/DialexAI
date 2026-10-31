@@ -103,7 +103,7 @@ graph TD
 - [01. Conceptual Foundation: Deterministic Token Optimization](kritix-ai/01_CONCEPTUAL_FOUNDATION.md)  
   *Reversing the brute-force DOM token drain, zero-token native Go algorithms, and enterprise reliability guarantees.*
 - [02. Core Technical Architecture](kritix-ai/02_CORE_TECHNICAL_ARCHITECTURE.md)  
-  *Semantic DOM Pruner (95% token savings), CDP virtual driver, Multi-factor self-healing locators, and DAG workflow pipelines.*
+  *Semantic DOM Pruner (token savings measured on a synthetic corpus only), CDP virtual driver, Multi-factor self-healing locators, and DAG workflow pipelines.*
 - [03. User Guide & Testing Workflows](kritix-ai/03_USER_GUIDE_AND_STUDIO.md)  
   *Web Studio demonstration recorder, Compose Desktop Cockpit, OWASP Top 10 DAST fuzzing, k6 performance audits, and quarantine SLAs.*
 - [04. Developer Guide & Enterprise Administration](kritix-ai/04_DEVELOPER_GUIDE_AND_ENTERPRISE.md)  

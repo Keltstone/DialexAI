@@ -29,7 +29,7 @@ graph LR
 **Dialex Suite** replaces the solo prompt-response paradigm with a **tripartite dialectic engine**:
 1. **Adversarial Deliberation (`socratix-engine` & `dialex-ai`)**: Pits heterogeneous frontier models (different providers, parameter scales, and cognitive priors) against one another under an impartial moderator state machine.
 2. **Autonomous Software Engineering (`artix-ai`)**: Decouples requirements planning from code execution into two separate checks-and-balances chambers, utilizing shadow git worktrees and sandboxed compilers to enforce non-negotiable architectural invariants (Taboo Spaces).
-3. **Autonomous Quality & Verification (`kritix-ai`)**: Replaces wasteful brute-force DOM token dumping with native Go deterministic optimization (95% token compression), self-healing locators, OWASP DAST security fuzzers, and build-failing flaky test quarantine SLAs.
+3. **Autonomous Quality & Verification (`kritix-ai`)**: Replaces wasteful brute-force DOM token dumping with native Go deterministic optimization (large token reduction on the synthetic benchmark corpus; live savings unmeasured), self-healing locators, OWASP DAST security fuzzers, and build-failing flaky test quarantine SLAs.
 
 ---
 
