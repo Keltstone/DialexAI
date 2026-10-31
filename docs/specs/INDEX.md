@@ -2,3 +2,5 @@
 - docs/specs/sentinix-hunt-config.md — `sentinix hunt` v2 configuration schema, sources, precedence, secret checking, ceilings
 - docs/specs/sentinix-hunt-taskflows.md — `sentinix hunt` v2 declarative taskflows, safe templates, built-in flows, signing
 - docs/specs/sentinix-hunt-validation.md — `sentinix hunt` v2 multi-stage validation, PoC feedback, exploitability, gating policy
+- docs/specs/scribex-generate.md — `scribex generate`: on-demand whole-repo doc scan/generate/update (CLI + dashboard + CI), LLM backends cli/ollama/api, card order
+- docs/specs/scribex-generate-cards.md — `scribex generate` implementation cards 1-3 (CI binary install, cli/ollama backends, doc-type catalog)
