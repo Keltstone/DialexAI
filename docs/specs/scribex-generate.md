@@ -2,7 +2,9 @@
 
 Goal: on-demand, one-time (re-runnable) whole-repo doc scan that creates or updates anchored docs, reviewed as a PR. Occasional use, not a daemon.
 
-Status: DESIGN. Implementer: user (Antigravity). Architect: Claude (spec/review only, no product code).
+Status: IMPLEMENTED in scribex-ai v1.1.0 (cards 1-12). Deviations and limits: see scribex-ai/docs/user/generate.md "Known limits".
+
+Implementation notes that differ from the design: the dashboard plans in-process and runs apply as a child process; the Socratix verdict is parsed from `UNSUPPORTED:` lines in the memo (heuristic, unmeasured); `test-requirements` reads nearby/same-stem test files only; dead anchors are reported by check and plan (with `-prune`, AI-managed orphan sections are removed; hand-written orphans are never deleted automatically); hosted CI runners cannot use a vendor CLI.
 
 ## Decisions
 - Scope: whole repo (all supported languages), narrowed by `--include/--exclude` globs.

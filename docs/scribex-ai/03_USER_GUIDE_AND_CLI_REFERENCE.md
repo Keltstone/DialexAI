@@ -133,6 +133,11 @@ Manages the interlinked documentation wiki (`docs/wiki/` by default).
 - **`backlinks <page>`**: Lists all documents linking to the specified page.
 - **`render -out dir`**: Renders internal `[[Wikilinks]]` into standard relative Markdown links and generates `Home.md` and `_Sidebar.md` for GitHub Wiki publishing.
 
+#### `scribex generate [-types a,b] [-include g] [-exclude g] [-backend b] [-model m] [-cli c] [-max-calls N] [-apply] [-confirm-send] [-branch] [-push] [-resume id] [-json]`
+On-demand whole-repo documentation. Without `-apply` it only plans (no model call) and saves `.scribex/runs/<id>/plan.md`. With `-apply` it writes anchored reference docs and derived/human doc types, then `scribex check` must pass. Non-local backends need `-confirm-send`. Full guide, safety rules and limits: `scribex-ai/docs/user/generate.md`.
+- **`doctypes list | show <id> | validate`**: Lists/validates the documentation kinds (`.scribex/doctypes.json`).
+- **`confirm <doc.md>#<typeID:unit>`**: A human re-stamps a derived section after review (drops the AI-draft banner, records the date).
+
 #### `scribex mcp add <name> [...] | list | remove <name> | check | export | serve`
 Manages Model Context Protocol (MCP) servers in `.scribex/mcp.json`.
 - **`add <name> -preset <preset>`**: Configures upstream MCP servers from vetted presets (`confluence-oauth`, `atlassian-token`, `github`, `notion`, `scribex`).

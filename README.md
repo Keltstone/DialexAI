@@ -17,7 +17,7 @@ Each software system in the DialexAI monorepo is versioned and released independ
 | **Artix AI** | 🔵 **Enterprise Track** | **`v0.11.0-enterprise`** | [`artix-ai/CHANGELOG.md`](./artix-ai/CHANGELOG.md) | [`artix-ai/README.md`](./artix-ai/README.md) | `brew install keltstone/tap/artix` |
 | **Kritix AI** | 🔵 **Enterprise Track** | **`v0.3.0-enterprise`** | [`kritix-ai/CHANGELOG.md`](./kritix-ai/CHANGELOG.md) | [`kritix-ai/README.md`](./kritix-ai/README.md) | `brew install keltstone/tap/kritix` |
 | **Socratix Engine** | 🟢 **Engine GA** | **`v1.0.0`** | [`socratix-engine/CHANGELOG.md`](./socratix-engine/CHANGELOG.md) | [`socratix-engine/README.md`](./socratix-engine/README.md) | `brew install keltstone/tap/socratix` |
-| **Scribex AI** | 🟡 **Early Release** | **`v1.0.0`** | *(no changelog yet; see [suite changelog](./CHANGELOG.md))* | [`scribex-ai/README.md`](./scribex-ai/README.md) | Build from source (`go build ./cmd/scribex`) or tagged CI release (`scribex-v*`); not yet in Homebrew or the installer |
+| **Scribex AI** | 🟡 **Early Release** | **`v1.1.0`** | *(no changelog yet; see [suite changelog](./CHANGELOG.md))* | [`scribex-ai/README.md`](./scribex-ai/README.md) | Build from source (`go build ./cmd/scribex`) or tagged CI release (`scribex-v*`); not yet in Homebrew or the installer |
 
 👉 **[Explore the Complete Technical Wiki Documentation Suite](docs/README.md)** — In-depth architectural guides, user manuals, and developer documentation for every engine.
 

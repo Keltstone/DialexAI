@@ -20,7 +20,20 @@ Each product in the DialexAI monorepo maintains its own dedicated, detailed vers
 - [**Artix AI Changelog**](artix-ai/CHANGELOG.md) — Current: `v0.11.0-enterprise` 🔵
 - [**Kritix AI Changelog**](kritix-ai/CHANGELOG.md) — Current: `v0.3.0-enterprise` 🔵
 - [**Socratix Engine Changelog**](socratix-engine/CHANGELOG.md) — Current: `v1.0.0` 🟢
-- **Scribex AI** — Current: `v1.0.0` 🟡 *(no dedicated changelog yet; entries live in this file)*
+- **Scribex AI** — Current: `v1.1.0` 🟡 *(no dedicated changelog yet; entries live in this file)*
+
+---
+
+## [Scribex AI v1.1.0] - 2026-11-01
+
+### Added: `scribex generate` (on-demand whole-repo docs)
+- **Engine**: plan (no model call) then apply; `symbol`, `derived` (source-hash provenance, stale-by-source in `check`) and `human` grounding; idempotent re-runs; call/wall-time ceilings with resume.
+- **Backends**: vendor CLI (default; claude, codex, gemini, agy), Ollama (loopback), Anthropic, OpenAI; `--confirm-send` required for anything non-local.
+- **Doc types**: configurable catalog (`.scribex/doctypes.json`, `scribex doctypes`), `id_policy: preserve`.
+- **Optional Socratix review** of derived sections (`ai.review`), unmeasured heuristic verdict.
+- **Dashboard** (`serve -enable-generate`): AI settings, doc-type editor, Generate page with job runner; admin-only, CSRF, no JS.
+- **CI**: manual `scribex-generate` workflow/job; generated workflows now install a pinned, checksummed release binary.
+- **Known gaps & verified state**: see `scribex-ai/docs/user/generate.md` (test files not scanned, codex/gemini CLI flags unverified; dead anchors pruned via `-prune`; Socratix review benefits unmeasured per `docs/scribex-ai/generate-review-measurement.md`).
 
 ---
 

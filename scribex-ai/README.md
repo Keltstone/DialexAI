@@ -19,6 +19,8 @@ Validates JWT bearer tokens.
 | `scribex confluence push\|pull [page]` | push draft revisions / pull bodies per `.scribex/manifest.yaml` (`ATLASSIAN_URL/USER/TOKEN`) |
 | `scribex jira -base ref [-key K] [-post]` | flag undeclared breaking changes / scope creep vs ticket |
 | `scribex trace -base ref [-key K] [-pr N] [-out f.csv]` | Jira ↔ PR ↔ symbol ↔ docs ↔ Confluence matrix (SOC2/ISO evidence) |
+| `scribex generate [-plan] [-apply] [-type t] [-prune]` | plan or apply docs generation grounded in code symbols / doctypes |
+| `scribex doctypes init\|list\|validate` | manage `.scribex/doctypes.json` schemas and templates |
 | `scribex serve -repos f -rbac f [-addr :8080]` | doc-health dashboard, team-scoped; `scribex hash-token <t>` for the rbac file |
 
 Repos file: `name path team`. RBAC file: `sha256(token) admin|viewer team,team`; send the token as the HTTP Basic password.
@@ -63,6 +65,21 @@ scribex ci init github                           # or gitlab: workflow with secr
 - Locally, real env vars win over `secrets.env`; in CI use the platform's secret store.
 - Token control: zero-token gate, first-time syncs never call the LLM, the system prompt (incl. `ai.style_guide`) is prompt-cached, and `ai.max_calls` is a hard cap per run.
 - The dashboard `/config` page (admin) shows config and set/unset secret status, read-only: secrets are never editable over HTTP.
+
+## Documentation Generation (`scribex generate`)
+
+Generate anchored docs (`<!-- @scribex:anchor -->` for symbols, `@scribex:derived` for architecture, runbooks, and requirements) grounded in repo sources:
+
+```bash
+scribex generate -plan                 # dry run: inspect plan without model calls
+scribex generate -apply                # generate docs using configured or default CLI backend
+scribex generate -apply -prune         # remove AI-managed orphan sections when symbols are deleted from code
+scribex doctypes list                  # view configured document types (.scribex/doctypes.json)
+```
+
+- Grounding: strictly tied to AST / lexical symbol definitions and source file content.
+- Invariants: hand-written prose is preserved; second run produces 0 calls and 0 diff.
+- See [Whole-Repo Documentation Generation](docs/user/generate.md) for full details, backends, honesty model, and safety guardrails.
 
 ## MCP for documentation systems
 
