@@ -5,7 +5,7 @@
 #   ./scripts/verify-release.sh <TAG> [REPO]
 #
 # Example:
-#   ./scripts/verify-release.sh scribex-v1.0.0
+#   ./scripts/verify-release.sh scribex-v1.1.0
 #   ./scripts/verify-release.sh scribex-v0.0.0-rc1 Keltstone/DialexAI
 
 set -euo pipefail

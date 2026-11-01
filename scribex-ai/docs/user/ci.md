@@ -159,3 +159,7 @@ These take precedence when `git` author configuration is not set globally or loc
 
 ### CI Security: Hooks Neutralized
 To guarantee deterministic execution and protect CI environments against arbitrary code execution from untrusted repository hooks, `scribex sync -commit` neutralizes git hooks by configuring `core.hooksPath` to `/dev/null` (or `NUL` on Windows). Repository-defined client-side hooks (`pre-commit`, `commit-msg`, etc.) are not executed during automated sync commits.
+
+## Generate workflow
+
+`scribex ci init github` also writes `.github/workflows/scribex-generate.yml` (manual only) and `ci init gitlab` adds a manual `scribex-generate` job. Both install the same pinned, checksummed binary (`SCRIBEX_RELEASE_URL`, `SCRIBEX_SHA256`), validate every input before use, and push a branch for review. See [generate.md](generate.md).

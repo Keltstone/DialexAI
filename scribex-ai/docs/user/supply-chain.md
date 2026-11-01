@@ -23,7 +23,7 @@ Bank security auditors and consumers can verify any Scribex release binary witho
 Run the verification script against the target release tag:
 
 ```bash
-./scripts/verify-release.sh scribex-v1.0.0
+./scripts/verify-release.sh scribex-v1.1.0
 ```
 
 The script performs the following end-to-end verifications:

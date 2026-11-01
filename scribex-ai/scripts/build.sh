@@ -2,7 +2,7 @@
 # build.sh - Reproducible multi-platform release build for Scribex
 #
 # Usage: ./scripts/build.sh <VERSION>
-# Example: ./scripts/build.sh 1.0.0
+# Example: ./scripts/build.sh 1.1.0
 #
 # Outputs:
 #   dist/scribex_<os>_<arch>[.exe]
