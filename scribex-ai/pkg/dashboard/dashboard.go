@@ -74,6 +74,8 @@ type Config struct {
 	Now            func() time.Time
 	MeasureFunc    func(Repo) (Health, error)
 	AccessLog      io.Writer
+	EnableGenerate bool    // opt-in: AI settings, doc types and Generate pages (the only POST routes)
+	GenerateRun    RunFunc // test seam; default runs `scribex generate` as a child process
 }
 
 // HashToken is what goes in the rbac file.
@@ -427,6 +429,7 @@ type Server struct {
 	semaphore  chan struct{}
 	styleHash  string
 	handler    http.Handler
+	gen        *genState
 }
 
 // Measure performs standard documentation health measurement on a repository.
@@ -480,6 +483,9 @@ func NewServer(cfg Config, repos []Repo, principals []Principal, cfgRoot string)
 		cache:      make(map[string]*cacheEntry),
 		semaphore:  make(chan struct{}, 4),
 		styleHash:  computeStyleHash(),
+	}
+	if cfg.EnableGenerate {
+		s.gen = newGenState(cfg.GenerateRun)
 	}
 	s.handler = s.buildHandler()
 	return s, nil
@@ -794,6 +800,10 @@ func (s *Server) buildHandler() http.Handler {
 		w.Write([]byte(b.String()))
 	})
 
+	if s.gen != nil {
+		s.registerGenerate(mux, authenticate)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := s.config.Now()
 		srw := &statusLoggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
@@ -809,7 +819,9 @@ func (s *Server) buildHandler() http.Handler {
 		}()
 
 		// Method restriction: only GET and HEAD
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if r.Method == http.MethodPost && s.gen != nil && postRoutes[r.URL.Path] {
+			// admin-only, CSRF-checked in the route itself
+		} else if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			srw.Header().Set("Allow", "GET, HEAD")
 			s.sendError(srw, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -818,6 +830,8 @@ func (s *Server) buildHandler() http.Handler {
 		mux.ServeHTTP(srw, r)
 	})
 }
+
+var postRoutes = map[string]bool{"/ai": true, "/doctypes": true, "/generate/plan": true, "/generate/apply": true}
 
 // Setting is one configuration item with the state of any secret it needs.
 type Setting struct {

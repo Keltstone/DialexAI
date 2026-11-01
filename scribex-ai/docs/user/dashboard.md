@@ -162,3 +162,7 @@ Access logs are emitted to `stderr` formatted as structured JSON lines:
 - **Logged Fields**: Timestamp, client IP, HTTP method, URL path (query strings stripped), HTTP status code, duration in milliseconds, first 8 characters of principal token hash.
 - **Never Logged**: Authorization headers, plain tokens, query strings, or filesystem paths.
 - **Retention**: The server maintains no persistent log files or database state on disk. Standard container or systemd log rotation should manage stderr capture.
+
+## Generate docs (opt-in)
+
+`scribex serve ... -enable-generate` turns on admin-only AI settings, doc-type editing and a Generate page (the only POST routes). Without the flag the dashboard stays read-only. Details and limits: [generate.md](generate.md).
