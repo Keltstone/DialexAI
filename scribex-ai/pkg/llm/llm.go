@@ -17,7 +17,18 @@ type Client struct {
 	http                          *httpx.Client
 }
 
-func New(a config.AI) (*Client, error) {
+// New returns the backend named by a.Provider: cli, ollama, anthropic or openai.
+func New(a config.AI) (Completer, error) {
+	switch a.Provider {
+	case "cli":
+		return newCLI(a)
+	case "ollama":
+		return newOllama(a)
+	}
+	return newAPI(a)
+}
+
+func newAPI(a config.AI) (*Client, error) {
 	if err := config.ValidateAPIKeyEnv(a.APIKeyEnv); err != nil {
 		return nil, err
 	}
@@ -64,6 +75,13 @@ func New(a config.AI) (*Client, error) {
 	}, nil
 }
 
+func (c *Client) openAIHeaders() map[string]string {
+	if c.Key == "" {
+		return nil // ollama: no Authorization header
+	}
+	return map[string]string{"Authorization": "Bearer " + c.Key}
+}
+
 // Complete sends a system+user prompt. The system prompt is marked cacheable (Anthropic prompt caching).
 func (c *Client) Complete(system, user string) (string, error) {
 	if c.Provider == "openai" {
@@ -75,7 +93,7 @@ func (c *Client) Complete(system, user string) (string, error) {
 				} `json:"message"`
 			} `json:"choices"`
 		}
-		err := c.http.Do("POST", c.BaseURL+"/v1/chat/completions", map[string]string{"Authorization": "Bearer " + c.Key}, map[string]any{
+		err := c.http.Do("POST", c.BaseURL+"/v1/chat/completions", c.openAIHeaders(), map[string]any{
 			"model": c.Model, "max_tokens": c.MaxTokens,
 			"messages": []map[string]string{{"role": "system", "content": system}, {"role": "user", "content": user}},
 		}, &out)

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"scribex/pkg/anchors"
+	"scribex/pkg/derived"
 	"scribex/pkg/fsx"
 	"scribex/pkg/gitx"
 	"scribex/pkg/mdsafe"
@@ -158,6 +159,9 @@ func Check(root string, sync bool, prose anchors.Prose) (Report, error) {
 			return r, err
 		}
 		r.Total += anchors.Count(string(b))
+		for _, di := range derived.Check(root, string(b)) {
+			r.Issues = append(r.Issues, Issue{f, anchors.Issue{Line: di.Line, Ref: di.Ref, Msg: di.Msg, Stale: di.Stale, Code: di.Code}})
+		}
 		issues, out := anchors.Process(string(b), look, sync, prose)
 		for _, i := range issues {
 			if !(sync && i.Stale && i.Code == "") {

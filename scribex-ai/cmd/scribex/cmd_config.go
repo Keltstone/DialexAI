@@ -20,7 +20,7 @@ import (
 
 func configCmd(root string, a []string) error {
 	if len(a) == 0 {
-		return fmt.Errorf("config init|show|set <key> <value>|validate|test")
+		return fmt.Errorf("config init|show|set <key> <value>|validate|test|models [cli]")
 	}
 	c, err := config.Load(root)
 	if err != nil {
@@ -44,6 +44,20 @@ func configCmd(root string, a []string) error {
 			return fmt.Errorf("%s", strings.Join(p, "\n"))
 		}
 		fmt.Println("config ok")
+	case "models":
+		for _, sp := range llm.CLISpecs() {
+			if sp.Reviewer || (len(a) == 2 && a[1] != sp.Name) {
+				continue
+			}
+			ver := sp.Verified
+			if ver == "" {
+				ver = "unverified"
+			}
+			fmt.Printf("%s (checked %s, %s)\n", sp.Name, sp.Checked, ver)
+			for _, m := range sp.Suggested {
+				fmt.Println("  ", m)
+			}
+		}
 	case "test":
 		cl, err := llm.New(c.AI)
 		if err != nil {
@@ -52,7 +66,7 @@ func configCmd(root string, a []string) error {
 		if _, err = cl.Complete("Reply with the single word: ok", "ping"); err != nil {
 			return err
 		}
-		fmt.Println("AI reachable:", c.AI.Provider, c.AI.Model)
+		fmt.Println("AI reachable:", c.AI.Provider, c.AI.CLICommand, c.AI.Model)
 	default:
 		return fmt.Errorf("unknown config command %q", a[0])
 	}
@@ -80,7 +94,11 @@ func secretsCmd(root string, a []string) error {
 	case "check":
 		c, _ := config.Load(root)
 		bad := 0
-		for _, n := range []string{c.AI.APIKeyEnv} {
+		need := []string{}
+		if c.AI.Provider == "anthropic" || c.AI.Provider == "openai" {
+			need = append(need, c.AI.APIKeyEnv)
+		}
+		for _, n := range need {
 			if os.Getenv(n) == "" {
 				fmt.Println("missing:", n)
 				bad++

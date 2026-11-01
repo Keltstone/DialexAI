@@ -47,8 +47,8 @@ func TestConfigNormalFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load missing config failed: %v", err)
 	}
-	if c.AI.Provider != "anthropic" {
-		t.Fatalf("expected default provider anthropic, got %s", c.AI.Provider)
+	if c.AI.Provider != "cli" || c.AI.CLICommand != "claude" {
+		t.Fatalf("expected default provider cli/claude, got %s/%s", c.AI.Provider, c.AI.CLICommand)
 	}
 
 	// Save and reload
@@ -121,5 +121,87 @@ func TestPartH_APIKeyEnvValidation(t *testing.T) {
 	reloaded, _ := Load(root)
 	if reloaded.AI.APIKeyEnv == badKey {
 		t.Fatalf("Set should NOT have written file on failure")
+	}
+}
+
+func TestValidateProviders(t *testing.T) {
+	base := func() Config { return Default() }
+	cases := []struct {
+		name string
+		mut  func(*Config)
+		ok   bool
+	}{
+		{"default cli needs no key", func(c *Config) { c.AI.APIKeyEnv = "" }, true},
+		{"cli codex", func(c *Config) { c.AI.CLICommand = "codex"; c.AI.Model = "" }, true},
+		{"cli empty model ok", func(c *Config) { c.AI.Model = "" }, true},
+		{"cli unknown command", func(c *Config) { c.AI.CLICommand = "bash" }, false},
+		{"cli path", func(c *Config) { c.AI.CLICommand = "/bin/sh" }, false},
+		{"cli args", func(c *Config) { c.AI.CLICommand = "claude --x" }, false},
+		{"cli traversal", func(c *Config) { c.AI.CLICommand = "../claude" }, false},
+		{"cli empty", func(c *Config) { c.AI.CLICommand = "" }, false},
+		{"flag-like model", func(c *Config) { c.AI.Model = "--dangerously-skip-permissions" }, false},
+		{"model with space", func(c *Config) { c.AI.Model = "a b" }, false},
+		{"model newline", func(c *Config) { c.AI.Model = "a\nb" }, false},
+		{"model too long", func(c *Config) { c.AI.Model = strings.Repeat("a", 101) }, false},
+		{"ollama needs model", func(c *Config) { c.AI.Provider = "ollama"; c.AI.Model = "" }, false},
+		{"ollama ok", func(c *Config) { c.AI.Provider = "ollama"; c.AI.Model = "llama3.2:3b" }, true},
+		{"anthropic ok", func(c *Config) { c.AI.Provider = "anthropic"; c.AI.Model = "claude-sonnet-5-5" }, true},
+		{"anthropic bad key env", func(c *Config) { c.AI.Provider = "anthropic"; c.AI.Model = "m"; c.AI.APIKeyEnv = "bad key" }, false},
+		{"unknown provider", func(c *Config) { c.AI.Provider = "gemini-api" }, false},
+		{"bad review", func(c *Config) { c.AI.Review = "yes" }, false},
+		{"bad review mode", func(c *Config) { c.AI.ReviewMode = "x" }, false},
+		{"bad branch prefix", func(c *Config) { c.AI.BranchPrefix = "../x" }, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := base()
+			tc.mut(&c)
+			if got := len(c.Validate()) == 0; got != tc.ok {
+				t.Errorf("ok=%v want %v: %v", got, tc.ok, c.Validate())
+			}
+		})
+	}
+}
+
+func TestExistingAnthropicConfigUnchanged(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".scribex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := "ai:\n  provider: anthropic\n  api_key_env: ANTHROPIC_API_KEY\n  max_tokens: 1024\n  max_calls: 20\n"
+	if err := os.WriteFile(filepath.Join(root, ".scribex", "config.yaml"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.AI.Provider != "anthropic" || c.AI.Model != "claude-sonnet-5-5" || len(c.Validate()) != 0 {
+		t.Fatalf("legacy config changed behaviour: %+v %v", c.AI, c.Validate())
+	}
+}
+
+func TestSetNewKeys(t *testing.T) {
+	root := t.TempDir()
+	if err := Save(root, Default()); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range map[string]string{"ai.cli_command": "agy", "ai.review": "socratix", "ai.review_mode": "tenthman", "ai.branch_prefix": "docs/bot-"} {
+		if err := Set(root, k, v); err != nil {
+			t.Fatalf("%s: %v", k, err)
+		}
+	}
+	c, _ := Load(root)
+	if c.AI.CLICommand != "agy" || c.AI.Review != "socratix" || c.AI.ReviewMode != "tenthman" || c.AI.BranchPrefix != "docs/bot-" {
+		t.Fatalf("not persisted: %+v", c.AI)
+	}
+	if err := Set(root, "ai.cli_command", "/bin/sh"); err == nil {
+		t.Fatal("arbitrary command accepted")
+	}
+}
+
+func TestDefaultModelIsCLIOwnDefault(t *testing.T) {
+	if Default().AI.Model != "" {
+		t.Fatal("default model must be empty so any CLI uses its own default")
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"scribex/pkg/anchors"
 	"scribex/pkg/confluence"
 	"scribex/pkg/dashboard"
+	"scribex/pkg/derived"
 	"scribex/pkg/diagram"
 	"scribex/pkg/docs"
 	"scribex/pkg/fsx"
@@ -42,9 +43,9 @@ import (
 	"scribex/pkg/trace"
 )
 
-var version = "1.0.0"
+var version = "1.1.0"
 
-var force *bool
+var force, strict *bool
 var preset, mcpURL, mcpExe, mcpArgs, mcpEnv, mcpHdr *string
 
 const usage = `usage: scribex <cmd> [flags]
@@ -52,13 +53,17 @@ const usage = `usage: scribex <cmd> [flags]
   comment -repo o/r -pr N [-base ref] [-body-file path] [-author LOGIN] (env GITHUB_TOKEN, GITHUB_API_URL)
   confluence push|pull [page]              (env ATLASSIAN_URL, ATLASSIAN_USER, ATLASSIAN_TOKEN)
   trace -base ref [-key K] [-pr N] [-out f.csv] [-verify-jira] [-require-jira] [-allow-no-key]
-  serve -repos file -rbac file -allowed-root dir [-addr 127.0.0.1:8080] [-cache-ttl 30s] [-tls-cert c -tls-key k] [-behind-proxy] [-trusted-proxy cidr]
+  serve -repos file -rbac file -allowed-root dir [-addr 127.0.0.1:8080] [-cache-ttl 30s] [-tls-cert c -tls-key k] [-behind-proxy] [-trusted-proxy cidr] [-enable-generate]
   sync -ai                                 (LLM prose update for changed signatures; see config)
   config init|show|set <k> <v>|validate|test
   secrets set <NAME> (value on stdin) | list | check
   ci init github|gitlab [-force]
   mcp add <name> [-preset p | -url u | -cmd c -args a,b] [-env K=VAR] [-header K=Bearer ${VAR}] | list | remove <name> | check | export | serve
   wiki new <title> | lint | search <q> | backlinks <page> | render -out dir
+  confirm <doc.md>#<typeID:unit>           (human re-stamps a derived section after review)
+  doctypes list | show <id> | validate    (documentation kinds for generate; .scribex/doctypes.json)
+  generate [-types a,b] [-include g] [-exclude g] [-backend b] [-model m] [-cli c] [-max-calls N] [-apply] [-confirm-send] [-branch] [-push] [-resume id] [-json]
+                                           (plan, then write/update docs repo-wide; plan only without -apply)
   hash-token <token> | version`
 
 func main() {
@@ -93,12 +98,14 @@ func main() {
 	trustedProxy := fs.String("trusted-proxy", "", "serve: comma-separated trusted proxy CIDRs")
 	ai := fs.Bool("ai", false, "sync: let the configured LLM update prose for changed signatures")
 	force = fs.Bool("force", false, "overwrite generated files")
+	strict = fs.Bool("strict", false, "check: also fail on council-disputed derived sections")
 	preset = fs.String("preset", "", "mcp add: "+strings.Join(mcp.PresetNames(), "|"))
 	mcpURL = fs.String("url", "", "mcp add: remote server URL")
 	mcpExe = fs.String("cmd", "", "mcp add: stdio server command")
 	mcpArgs = fs.String("args", "", "mcp add: comma-separated args")
 	mcpEnv = fs.String("env", "", "mcp add: KEY=ENV_VAR,... (stored as ${ENV_VAR})")
 	mcpHdr = fs.String("header", "", "mcp add: Name=value (value must use ${ENV_VAR} for credentials)")
+	registerGenFlags(fs)
 	var a []string // flags may appear before or after positionals
 	for rest := os.Args[2:]; ; {
 		fs.Parse(rest)
@@ -185,6 +192,12 @@ func main() {
 		err = mcpCmd(*root, a)
 	case "wiki":
 		err = wikiCmd(*root, a, *out)
+	case "doctypes":
+		err = doctypesCmd(*root, a)
+	case "confirm":
+		err = confirmCmd(*root, a)
+	case "generate":
+		err = generateCmd(*root)
 	case "hash-token":
 		if len(a) != 1 {
 			err = fmt.Errorf("hash-token <token>")
@@ -293,8 +306,15 @@ func check(root, base, report string) error {
 	if checkErr != nil {
 		return checkErr
 	}
-	if len(r.Issues) > 0 {
-		return fmt.Errorf("%d doc issue(s)", len(r.Issues))
+	failing := 0
+	for _, i := range r.Issues {
+		if i.Code == derived.CodeDisputed && !(strict != nil && *strict) {
+			continue // a notice unless -strict
+		}
+		failing++
+	}
+	if failing > 0 {
+		return fmt.Errorf("%d doc issue(s)", failing)
 	}
 	return nil
 }
@@ -844,6 +864,7 @@ func serve(root, reposF, rbacF, addr, allowedRoot string, cacheTTL time.Duration
 		CacheTTL:       cacheTTL,
 		BehindProxy:    behindProxy,
 		TrustedProxies: trustedPrefixes,
+		EnableGenerate: *gen.enableGen,
 		Now:            time.Now,
 		AccessLog:      os.Stderr,
 	}, rs, ps, root)
